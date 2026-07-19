@@ -11,6 +11,17 @@ This file is the source of truth for the Devpost entry and demo recording. Repla
 - **Demo video:** `TODO(submission): public YouTube URL, under three minutes`
 - **Primary Codex feedback Session ID:** `TODO(submission): run /feedback in the main build session`
 
+## Live Devpost requirements
+
+Verified through the connected Devpost source on July 19, 2026 at 21:41 UTC:
+
+- submissions are open until **July 21 at 5:00 PM PT** (`2026-07-22T00:00:00Z`);
+- **Apps for Your Life** is an exact category option (field `27947`);
+- the repository URL is required (field `27948`);
+- the primary `/feedback` Session ID is required (field `27950`);
+- a public YouTube video under three minutes is required, with audio explaining both Codex and GPT-5.6;
+- a hosted website and ZIP upload are not required.
+
 ## Project description
 
 Electricity bills combine meter data, time-of-use buckets, delivery rates, generation rates, credits, taxes, and riders into a document most households cannot independently check. Generic bill summaries can restate the total, but they rarely prove whether a charge follows the tariff that governed that exact billing period.
@@ -81,7 +92,7 @@ Show a terminal with `make verify`, then briefly show `CODEX_LOG.md`: “Codex h
 - [ ] Run `make verify` in a fresh environment.
 - [ ] Confirm the authentic and synthetic demo paths in Chromium.
 - [ ] Record at 1080p with readable text and no private tabs, keys, or notifications.
-- [ ] Keep the final video under 3:00 after YouTube processing.
+- [ ] Keep the final video under 3:00 after YouTube processing, with audio covering both Codex and GPT-5.6.
 - [ ] Make the repository accessible to judges and confirm setup from its public URL.
 - [ ] Run `/feedback` in the primary Codex session and preserve its Session ID.
 - [ ] Submit before Tuesday, July 21, 2026 at 5:00 PM PT with upload buffer.
