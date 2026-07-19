@@ -1,0 +1,194 @@
+# BillHawk — Execution Checklist
+
+Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do not begin stretch work until the judged vertical slice is runnable and tested.
+
+## P0 — Preserve the Codex build evidence
+
+- [ ] Start the main implementation in one primary Codex session.
+- [ ] Tell Codex explicitly that this is an OpenAI Build Week project using Codex and GPT-5.6.
+- [ ] Keep most core implementation work in that session so its `/feedback` ID is representative.
+- [ ] Run `/feedback` before submission and record the Session ID.
+- [ ] Create `CODEX_LOG.md` and record major prompts, architectural decisions, Codex-generated components, human corrections, failed approaches, and verification results.
+- [ ] Never place API keys, account data, addresses, meter numbers, or unredacted bills in the repository or Codex prompt.
+
+## P0 — Bootstrap the repository
+
+- [ ] Create or select the final Git repository for BillHawk.
+- [ ] Copy in `PLAN.md`, `TODO.md`, and only the sanitized/public assets needed for development.
+- [ ] Add `.gitignore`, `.env.example`, license, and a placeholder `README.md`.
+- [ ] Choose the smallest viable stack and document the decision in `CODEX_LOG.md`.
+- [ ] Add one-command development startup.
+- [ ] Add scripts for test, lint, type-check, and build.
+- [ ] Verify a clean clone can install and start without undocumented local state.
+
+## P0 — Establish ground truth before coding the engine
+
+- [ ] Inspect `assets/pge-sample-consolidated-bill.pdf` and identify:
+  - [ ] billing period;
+  - [ ] rate schedule;
+  - [ ] delivery utility;
+  - [ ] generation provider/CCA;
+  - [ ] all printed quantities and charge lines;
+  - [ ] actual versus estimated meter readings.
+- [ ] Determine whether the existing pricing PDF matches the sample bill's effective period.
+- [ ] Download/archive the exact official tariff or rate source that governed the sample period.
+- [ ] Record source URL, retrieval date, effective dates, and file hash.
+- [ ] Mark each bill line as `calculable`, `reconcilable only`, or `unsupported`.
+- [ ] Hand-calculate at least one complete supported charge path.
+- [ ] Have a second pass—human or Codex—independently check the hand calculation.
+- [ ] Save expected extraction and expected audit fixtures as JSON.
+
+## P0 — Define trustworthy data contracts
+
+- [ ] Define and version `BillExtraction`.
+- [ ] Preserve page number, quoted source text, confidence, units, and printed/inferred status for material fields.
+- [ ] Define `TariffVersion` with schedule, jurisdiction, effective range, source, snapshot hash, and retrieval date.
+- [ ] Define `AuditLine` with billed amount, expected amount, delta, formula, inputs, citation, status, and limitations.
+- [ ] Define explicit statuses: `verified`, `discrepancy`, `estimated`, `cannot_verify`, and `needs_review`.
+- [ ] Use decimal currency arithmetic and document rounding tolerances.
+- [ ] Reject impossible or internally inconsistent extracted data.
+
+## P0 — Build the headless vertical slice
+
+- [ ] Extract native PDF text before invoking vision.
+- [ ] Use GPT-5.6 structured output to map bill evidence into `BillExtraction`.
+- [ ] Validate line-item, subtotal, total, and meter-usage invariants.
+- [ ] Return low-confidence or inconsistent fields for user correction.
+- [ ] Implement the first PG&E tariff adapter for the exact sample schedule and period.
+- [ ] Produce a calculation trace for every supported charge.
+- [ ] Reconcile expected versus printed amounts within explicit tolerances.
+- [ ] Label unsupported fees/riders without guessing.
+- [ ] Expose the flow through a CLI or API before building the polished UI.
+- [ ] Verify the authentic sanitized fixture produces the hand-checked result.
+
+## P0 — Prove discrepancy detection honestly
+
+- [ ] Create a clearly labeled synthetic altered fixture derived from sanitized data.
+- [ ] Change one auditable input or charge by a known amount.
+- [ ] Record the expected discrepancy and rationale.
+- [ ] Add a regression test that catches the exact discrepancy.
+- [ ] Ensure the UI and demo never imply the synthetic error was found on a real customer's bill.
+
+## P0 — Build the coherent product flow
+
+- [ ] Upload screen with supported-provider notice and truthful privacy copy.
+- [ ] Sample-mode button so judges can run the demo instantly.
+- [ ] Extraction-review screen with bill evidence and editable low-confidence fields.
+- [ ] Audit screen with a plain-language verdict and line-by-line calculation traces.
+- [ ] Visible source/effective-date citations for rates.
+- [ ] Distinct visual treatment for verified facts, possible discrepancies, estimates, and unsupported checks.
+- [ ] Rate-plan comparison screen or a clear missing-data explanation.
+- [ ] Evidence-grounded review-request screen with editable copy.
+- [ ] Loading, invalid-file, partial-extraction, unsupported-provider, and API-error states.
+- [ ] Responsive layout and keyboard-accessible primary flow.
+
+## P0 — Ground the generated review request
+
+- [ ] Pass only structured verified audit facts to GPT-5.6.
+- [ ] Require neutral language asking the provider to clarify or review the bill.
+- [ ] Include tariff citation, disputed/reviewed line, expected amount, billed amount, and delta.
+- [ ] Prevent the model from adding amounts, causes, laws, or accusations absent from the audit.
+- [ ] Add a test ensuring every material claim maps to an `AuditLine`.
+- [ ] Require user review before copy/download; do not send automatically.
+
+## P0 — Testing and release gate
+
+- [ ] Unit tests for decimal and rounding behavior.
+- [ ] Boundary tests for billing dates, tariff effective dates, tiers, and TOU periods where applicable.
+- [ ] Golden extraction test using the sanitized sample.
+- [ ] Golden audit test using the hand-checked fixture.
+- [ ] Synthetic discrepancy regression test.
+- [ ] Missing-data test that refuses an invalid plan comparison.
+- [ ] Unsupported-provider test with a useful result.
+- [ ] Letter-grounding test.
+- [ ] Browser-level happy path from sample upload to review request.
+- [ ] Run test, lint, type-check, and production build.
+- [ ] Test from a clean clone/environment.
+- [ ] Confirm no secrets or personal data are tracked.
+
+## P1 — Rate-plan comparison
+
+- [ ] Implement a second supported PG&E schedule only after the initial audit is correct.
+- [ ] Define the usage detail required for a valid comparison.
+- [ ] Compare a bill period using actual printed buckets where available.
+- [ ] Do not annualize a single month without an explicit, defensible method and disclaimer.
+- [ ] Show assumptions, source, effective date, and calculation trace.
+- [ ] If source data is insufficient, explain how the user can obtain interval usage instead of estimating silently.
+
+## P1 — GPT-5.6 extraction robustness
+
+- [ ] Add rendered-page vision fallback for scanned PDFs/images.
+- [ ] Compare native text values with vision values when both are available.
+- [ ] Retry or request correction on disagreement rather than choosing silently.
+- [ ] Test digit transpositions, missing negative signs, duplicated lines, and unreadable scans.
+- [ ] Establish file-size, page-count, and supported-format limits.
+
+## P1 — README and judge experience
+
+- [ ] Explain the problem, audience, differentiation, and PG&E-first scope.
+- [ ] Include architecture diagram or concise architecture section.
+- [ ] Document setup, environment variables, run, test, and sample-mode steps.
+- [ ] State which utilities, schedules, and effective periods are actually supported.
+- [ ] Document known limitations and privacy behavior.
+- [ ] Explain: GPT-5.6 reads and drafts; deterministic code validates and calculates.
+- [ ] Explain how Codex accelerated tariff implementation, schemas, tests, debugging, and product development.
+- [ ] Include sample screenshots/GIF only after the UI is final.
+- [ ] Provide a hosted demo or a judge-friendly local/sandbox route.
+
+## P1 — Submission package
+
+- [ ] Select **Apps for Your Life**.
+- [ ] Draft the Devpost project description around the consumer tariff-audit whitespace.
+- [ ] Verify the code repository is public with suitable licensing, or share a private repository with the required judging addresses.
+- [ ] Ensure sample data and complete setup instructions are committed.
+- [ ] Record the primary Codex `/feedback` Session ID in the submission form.
+- [ ] Produce a public YouTube demo under three minutes.
+- [ ] In the video, explain both Codex use and GPT-5.6 use.
+- [ ] Demonstrate a working product, not slides or mockups.
+- [ ] Rehearse the final video against the judging criteria.
+- [ ] Submit before Tuesday, July 21 at 5:00 PM PT; leave buffer for upload and Devpost issues.
+
+## P2 — Stretch only after submission readiness
+
+- [ ] OpenEI URDB lookup for utility/schedule discovery, with freshness shown.
+- [ ] Second utility adapter backed by official tariff snapshots.
+- [ ] Downloadable audit report.
+- [ ] Visual bounding-box highlights linking results to bill evidence.
+- [ ] Shareable redacted result.
+- [ ] Additional accessibility polish and screen-reader testing.
+- [ ] Lightweight telemetry only if consented, privacy-preserving, and useful for the demo.
+
+## Cut list if time is short
+
+Cut in this order:
+
+1. URDB/nationwide discovery.
+2. Second utility.
+3. OCR/image fallback.
+4. Downloadable reports and sharing.
+5. Rate-plan optimizer if the sample lacks sufficient interval/tier data.
+
+Never cut:
+
+- exact tariff provenance;
+- deterministic calculation;
+- extraction review and uncertainty states;
+- the authentic and synthetic golden fixtures;
+- meaningful automated tests;
+- a complete upload-to-action product flow;
+- Codex session evidence and `/feedback` ID.
+
+## Final go/no-go checklist
+
+Do not record the final demo until all answers are **yes**:
+
+- [ ] Can a fresh user run the sample in under five minutes?
+- [ ] Can every displayed dollar amount be traced to a printed input and rate source?
+- [ ] Does the authentic fixture produce the hand-checked result?
+- [ ] Does the labeled synthetic fixture produce the exact expected discrepancy?
+- [ ] Does missing data lead to an honest limitation rather than a guess?
+- [ ] Does the product visibly feel complete across all five steps?
+- [ ] Do test, lint, type-check, and build pass?
+- [ ] Does the README describe exact support and limitations?
+- [ ] Does the video show substantive Codex and GPT-5.6 use?
+- [ ] Is the `/feedback` Session ID saved?

@@ -1,0 +1,42 @@
+{
+  "demo": "BillHawk",
+  "local_root": ".",
+  "scenario": {
+    "location": "PG&E service territory served by Central Coast Community Energy",
+    "utility_setup": "PG&E delivery plus 3CE generation",
+    "schedule": "E-TOU-C, peak pricing 4-9 p.m. every day",
+    "bill_period": "2022-11-08 through 2022-12-08",
+    "constraints": [
+      "public anonymized fixture",
+      "period-matched rates",
+      "no invented savings"
+    ]
+  },
+  "local_assets": [
+    {
+      "name": "Primary auditable anonymized PG&E plus 3CE sample bill",
+      "path": "assets/pge-anonymous-3ce-sample-bill.pdf",
+      "remote_url": "https://3cenergy.org/wp-content/uploads/2023/01/PGE-Example-RES-Bill-Anonymous.pdf"
+    },
+    {
+      "name": "PG&E consolidated-bill layout explainer; not auditable",
+      "path": "assets/pge-sample-consolidated-bill.pdf",
+      "remote_url": "https://www.pge.com/assets/pge/docs/account/billing-and-assistance/sample-consolidated-bill.pdf"
+    },
+    {
+      "name": "PG&E pricing effective March 1, 2026; context only",
+      "path": "assets/pge-residential-rate-plan-pricing.pdf",
+      "remote_url": "https://www.pge.com/assets/pge/docs/account/rate-plans/residential-electric-rate-plan-pricing.pdf"
+    },
+    {
+      "name": "San Jose Clean Energy bill explainer; context only",
+      "path": "assets/sjce-understanding-your-bill.pdf",
+      "remote_url": "https://sanjosecleanenergy.org/wp-content/uploads/2022/03/SJCE_Understanding-Your-Bill_English.pdf"
+    },
+    {
+      "name": "Valley Clean Energy sample rejected for period inconsistency",
+      "path": "assets/optional-valley-clean-energy-sample-bill.pdf",
+      "remote_url": "https://valleycleanenergy.org/wp-content/uploads/VCE_sample_bill_v5-SAMPLE_3_3_20-new.pdf"
+    }
+  ]
+}
