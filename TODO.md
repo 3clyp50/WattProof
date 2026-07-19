@@ -1,4 +1,4 @@
-# BillHawk — Execution Checklist
+# WattProof — Execution Checklist
 
 Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do not begin stretch work until the judged vertical slice is runnable and tested.
 
@@ -13,7 +13,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 
 ## P0 — Bootstrap the repository
 
-- [x] Create or select the final Git repository for BillHawk.
+- [x] Create or select the final Git repository for WattProof.
 - [x] Copy in `PLAN.md`, `TODO.md`, and only the sanitized/public assets needed for development.
 - [x] Add `.gitignore`, `.env.example`, license, and a placeholder `README.md`.
 - [x] Choose the smallest viable stack and document the decision in `CODEX_LOG.md`.

@@ -7,7 +7,7 @@ tmp/
 dist/
 build/
 
-# Original demo-kit background retained locally, outside the BillHawk MVP.
+# Original demo-kit background retained locally, outside the WattProof MVP.
 assets/cpuc-pge-2027-grc-fact-sheet.pdf
 assets/eia-electric-power-monthly-may-2026.pdf
 assets/san-jose-noaa-climate.pdf

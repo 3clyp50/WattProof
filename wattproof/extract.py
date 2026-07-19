@@ -18,7 +18,7 @@ REJECTED_DOCUMENTS = {
     ),
     "e33ba91e68f2746eba65fc47c4b5a949dc128d5e984844886f8b26daca4f500b": (
         "This Valley Clean Energy sample contains conflicting billing periods and "
-        "rates, so BillHawk will not treat it as ground truth."
+        "rates, so WattProof will not treat it as ground truth."
     ),
 }
 

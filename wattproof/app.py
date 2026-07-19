@@ -41,7 +41,7 @@ def create_app() -> Flask:
         return send_file(
             PROJECT_ROOT / "assets/pge-anonymous-3ce-sample-bill.pdf",
             mimetype="application/pdf",
-            download_name="billhawk-public-anonymized-sample.pdf",
+            download_name="wattproof-public-anonymized-sample.pdf",
         )
 
     @app.get("/api/sample/<kind>")

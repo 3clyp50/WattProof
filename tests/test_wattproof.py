@@ -10,19 +10,19 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from billhawk.app import create_app
-from billhawk.audit import UnsupportedBillError, audit_bill, round_money
-from billhawk.cli import main
-from billhawk.extract import (
+from wattproof.app import create_app
+from wattproof.audit import UnsupportedBillError, audit_bill, round_money
+from wattproof.cli import main
+from wattproof.extract import (
     MAX_FILE_BYTES,
     MAX_PAGES,
     InvalidDocumentError,
     UnsupportedDocumentError,
     extract_pdf,
 )
-from billhawk.fixtures import FIXTURES_DIR, PROJECT_ROOT, load_sample
-from billhawk.models import AuditLine, AuditResult, BillExtraction, DateFact, TextFact
-from billhawk.tariffs import load_tariff_bundle
+from wattproof.fixtures import FIXTURES_DIR, PROJECT_ROOT, load_sample
+from wattproof.models import AuditLine, AuditResult, BillExtraction, DateFact, TextFact
+from wattproof.tariffs import load_tariff_bundle
 
 
 def _lines(result: AuditResult) -> dict[str, AuditLine]:
@@ -250,7 +250,7 @@ def test_excess_page_count_is_rejected(
     def page_count(_path: Path) -> int:
         return MAX_PAGES + 1
 
-    monkeypatch.setattr("billhawk.extract._page_count", page_count)
+    monkeypatch.setattr("wattproof.extract._page_count", page_count)
     with pytest.raises(InvalidDocumentError, match="20 pages"):
         extract_pdf(file)
 

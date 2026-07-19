@@ -305,7 +305,7 @@ byId("download-letter").addEventListener("click", () => {
   const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = "billhawk-review-request.txt";
+  link.download = "wattproof-review-request.txt";
   link.click();
   URL.revokeObjectURL(url);
 });

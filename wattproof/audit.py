@@ -314,7 +314,7 @@ def _comparison() -> PlanComparison:
         explanation=(
             "This bill reports only 4-9 p.m. peak and aggregate off-peak usage. "
             "It cannot reconstruct PG&E plans with different hour windows, so "
-            "BillHawk will not invent a savings estimate."
+            "WattProof will not invent a savings estimate."
         ),
         required_data=(
             "hourly or 15-minute Green Button interval usage",
@@ -370,7 +370,7 @@ def _review_request(
     body = (
         "Hello,\n\nPlease confirm the rate components applied to my E-TOU-C "
         f"statement dated {bill.statement_date.value.isoformat()}. The energy and baseline "
-        "lines BillHawk could recompute agree with the published rates, but the archived "
+        "lines WattProof could recompute agree with the published rates, but the archived "
         "sources are insufficient to independently verify the generation credit, PCIA, "
         "and certain taxes. Please provide the applicable component rates or calculation "
         "detail.\n\nI will verify my account details before sending. Thank you."

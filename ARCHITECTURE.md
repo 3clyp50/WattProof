@@ -1,4 +1,4 @@
-# BillHawk MVP Architecture
+# WattProof MVP Architecture
 
 The smallest complete judged slice is one Python process and a browser.
 

@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="BillHawk checks residential electricity bill math against period-matched published tariffs.">
-    <title>BillHawk — Check the math on your power bill</title>
+    <meta name="description" content="WattProof checks residential electricity bill math against period-matched published tariffs.">
+    <title>WattProof — Check the math on your power bill</title>
     <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
@@ -12,9 +12,9 @@
   <body>
     <a class="skip-link" href="#workspace">Skip to audit workspace</a>
     <header class="site-header">
-      <a class="brand" href="/" aria-label="BillHawk home">
+      <a class="brand" href="/" aria-label="WattProof home">
         <span class="brand-mark" aria-hidden="true"><span></span></span>
-        <span>BillHawk</span>
+        <span>WattProof</span>
       </a>
       <p class="header-proof"><span></span> Local sample mode · deterministic math</p>
     </header>
@@ -36,7 +36,7 @@
       <section class="step-panel upload-panel" data-step="1" aria-labelledby="upload-title">
         <div class="hero-copy">
           <p class="eyebrow">A receipt checker for electricity</p>
-          <h1 id="upload-title">Your power bill has a formula.<br><em>BillHawk shows its work.</em></h1>
+          <h1 id="upload-title">Your power bill has a formula.<br><em>WattProof shows its work.</em></h1>
           <p class="lede">Review what was read, recompute supported charges against the tariff that actually governed the bill, and leave with a calm evidence-backed request.</p>
           <ul class="trust-list">
             <li><span>01</span><strong>Evidence first</strong><small>Every material fact keeps its page and printed text.</small></li>
@@ -72,7 +72,7 @@
 
       <section class="step-panel" data-step="2" aria-labelledby="review-title" hidden>
         <div class="section-heading">
-          <div><p class="eyebrow">Before conclusions</p><h1 id="review-title" tabindex="-1">Review what BillHawk read</h1></div>
+          <div><p class="eyebrow">Before conclusions</p><h1 id="review-title" tabindex="-1">Review what WattProof read</h1></div>
           <p>Printed facts and inferred metadata stay visibly distinct. Correct anything before code runs the tariff math.</p>
         </div>
         <div class="review-layout">
@@ -121,7 +121,7 @@
           <div><span class="status-pill cannot_verify">More data needed</span><h2 id="comparison-headline"></h2><p id="comparison-explanation"></p></div>
           <div class="needed-data"><h3>What unlocks a real comparison</h3><ul id="comparison-data"></ul><p>Download Green Button interval data from the utility account, then compare schedules over a representative period.</p></div>
         </div>
-        <div class="principle-strip"><span>BillHawk principle 04</span><strong>If the evidence stops, the claim stops.</strong></div>
+        <div class="principle-strip"><span>WattProof principle 04</span><strong>If the evidence stops, the claim stops.</strong></div>
         <div class="form-actions"><button class="button text" type="button" data-back="3">← Audit result</button><button class="button primary" type="button" data-next="5">Prepare review request <span aria-hidden="true">→</span></button></div>
       </section>
 
@@ -135,7 +135,7 @@
             <label for="letter-subject">Subject</label><input id="letter-subject" type="text">
             <label for="letter-body">Message</label><textarea id="letter-body" rows="16"></textarea>
             <div class="letter-actions"><button id="copy-letter" class="button primary" type="button">Copy request</button><button id="download-letter" class="button secondary" type="button">Download .txt</button></div>
-            <p class="review-note"><span aria-hidden="true">!</span><strong>User review required.</strong> BillHawk never sends messages or adds account details automatically.</p>
+            <p class="review-note"><span aria-hidden="true">!</span><strong>User review required.</strong> WattProof never sends messages or adds account details automatically.</p>
           </div>
           <aside class="grounding-card"><span class="card-kicker">Claim ledger</span><h2>Why this wording is safe</h2><ul><li>No accusation or invented cause</li><li>Every material statement maps to an audit line</li><li>Missing source evidence is requested, not invented</li><li>Asks the provider to confirm or correct</li></ul><div id="grounded-lines"></div></aside>
         </div>
@@ -143,6 +143,6 @@
       </section>
     </main>
 
-    <footer><span>BillHawk · PG&E-first tariff verification</span><span>GPT-5.6 maps evidence. Decimal code calculates.</span></footer>
+    <footer><span>WattProof · PG&E-first tariff verification</span><span>GPT-5.6 maps evidence. Decimal code calculates.</span></footer>
   </body>
 </html>

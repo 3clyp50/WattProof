@@ -1,12 +1,12 @@
-# BillHawk
+# WattProof
 
-**BillHawk checks the math on household electricity bills.** A user uploads a bill, reviews every material fact with page evidence, and gets a deterministic line-by-line audit against the published tariff that actually governed the billing period.
+**WattProof checks the math on household electricity bills.** A user uploads a bill, reviews every material fact with page evidence, and gets a deterministic line-by-line audit against the published tariff that actually governed the billing period.
 
 > GPT-5.6 maps document evidence. Typed Decimal code calculates.
 
-![BillHawk detecting the clearly labeled synthetic five-dollar discrepancy](output/playwright/audit-synthetic-desktop.png)
+![WattProof detecting the clearly labeled synthetic five-dollar discrepancy](output/playwright/audit-synthetic-desktop.png)
 
-BillHawk is an OpenAI Build Week project for the **Apps for Your Life** track. Its first polished adapter is intentionally narrow: one public anonymized PG&E delivery + Central Coast Community Energy generation statement, one exact schedule and effective period, audited exceptionally well.
+WattProof is an OpenAI Build Week project for the **Apps for Your Life** track. Its first polished adapter is intentionally narrow: one public anonymized PG&E delivery + Central Coast Community Energy generation statement, one exact schedule and effective period, audited exceptionally well.
 
 ## The judged vertical slice
 
@@ -16,7 +16,7 @@ BillHawk is an OpenAI Build Week project for the **Apps for Your Life** track. I
 4. **Compare** plans only when the data can support it; otherwise explain exactly what interval data is missing.
 5. **Act** with an editable, neutral bill-review request whose claims map back to audit lines.
 
-The authentic sample reconciles. A separate structured fixture is visibly labeled synthetic and changes one peak charge from `$36.44` to `$41.44`; BillHawk detects exactly `$5.00` and never suggests that this occurred on a real bill.
+The authentic sample reconciles. A separate structured fixture is visibly labeled synthetic and changes one peak charge from `$36.44` to `$41.44`; WattProof detects exactly `$5.00` and never suggests that this occurred on a real bill.
 
 ## Quick start
 
@@ -52,17 +52,17 @@ export OPENAI_MODEL="gpt-5.6"
 make run
 ```
 
-BillHawk sends unknown native-PDF text to the OpenAI Responses API with strict Pydantic output and `store=False`. The bundled known fixture is recognized by SHA-256 and stays entirely local.
+WattProof sends unknown native-PDF text to the OpenAI Responses API with strict Pydantic output and `store=False`. The bundled known fixture is recognized by SHA-256 and stays entirely local.
 
 ## CLI proof
 
 The same engine runs headlessly:
 
 ```bash
-python3 -m billhawk --sample authentic
-python3 -m billhawk --sample synthetic
-python3 -m billhawk --sample authentic --json
-python3 -m billhawk --file assets/pge-anonymous-3ce-sample-bill.pdf
+python3 -m wattproof --sample authentic
+python3 -m wattproof --sample synthetic
+python3 -m wattproof --sample authentic --json
+python3 -m wattproof --file assets/pge-anonymous-3ce-sample-bill.pdf
 ```
 
 Expected verdicts:
@@ -105,7 +105,7 @@ A real Chromium pass also covers the authentic sample, actual PDF upload, synthe
 | Scanned PDFs / OCR | Not in the MVP |
 | Plan savings | Refused for this fixture because its aggregate buckets cannot reconstruct other hour windows |
 
-BillHawk deterministically verifies the printed PG&E peak, off-peak, baseline credit, franchise fee, 3CE peak/off-peak generation, and printed 3CE utility-tax lines. It also verifies section subtotals, current charges, and amount due.
+WattProof deterministically verifies the printed PG&E peak, off-peak, baseline credit, franchise fee, 3CE peak/off-peak generation, and printed 3CE utility-tax lines. It also verifies section subtotals, current charges, and amount due.
 
 It does **not** force a match for the generation credit, PCIA, Energy Commission tax, PG&E utility tax, or meter delta when the exact source or printed readings are absent. Those lines remain `cannot_verify` with a reason.
 
@@ -115,7 +115,7 @@ See [`GROUND_TRUTH.md`](GROUND_TRUTH.md) for the hand calculations and [`sources
 
 The supplied PG&E pricing summary is effective March 1, 2026, but the supplied consolidated-bill PDF is only a layout explainer with placeholder dates and no charge detail. A three-query current-source sweep on July 19, 2026 found newer guidance but no newer official, complete ordinary residential statement with matching auditable sources.
 
-The December 2022 public PG&E/3CE statement is therefore the newest coherent bill-and-rate pair found. Applying a 2026 rate to a 2022 statement would make the demo newer and wrong. BillHawk chooses effective-period truth.
+The December 2022 public PG&E/3CE statement is therefore the newest coherent bill-and-rate pair found. Applying a 2026 rate to a 2022 statement would make the demo newer and wrong. WattProof chooses effective-period truth.
 
 ## Architecture
 
@@ -126,11 +126,11 @@ native PDF → hash/native text → strict BillExtraction → user review
     → hash-verified tariff snapshots → Decimal audit → grounded request
 ```
 
-- `billhawk/extract.py` validates PDFs, recognizes the golden sample, extracts native text, and invokes GPT-5.6 only when needed.
-- `billhawk/models.py` preserves typed facts, confidence, printed/inferred status, page, and source quote.
-- `billhawk/tariffs.py` refuses to calculate if an archived source hash changes.
-- `billhawk/audit.py` owns all arithmetic, reconciliation, insufficiency, and grounded request facts.
-- `billhawk/app.py` owns the stateless Flask routes.
+- `wattproof/extract.py` validates PDFs, recognizes the golden sample, extracts native text, and invokes GPT-5.6 only when needed.
+- `wattproof/models.py` preserves typed facts, confidence, printed/inferred status, page, and source quote.
+- `wattproof/tariffs.py` refuses to calculate if an archived source hash changes.
+- `wattproof/audit.py` owns all arithmetic, reconciliation, insufficiency, and grounded request facts.
+- `wattproof/app.py` owns the stateless Flask routes.
 - `fixtures/` contains authentic expected data and the clearly labeled synthetic alteration.
 
 The smallest-architecture rationale is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -142,7 +142,7 @@ The smallest-architecture rationale is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 - The app has no accounts, database, background jobs, provider login, payment path, or automatic sending.
 - Unknown native PDFs reach OpenAI only when the operator supplies a key; API response storage is disabled.
 - The request screen always states that user review is required.
-- BillHawk asks for clarification or correction; it does not accuse a provider, offer legal advice, or guarantee savings.
+- WattProof asks for clarification or correction; it does not accuse a provider, offer legal advice, or guarantee savings.
 
 ## Codex and GPT-5.6
 

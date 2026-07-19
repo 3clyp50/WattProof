@@ -1,10 +1,10 @@
-# BillHawk — Product and Build Plan
+# WattProof — Product and Build Plan
 
 ## 1. Product thesis
 
-**BillHawk checks the math on household electricity bills.** A user uploads a bill; BillHawk extracts the billed usage and charges, identifies the applicable published tariff, deterministically recomputes the expected charges, explains any discrepancy, compares supported rate plans, and prepares an evidence-backed review request.
+**WattProof checks the math on household electricity bills.** A user uploads a bill; WattProof extracts the billed usage and charges, identifies the applicable published tariff, deterministically recomputes the expected charges, explains any discrepancy, compares supported rate plans, and prepares an evidence-backed review request.
 
-> Rocket Money negotiates the price. BillHawk verifies the math.
+> Rocket Money negotiates the price. WattProof verifies the math.
 
 ### Target user
 
@@ -21,7 +21,7 @@ Within two minutes, the user should know:
 
 ### Why now
 
-Consumer bill services mostly cancel subscriptions or negotiate discounts. Tariff auditing exists mainly for enterprises. BillHawk applies transparent, deterministic bill verification to consumers and uses an LLM only where language and document understanding are appropriate.
+Consumer bill services mostly cancel subscriptions or negotiate discounts. Tariff auditing exists mainly for enterprises. WattProof applies transparent, deterministic bill verification to consumers and uses an LLM only where language and document understanding are appropriate.
 
 ## 2. Hackathon constraints and submission requirements
 
@@ -35,7 +35,7 @@ Consumer bill services mostly cancel subscriptions or negotiate discounts. Tarif
 
 ## 3. Judging strategy
 
-| Criterion | What BillHawk must demonstrate |
+| Criterion | What WattProof must demonstrate |
 | --- | --- |
 | Technological Implementation | Native-PDF and scanned-document extraction into a strict schema; deterministic tariff engines; reconciliation invariants; provenance for every rate; tests built from tariff examples; graceful uncertainty handling. Codex should materially help implement, test, and verify the system—not merely scaffold a landing page. |
 | Design | A coherent five-step flow: upload → extraction review → audit result → plan comparison → action letter. Results must be understandable to a non-expert and distinguish verified facts, estimates, assumptions, and unsupported checks. |

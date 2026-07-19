@@ -1,4 +1,4 @@
-# BillHawk Ground Truth
+# WattProof Ground Truth
 
 Retrieved and checked on **2026-07-19**. No tariff formula is implemented unless its inputs and effective source are listed here.
 
@@ -10,7 +10,7 @@ Three independent public-web searches on 2026-07-19 looked for a 2025 or 2026 of
 - `887f8dc8-14e5-4891-af60-e918750d5186`
 - `260aa254-3e53-438f-b8d3-3f1fa206cfaf`
 
-The supplied PG&E residential pricing summary is current to March 1, 2026 and remains useful context, but applying it to a 2022 bill would be wrong. BillHawk therefore uses the newest public fixture found that forms a coherent, reproducible bill-and-rate pair: the December 2022 PG&E/3CE statement and its official 2022 sources. Freshness never overrides effective-period correctness.
+The supplied PG&E residential pricing summary is current to March 1, 2026 and remains useful context, but applying it to a 2022 bill would be wrong. WattProof therefore uses the newest public fixture found that forms a coherent, reproducible bill-and-rate pair: the December 2022 PG&E/3CE statement and its official 2022 sources. Freshness never overrides effective-period correctness.
 
 ## Supplied fixture audit
 
@@ -116,10 +116,10 @@ The authentic fixture reconciles internally:
 | Section subtotals and amount due | `reconcilable_only` | Printed arithmetic can be checked independently of tariff eligibility. |
 | 3CE utility users' tax | `calculable` | The bill prints the 1.000% rate and the taxable period charges. |
 | Generation credit | `unsupported` | The matching PG&E generation-credit component source is not archived. |
-| PCIA | `unsupported` | The 3CE sheet's 2020-vintage rate calculates `$4.50`, not the printed `$4.53`; BillHawk must not force a match. |
+| PCIA | `unsupported` | The 3CE sheet's 2020-vintage rate calculates `$4.50`, not the printed `$4.53`; WattProof must not force a match. |
 | Energy Commission tax | `unsupported` | The exact effective tax source has not been archived. |
 | PG&E utility users' tax | `reconcilable_only` | The precise taxable base and utility rounding rule are not sourced. |
 | Meter delta / actual-estimated status | `cannot_verify` | The sample omits both meter readings and status. |
 | Alternative-plan savings | `cannot_verify` | Aggregate 4-9 p.m. usage cannot reconstruct 5-8 p.m. or hourly usage; interval data is required. |
 
-This boundary is intentional: BillHawk reports unsupported lines and still verifies every supported dollar without inventing the rest.
+This boundary is intentional: WattProof reports unsupported lines and still verifies every supported dollar without inventing the rest.

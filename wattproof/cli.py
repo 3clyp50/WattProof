@@ -18,7 +18,7 @@ from .fixtures import load_sample
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="billhawk",
+        prog="wattproof",
         description="Audit the supported PG&E/3CE statement with deterministic math.",
     )
     source = parser.add_mutually_exclusive_group()
@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         ValidationError,
         ValueError,
     ) as error:
-        print(f"BillHawk could not audit this document: {error}", file=sys.stderr)
+        print(f"WattProof could not audit this document: {error}", file=sys.stderr)
         return 2
 
     if args.json:

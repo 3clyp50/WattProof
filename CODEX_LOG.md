@@ -1,6 +1,6 @@
-# BillHawk Codex Build Log
+# WattProof Codex Build Log
 
-This log records the primary OpenAI Build Week implementation session for BillHawk, built with Codex and GPT-5.6.
+This log records the primary OpenAI Build Week implementation session for WattProof, built with Codex and GPT-5.6. The product used the working title BillHawk until the July 20 rebrand recorded below; earlier entries retain that historical name where it describes an actual prompt, path, or command.
 
 ## 2026-07-19 - Session start
 
@@ -148,3 +148,17 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - Fresh clone `4721e62` created a new Python 3.13 virtual environment, installed only `requirements-dev.txt`, passed unchanged `make verify`, started the Flask app, rendered the landing page, and returned the authentic E-TOU-C sample API payload. The complete install-and-verify portion finished well inside the five-minute judge target and left the clone clean.
 - The first HTTP harness used an obsolete hero-text assertion after receiving a valid `200`; its cleanup trap stopped the server. Re-running against the stable `Audit authentic sample` control and API value passed without a product change.
 - A separate clean Python 3.12.3 environment installed `requirements-dev.txt` and passed the same 26 tests, Ruff, strict MyPy, and build gates, proving the README's stated minimum interpreter version.
+
+## 2026-07-20 - WattProof rebrand
+
+### Decision
+
+- The user selected **WattProof** for its compact combination of electricity and evidence. Live screening found no exact public GitHub repository match for WattProof; `ClearCurrent`, `TariffLens`, and `GridProof` were rejected after collision checks.
+- Renamed the current product surfaces, Python package, CLI, configuration prefix, tests, downloads, and submission copy. The local checkout stays at `/home/eclypso/a0/BillHawk` only to preserve this active desktop workspace; the public repository name is WattProof.
+
+### Verification
+
+- DeepAPI GitHub request `6efb03c9-2099-4d94-8a90-5308106b8cde` returned zero public repository matches for WattProof; `gh repo view 3clyp50/WattProof` independently confirmed that the target repository did not exist before publication.
+- Both Python 3.13.11 and Python 3.12.3 pass 26 tests, Ruff, strict MyPy across 10 source files, and bytecode compilation after the package rename.
+- Regenerated all five tracked screenshots from the real WattProof UI. Authentic and labeled-synthetic desktop flows plus the 390 × 844 synthetic audit remain visually coherent and produce zero browser console errors or warnings.
+- Current-facing tracked text has no remaining BillHawk package or product identifier; only this log retains it to preserve historical prompts, paths, and commands. JavaScript syntax, JSON parsing, whitespace, and tracked secret-pattern scans pass.

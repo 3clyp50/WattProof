@@ -54,7 +54,7 @@
   },
   "limitations": {
     "pge_generation_credit": "The matching archived generation-credit component source is unavailable.",
-    "pge_pcia": "The available 3CE sheet calculates $4.50 rather than the printed $4.53, so BillHawk will not force a match.",
+    "pge_pcia": "The available 3CE sheet calculates $4.50 rather than the printed $4.53, so WattProof will not force a match.",
     "pge_uut": "The precise PG&E taxable base and rounding rule are not sourced.",
     "cca_nov_energy_commission_tax": "The exact effective Energy Commission tax source is not archived.",
     "cca_dec_energy_commission_tax": "The exact effective Energy Commission tax source is not archived."
