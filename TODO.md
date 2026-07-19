@@ -6,7 +6,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 
 - [x] Start the main implementation in one primary Codex session.
 - [x] Tell Codex explicitly that this is an OpenAI Build Week project using Codex and GPT-5.6.
-- [ ] Keep most core implementation work in that session so its `/feedback` ID is representative.
+- [x] Keep most core implementation work in that session so its `/feedback` ID is representative.
 - [ ] Run `/feedback` before submission and record the Session ID.
 - [x] Create `CODEX_LOG.md` and record major prompts, architectural decisions, Codex-generated components, human corrections, failed approaches, and verification results.
 - [x] Never place API keys, account data, addresses, meter numbers, or unredacted bills in the repository or Codex prompt.
@@ -17,7 +17,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Copy in `PLAN.md`, `TODO.md`, and only the sanitized/public assets needed for development.
 - [x] Add `.gitignore`, `.env.example`, license, and a placeholder `README.md`.
 - [x] Choose the smallest viable stack and document the decision in `CODEX_LOG.md`.
-- [ ] Add one-command development startup.
+- [x] Add one-command development startup.
 - [x] Add scripts for test, lint, type-check, and build.
 - [ ] Verify a clean clone can install and start without undocumented local state.
 
@@ -53,7 +53,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Extract native PDF text before invoking vision.
 - [x] Use GPT-5.6 structured output to map bill evidence into `BillExtraction`.
 - [x] Validate line-item, subtotal, total, and meter-usage invariants.
-- [ ] Return low-confidence or inconsistent fields for user correction.
+- [x] Return low-confidence or inconsistent fields for user correction.
 - [x] Implement the first PG&E tariff adapter for the exact sample schedule and period.
 - [x] Produce a calculation trace for every supported charge.
 - [x] Reconcile expected versus printed amounts within explicit tolerances.
@@ -67,20 +67,20 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Change one auditable input or charge by a known amount.
 - [x] Record the expected discrepancy and rationale.
 - [x] Add a regression test that catches the exact discrepancy.
-- [ ] Ensure the UI and demo never imply the synthetic error was found on a real customer's bill.
+- [x] Ensure the UI and demo never imply the synthetic error was found on a real customer's bill.
 
 ## P0 — Build the coherent product flow
 
-- [ ] Upload screen with supported-provider notice and truthful privacy copy.
-- [ ] Sample-mode button so judges can run the demo instantly.
-- [ ] Extraction-review screen with bill evidence and editable low-confidence fields.
-- [ ] Audit screen with a plain-language verdict and line-by-line calculation traces.
-- [ ] Visible source/effective-date citations for rates.
-- [ ] Distinct visual treatment for verified facts, possible discrepancies, estimates, and unsupported checks.
-- [ ] Rate-plan comparison screen or a clear missing-data explanation.
-- [ ] Evidence-grounded review-request screen with editable copy.
-- [ ] Loading, invalid-file, partial-extraction, unsupported-provider, and API-error states.
-- [ ] Responsive layout and keyboard-accessible primary flow.
+- [x] Upload screen with supported-provider notice and truthful privacy copy.
+- [x] Sample-mode button so judges can run the demo instantly.
+- [x] Extraction-review screen with bill evidence and editable low-confidence fields.
+- [x] Audit screen with a plain-language verdict and line-by-line calculation traces.
+- [x] Visible source/effective-date citations for rates.
+- [x] Distinct visual treatment for verified facts, possible discrepancies, estimates, and unsupported checks.
+- [x] Rate-plan comparison screen or a clear missing-data explanation.
+- [x] Evidence-grounded review-request screen with editable copy.
+- [x] Loading, invalid-file, partial-extraction, unsupported-provider, and API-error states.
+- [x] Responsive layout and keyboard-accessible primary flow.
 
 ## P0 — Ground the generated review request
 
@@ -101,7 +101,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Missing-data test that refuses an invalid plan comparison.
 - [x] Unsupported-provider test with a useful result.
 - [x] Letter-grounding test.
-- [ ] Browser-level happy path from sample upload to review request.
+- [x] Browser-level happy path from sample upload to review request.
 - [ ] Run test, lint, type-check, and production build.
 - [ ] Test from a clean clone/environment.
 - [ ] Confirm no secrets or personal data are tracked.
@@ -109,11 +109,11 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 ## P1 — Rate-plan comparison
 
 - [ ] Implement a second supported PG&E schedule only after the initial audit is correct.
-- [ ] Define the usage detail required for a valid comparison.
+- [x] Define the usage detail required for a valid comparison.
 - [ ] Compare a bill period using actual printed buckets where available.
 - [ ] Do not annualize a single month without an explicit, defensible method and disclaimer.
 - [ ] Show assumptions, source, effective date, and calculation trace.
-- [ ] If source data is insufficient, explain how the user can obtain interval usage instead of estimating silently.
+- [x] If source data is insufficient, explain how the user can obtain interval usage instead of estimating silently.
 
 ## P1 — GPT-5.6 extraction robustness
 
@@ -125,14 +125,14 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 
 ## P1 — README and judge experience
 
-- [ ] Explain the problem, audience, differentiation, and PG&E-first scope.
-- [ ] Include architecture diagram or concise architecture section.
-- [ ] Document setup, environment variables, run, test, and sample-mode steps.
-- [ ] State which utilities, schedules, and effective periods are actually supported.
-- [ ] Document known limitations and privacy behavior.
-- [ ] Explain: GPT-5.6 reads and drafts; deterministic code validates and calculates.
-- [ ] Explain how Codex accelerated tariff implementation, schemas, tests, debugging, and product development.
-- [ ] Include sample screenshots/GIF only after the UI is final.
+- [x] Explain the problem, audience, differentiation, and PG&E-first scope.
+- [x] Include architecture diagram or concise architecture section.
+- [x] Document setup, environment variables, run, test, and sample-mode steps.
+- [x] State which utilities, schedules, and effective periods are actually supported.
+- [x] Document known limitations and privacy behavior.
+- [x] Explain: GPT-5.6 reads and drafts; deterministic code validates and calculates.
+- [x] Explain how Codex accelerated tariff implementation, schemas, tests, debugging, and product development.
+- [x] Include sample screenshots/GIF only after the UI is final.
 - [ ] Provide a hosted demo or a judge-friendly local/sandbox route.
 
 ## P1 — Submission package

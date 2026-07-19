@@ -34,6 +34,11 @@ def _currency(value: Decimal) -> str:
     return f"{sign}${abs(value):.2f}"
 
 
+def _rate(value: Decimal) -> str:
+    sign = "-" if value < 0 else ""
+    return f"{sign}${abs(value)}/kWh"
+
+
 def _citation(bundle: TariffBundle, rule: RateRule) -> tuple[Citation, ...]:
     return tuple(bundle.citation_map[key] for key in rule.citations)
 
@@ -82,7 +87,7 @@ def _quantity_rule(
         billed_amount=billed,
         expected_amount=expected,
         delta=delta,
-        formula=f"{quantity} kWh × ${rule.rate}/kWh",
+        formula=f"{quantity} kWh × {_rate(rule.rate)}",
         inputs={
             "quantity_kwh": str(quantity),
             "official_rate_usd_per_kwh": str(rule.rate),
@@ -314,20 +319,23 @@ def _review_request(
     ]
     if discrepancies:
         line = discrepancies[0]
-        citation = line.citations[0]
+        source_list = "\n".join(
+            f"- {citation.label}: {citation.source_url}"
+            for citation in line.citations
+        )
         synthetic_prefix = (
             "This is a synthetic demo request; no real customer bill contained this error.\n\n"
             if bill.fixture_kind == "synthetic"
             else ""
         )
         body = (
-            f"Hello,\n\n{synthetic_prefix}Please review the {line.label.lower()} on "
+            f"Hello,\n\n{synthetic_prefix}Please review the {line.label} on "
             f"the statement dated {bill.statement_date.value.isoformat()}. The statement "
             f"shows {_currency(line.billed_amount)}. Applying the published rate to the "
             f"printed usage gives {_currency(line.expected_amount or Decimal('0'))}, a "
             f"difference of {_currency(abs(line.delta or Decimal('0')))}.\n\n"
             f"Calculation: {line.formula}.\n"
-            f"Rate source: {citation.label} ({citation.source_url}).\n\n"
+            f"Rate sources:\n{source_list}\n\n"
             "Please confirm the quantity and rate used and explain or correct the charge "
             "if appropriate. I will verify my account details before sending. Thank you."
         )
@@ -337,6 +345,11 @@ def _review_request(
             grounded_audit_line_ids=(line.id,),
         )
 
+    verified_rate_lines = (
+        "pge_peak_energy",
+        "pge_off_peak_energy",
+        "pge_baseline_credit",
+    )
     unsupported = tuple(
         line.id for line in lines if line.category == "tariff" and line.status == "cannot_verify"
     )
@@ -351,7 +364,7 @@ def _review_request(
     return ReviewRequest(
         subject="Request for electricity charge calculation detail",
         body=body,
-        grounded_audit_line_ids=unsupported,
+        grounded_audit_line_ids=verified_rate_lines + unsupported,
     )
 
 

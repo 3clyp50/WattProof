@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import re
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from billhawk.audit import UnsupportedBillError, audit_bill, round_money
+from billhawk.app import create_app
 from billhawk.cli import main
 from billhawk.extract import (
     InvalidDocumentError,
@@ -148,6 +150,22 @@ def test_review_request_claims_are_grounded() -> None:
     assert result.review_request.requires_user_review is True
 
 
+def test_authentic_review_request_grounds_agreement_and_limitations() -> None:
+    result = audit_bill(load_sample("authentic"))
+    grounded = set(result.review_request.grounded_audit_line_ids)
+    line_ids = {line.id for line in result.lines}
+
+    assert {
+        "pge_peak_energy",
+        "pge_off_peak_energy",
+        "pge_baseline_credit",
+        "pge_generation_credit",
+        "pge_pcia",
+    } <= grounded
+    assert grounded <= line_ids
+    assert "insufficient to independently verify" in result.review_request.body
+
+
 def test_known_non_bill_is_rejected() -> None:
     with pytest.raises(UnsupportedDocumentError, match="layout explainer"):
         extract_pdf(PROJECT_ROOT / "assets/pge-sample-consolidated-bill.pdf")
@@ -168,3 +186,52 @@ def test_cli_happy_path_and_error(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--file", "missing.pdf"]) == 2
     output = capsys.readouterr()
     assert "does not exist" in output.err
+
+
+def test_web_flow_exposes_all_five_steps() -> None:
+    client = create_app().test_client()
+    response = client.get("/")
+    page = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    for label in ("Upload", "Review", "Audit", "Compare", "Act"):
+        assert f"<b>{label}</b>" in page
+    assert "GPT-5.6 may read" in page
+    assert "Decimal arithmetic handles money" in page
+
+
+def test_web_sample_review_to_audit_api() -> None:
+    client = create_app().test_client()
+    extraction_response = client.get("/api/sample/authentic")
+    extraction = extraction_response.get_json()["extraction"]
+    audit_response = client.post("/api/audit", json=extraction)
+    result = audit_response.get_json()["audit"]
+
+    assert extraction_response.status_code == 200
+    assert audit_response.status_code == 200
+    assert result["verdict"] == "reconciled"
+    assert result["comparison"]["status"] == "cannot_verify"
+    assert result["review_request"]["requires_user_review"] is True
+
+
+def test_web_upload_uses_known_public_fixture_without_api_key() -> None:
+    client = create_app().test_client()
+    data = (PROJECT_ROOT / "assets/pge-anonymous-3ce-sample-bill.pdf").read_bytes()
+    response = client.post(
+        "/api/extract",
+        data={"bill": (BytesIO(data), "public-sample.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["extraction"]["delivery_schedule"]["value"] == "E-TOU-C"
+
+
+def test_web_validation_returns_reviewable_field() -> None:
+    client = create_app().test_client()
+    extraction = load_sample("authentic").model_dump(mode="json")
+    extraction["peak_usage"]["value"] = "900"
+    response = client.post("/api/audit", json=extraction)
+
+    assert response.status_code == 422
+    assert "peak and off-peak quantities" in response.get_json()["error"]

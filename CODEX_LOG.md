@@ -75,3 +75,36 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - Authentic CLI verdict: `Reconciled where the archived sources support a calculation`.
 - Synthetic CLI verdict: `Possible $5.00 source-supported discrepancy`; the delivery-subtotal inconsistency corroborates the altered charge but is not double-counted.
 - Python bytecode compilation and JSON parsing passed.
+
+## 2026-07-19 - Milestone C product flow
+
+### Generated components
+
+- Stateless Flask routes for the landing page, public sample, temporary native-PDF extraction, and reviewed-extraction audit.
+- A framework-free five-step browser flow: upload, evidence review, audit, plan sufficiency, and grounded action.
+- Editable facts and line amounts with source page, exact quote, confidence, and printed/inferred status.
+- Responsive result treatments for verified, discrepancy, and cannot-verify states; exact source links remain beside each calculation.
+- Copy and text-download actions that never send a message and keep the user-review requirement visible.
+
+### Failures and corrections
+
+- The in-app browser control transport closed during two initialization attempts. Switched to the local Playwright CLI harness and preserved the same rendered-browser verification scope.
+- CSS `display` rules overrode the native `hidden` attribute, stacking old steps in the page and accessibility tree. Added an explicit `[hidden]` rule and re-ran the complete path.
+- The authentic action-screen claim ledger initially said every request had a published source, even though its purpose is to ask for missing component sources. Reworded the ledger and grounded the agreement claim in the three verified PG&E rate lines as well as every unsupported line named.
+- The copy button held `event.currentTarget` across an asynchronous clipboard call; the browser cleared it and the success label threw. Stored the button reference before the await and verified the visible `Copied` state with zero console errors.
+- Preserved exact credit-rate sign formatting as `-$0.09054/kWh` and listed both period-crossing PG&E workbooks in the synthetic request.
+
+### Browser verification
+
+- Authentic sample: upload → editable evidence review → 14 verified checks / 6 unavailable → honest interval-data state → grounded action request.
+- Actual `assets/pge-anonymous-3ce-sample-bill.pdf` upload completed the same five-step path without an API key.
+- Synthetic sample kept its no-real-customer banner on every result screen and reported one counted `$5.00` discrepancy plus the corroborating `-$5.00` subtotal inconsistency.
+- The supplied non-auditable PG&E layout explainer returned a useful visible rejection message.
+- Desktop and 390 × 844 mobile Chromium renders were visually inspected; keyboard-addressable controls and semantic snapshots exposed the intended headings, labels, alert/note roles, and progress states.
+- Final clean browser session: zero console errors or warnings through the complete authentic flow and copy action.
+
+### Verification
+
+- `19 passed` after adding Flask route, actual upload, validation, and authentic-letter grounding coverage.
+- `node --check`, Python bytecode compilation, JSON parsing, and whitespace checks passed.
+- Rendered screenshots are saved under `output/playwright/` for README and judging evidence.

@@ -1,7 +1,7 @@
 .PHONY: run audit test lint typecheck build verify
 
 run:
-	python3 -m billhawk
+	python3 run.py
 
 audit:
 	python3 -m billhawk --sample authentic
@@ -16,6 +16,6 @@ typecheck:
 	python3 -m mypy billhawk tests
 
 build:
-	python3 -m compileall -q billhawk tests
+	python3 -m compileall -q billhawk tests run.py
 
 verify: test lint typecheck build

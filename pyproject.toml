@@ -36,4 +36,4 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [tool.setuptools.package-data]
-billhawk = ["data/*.json", "templates/*.html", "static/*.css"]
+billhawk = ["data/*.json", "templates/*.html", "static/*"]
