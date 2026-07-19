@@ -138,6 +138,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 ## P1 — Submission package
 
 - [ ] Select **Apps for Your Life**.
+- [x] Create and populate the editable Build Week submission draft.
 - [x] Draft the Devpost project description around the consumer tariff-audit whitespace.
 - [x] Verify the code repository is public with suitable licensing, or share a private repository with the required judging addresses.
 - [x] Ensure sample data and complete setup instructions are committed.

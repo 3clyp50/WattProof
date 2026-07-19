@@ -8,6 +8,7 @@ This file is the source of truth for the Devpost entry and demo recording. Repla
 - **Tagline:** Check the math on your electricity bill.
 - **Category:** Apps for Your Life
 - **Repository:** https://github.com/3clyp50/WattProof
+- **Devpost project:** https://devpost.com/software/wattproof-xtw6ib
 - **Demo video:** `TODO(submission): public YouTube URL, under three minutes`
 - **Primary Codex feedback Session ID:** `TODO(submission): run /feedback in the main build session`
 
@@ -94,5 +95,6 @@ Show a terminal with `make verify`, then briefly show `CODEX_LOG.md`: “Codex h
 - [ ] Record at 1080p with readable text and no private tabs, keys, or notifications.
 - [ ] Keep the final video under 3:00 after YouTube processing, with audio covering both Codex and GPT-5.6.
 - [x] Make the repository accessible to judges and confirm setup from its public URL.
+- [x] Populate the Build Week submission draft with the write-up, repository, stack, and thumbnail.
 - [ ] Run `/feedback` in the primary Codex session and preserve its Session ID.
 - [ ] Submit before Tuesday, July 21, 2026 at 5:00 PM PT with upload buffer.

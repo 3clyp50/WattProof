@@ -167,3 +167,5 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 
 - Committed the full product rename as `e463468` and created the standalone public repository at https://github.com/3clyp50/WattProof.
 - Added the repository as `origin`; the submission source now records the confirmed public URL rather than a placeholder.
+- Created standalone Devpost project `1354055` before the user surfaced their separately created Build Week submission draft `1105838`, backed by project `1354058`. The duplicate was detected through the connected account rather than guessed from the two URLs.
+- Preserved the user's more specific tagline and copied the completed write-up, repository link, technology list, and real landing-page screenshot into project `1354058`. Verification returned the OpenAI Build Week relationship with `submitted_at: null`, so it remains editable and has not been prematurely submitted. Project `1354055` remains unattached to any hackathon and is not used by the submission.
