@@ -19,7 +19,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Choose the smallest viable stack and document the decision in `CODEX_LOG.md`.
 - [x] Add one-command development startup.
 - [x] Add scripts for test, lint, type-check, and build.
-- [ ] Verify a clean clone can install and start without undocumented local state.
+- [x] Verify a clean clone can install and start without undocumented local state.
 
 ## P0 — Establish ground truth before coding the engine
 
@@ -103,7 +103,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Letter-grounding test.
 - [x] Browser-level happy path from sample upload to review request.
 - [x] Run test, lint, type-check, and production build.
-- [ ] Test from a clean clone/environment.
+- [x] Test from a clean clone/environment.
 - [x] Confirm no secrets or personal data are tracked.
 
 ## P1 — Rate-plan comparison
@@ -182,7 +182,7 @@ Never cut:
 
 Do not record the final demo until all answers are **yes**:
 
-- [ ] Can a fresh user run the sample in under five minutes?
+- [x] Can a fresh user run the sample in under five minutes?
 - [x] Can every displayed dollar amount be traced to a printed input and rate source?
 - [x] Does the authentic fixture produce the hand-checked result?
 - [x] Does the labeled synthetic fixture produce the exact expected discrepancy?

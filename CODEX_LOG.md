@@ -145,3 +145,5 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 ### Verification
 
 - `make verify` passes in the isolated environment: 26 tests, zero Ruff findings, zero MyPy issues across 10 source files, and successful bytecode compilation.
+- Fresh clone `4721e62` created a new Python 3.13 virtual environment, installed only `requirements-dev.txt`, passed unchanged `make verify`, started the Flask app, rendered the landing page, and returned the authentic E-TOU-C sample API payload. The complete install-and-verify portion finished well inside the five-minute judge target and left the clone clean.
+- The first HTTP harness used an obsolete hero-text assertion after receiving a valid `200`; its cleanup trap stopped the server. Re-running against the stable `Audit authentic sample` control and API value passed without a product change.
