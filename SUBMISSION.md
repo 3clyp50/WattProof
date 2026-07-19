@@ -89,8 +89,8 @@ Show a terminal with `make verify`, then briefly show `CODEX_LOG.md`: “Codex h
 ## Pre-submission proof
 
 - [ ] Replace every `TODO(submission)` field above.
-- [ ] Run `make verify` in a fresh environment.
-- [ ] Confirm the authentic and synthetic demo paths in Chromium.
+- [x] Run `make verify` in a fresh environment.
+- [x] Confirm the authentic and synthetic demo paths in Chromium.
 - [ ] Record at 1080p with readable text and no private tabs, keys, or notifications.
 - [ ] Keep the final video under 3:00 after YouTube processing, with audio covering both Codex and GPT-5.6.
 - [ ] Make the repository accessible to judges and confirm setup from its public URL.
