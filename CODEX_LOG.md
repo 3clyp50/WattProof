@@ -162,3 +162,8 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - Both Python 3.13.11 and Python 3.12.3 pass 26 tests, Ruff, strict MyPy across 10 source files, and bytecode compilation after the package rename.
 - Regenerated all five tracked screenshots from the real WattProof UI. Authentic and labeled-synthetic desktop flows plus the 390 × 844 synthetic audit remain visually coherent and produce zero browser console errors or warnings.
 - Current-facing tracked text has no remaining BillHawk package or product identifier; only this log retains it to preserve historical prompts, paths, and commands. JavaScript syntax, JSON parsing, whitespace, and tracked secret-pattern scans pass.
+
+### Publication
+
+- Committed the full product rename as `e463468` and created the standalone public repository at https://github.com/3clyp50/WattProof.
+- Added the repository as `origin`; the submission source now records the confirmed public URL rather than a placeholder.

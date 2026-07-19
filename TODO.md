@@ -139,7 +139,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 
 - [ ] Select **Apps for Your Life**.
 - [x] Draft the Devpost project description around the consumer tariff-audit whitespace.
-- [ ] Verify the code repository is public with suitable licensing, or share a private repository with the required judging addresses.
+- [x] Verify the code repository is public with suitable licensing, or share a private repository with the required judging addresses.
 - [x] Ensure sample data and complete setup instructions are committed.
 - [ ] Record the primary Codex `/feedback` Session ID in the submission form.
 - [ ] Produce a public YouTube demo under three minutes.
