@@ -108,3 +108,15 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - `19 passed` after adding Flask route, actual upload, validation, and authentic-letter grounding coverage.
 - `node --check`, Python bytecode compilation, JSON parsing, and whitespace checks passed.
 - Rendered screenshots are saved under `output/playwright/` for README and judging evidence.
+
+## 2026-07-19 - Milestone D release preparation
+
+### Generated components
+
+- Added effective-period boundary coverage on both sides of the archived tariff window and a duplicate-charge-ID schema rejection case.
+- Drafted the Devpost narrative, technical explanation, differentiation, lessons, explicit submission blanks, and a timed 2:35 demo script in `SUBMISSION.md`.
+
+### Verification
+
+- `22 passed` across the expanded deterministic, schema, extraction, API, and web contract suite.
+- A fresh clone of milestone commit `ab62720` ran all then-current 19 tests and the Flask smoke path using the existing host dependencies; a true dependency install plus Ruff/MyPy run remains pending permission to create the local development environment.

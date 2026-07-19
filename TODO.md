@@ -84,7 +84,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 
 ## P0 — Ground the generated review request
 
-- [ ] Pass only structured verified audit facts to GPT-5.6.
+- [x] Keep the MVP request deterministic; any future GPT-5.6 drafting path may receive only structured verified audit facts.
 - [x] Require neutral language asking the provider to clarify or review the bill.
 - [x] Include tariff citation, disputed/reviewed line, expected amount, billed amount, and delta.
 - [x] Prevent the model from adding amounts, causes, laws, or accusations absent from the audit.
@@ -94,7 +94,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 ## P0 — Testing and release gate
 
 - [x] Unit tests for decimal and rounding behavior.
-- [ ] Boundary tests for billing dates, tariff effective dates, tiers, and TOU periods where applicable.
+- [x] Boundary tests for billing dates and tariff effective dates; tiers and alternate TOU windows are outside this single-period adapter.
 - [x] Golden extraction test using the sanitized sample.
 - [x] Golden audit test using the hand-checked fixture.
 - [x] Synthetic discrepancy regression test.
@@ -104,14 +104,14 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Browser-level happy path from sample upload to review request.
 - [ ] Run test, lint, type-check, and production build.
 - [ ] Test from a clean clone/environment.
-- [ ] Confirm no secrets or personal data are tracked.
+- [x] Confirm no secrets or personal data are tracked.
 
 ## P1 — Rate-plan comparison
 
 - [ ] Implement a second supported PG&E schedule only after the initial audit is correct.
 - [x] Define the usage detail required for a valid comparison.
 - [ ] Compare a bill period using actual printed buckets where available.
-- [ ] Do not annualize a single month without an explicit, defensible method and disclaimer.
+- [x] Do not annualize a single month without an explicit, defensible method and disclaimer.
 - [ ] Show assumptions, source, effective date, and calculation trace.
 - [x] If source data is insufficient, explain how the user can obtain interval usage instead of estimating silently.
 
@@ -121,7 +121,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [ ] Compare native text values with vision values when both are available.
 - [ ] Retry or request correction on disagreement rather than choosing silently.
 - [ ] Test digit transpositions, missing negative signs, duplicated lines, and unreadable scans.
-- [ ] Establish file-size, page-count, and supported-format limits.
+- [x] Establish file-size, page-count, and supported-format limits.
 
 ## P1 — README and judge experience
 
@@ -133,14 +133,14 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Explain: GPT-5.6 reads and drafts; deterministic code validates and calculates.
 - [x] Explain how Codex accelerated tariff implementation, schemas, tests, debugging, and product development.
 - [x] Include sample screenshots/GIF only after the UI is final.
-- [ ] Provide a hosted demo or a judge-friendly local/sandbox route.
+- [x] Provide a hosted demo or a judge-friendly local/sandbox route.
 
 ## P1 — Submission package
 
 - [ ] Select **Apps for Your Life**.
-- [ ] Draft the Devpost project description around the consumer tariff-audit whitespace.
+- [x] Draft the Devpost project description around the consumer tariff-audit whitespace.
 - [ ] Verify the code repository is public with suitable licensing, or share a private repository with the required judging addresses.
-- [ ] Ensure sample data and complete setup instructions are committed.
+- [x] Ensure sample data and complete setup instructions are committed.
 - [ ] Record the primary Codex `/feedback` Session ID in the submission form.
 - [ ] Produce a public YouTube demo under three minutes.
 - [ ] In the video, explain both Codex use and GPT-5.6 use.
@@ -183,12 +183,12 @@ Never cut:
 Do not record the final demo until all answers are **yes**:
 
 - [ ] Can a fresh user run the sample in under five minutes?
-- [ ] Can every displayed dollar amount be traced to a printed input and rate source?
-- [ ] Does the authentic fixture produce the hand-checked result?
-- [ ] Does the labeled synthetic fixture produce the exact expected discrepancy?
-- [ ] Does missing data lead to an honest limitation rather than a guess?
-- [ ] Does the product visibly feel complete across all five steps?
+- [x] Can every displayed dollar amount be traced to a printed input and rate source?
+- [x] Does the authentic fixture produce the hand-checked result?
+- [x] Does the labeled synthetic fixture produce the exact expected discrepancy?
+- [x] Does missing data lead to an honest limitation rather than a guess?
+- [x] Does the product visibly feel complete across all five steps?
 - [ ] Do test, lint, type-check, and build pass?
-- [ ] Does the README describe exact support and limitations?
+- [x] Does the README describe exact support and limitations?
 - [ ] Does the video show substantive Codex and GPT-5.6 use?
 - [ ] Is the `/feedback` Session ID saved?

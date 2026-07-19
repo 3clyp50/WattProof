@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -18,7 +19,7 @@ from billhawk.extract import (
     extract_pdf,
 )
 from billhawk.fixtures import FIXTURES_DIR, PROJECT_ROOT, load_sample
-from billhawk.models import BillExtraction, TextFact
+from billhawk.models import BillExtraction, DateFact, TextFact
 from billhawk.tariffs import load_tariff_bundle
 
 
@@ -90,6 +91,13 @@ def test_schema_rejects_impossible_usage_total() -> None:
         BillExtraction.model_validate(raw)
 
 
+def test_schema_rejects_duplicate_charge_ids() -> None:
+    raw = load_sample("authentic").model_dump(mode="json")
+    raw["charges"][1]["id"] = raw["charges"][0]["id"]
+    with pytest.raises(ValidationError, match="charge line IDs must be unique"):
+        BillExtraction.model_validate(raw)
+
+
 def test_source_snapshots_match_recorded_hashes() -> None:
     bundle = load_tariff_bundle(verify_sources=True)
     assert bundle.version.id == "pge_3ce_e_tou_c_2022_h2"
@@ -120,6 +128,28 @@ def test_unsupported_provider_returns_useful_limitation() -> None:
     unsupported = bill.model_copy(update={"delivery_provider": other_provider})
     with pytest.raises(UnsupportedBillError, match="PG&E residential"):
         audit_bill(unsupported)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("service_start", date(2022, 5, 31)),
+        ("service_end", date(2023, 1, 1)),
+    ],
+)
+def test_tariff_effective_period_boundaries(field: str, value: date) -> None:
+    bill = load_sample("authentic")
+    original = getattr(bill, field)
+    changed = DateFact(
+        value=value,
+        source_page=original.source_page,
+        source_text=original.source_text,
+        confidence=original.confidence,
+        status=original.status,
+    )
+    outside_period = bill.model_copy(update={field: changed})
+    with pytest.raises(UnsupportedBillError, match="outside the archived"):
+        audit_bill(outside_period)
 
 
 def test_review_request_claims_are_grounded() -> None:

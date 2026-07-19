@@ -167,5 +167,6 @@ GPT-5.6 is integrated through schema-constrained Responses API extraction for un
 - [`GROUND_TRUTH.md`](GROUND_TRUTH.md) — bill period, schedules, provenance, hand math, and support boundary
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — smallest complete implementation shape
 - [`CODEX_LOG.md`](CODEX_LOG.md) — primary-session engineering evidence
+- [`SUBMISSION.md`](SUBMISSION.md) — Devpost copy, artifact checklist, and timed demo script
 
 Licensed under the [MIT License](LICENSE).
