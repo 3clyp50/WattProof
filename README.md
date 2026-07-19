@@ -6,7 +6,7 @@
 
 ## Build status
 
-The tariff-ground-truth milestone is complete enough to review; the runnable audit flow is being built next. See:
+The tariff-ground-truth and headless-audit milestones are runnable. The five-step browser experience is being built next. See:
 
 - [`GROUND_TRUTH.md`](GROUND_TRUTH.md) for the selected bill, rate periods, hand calculations, and support boundary.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) for the deliberately small implementation plan.
@@ -26,4 +26,17 @@ The supplied March 2026 PG&E pricing summary is newer, but it does not govern th
 - A separate altered fixture will be clearly labeled synthetic and will demonstrate discrepancy detection.
 - BillHawk never invents a rate, a cause, or a savings estimate when the required data is absent.
 
-Runnable setup and demo instructions will replace this build-status section when the vertical slice is complete.
+Full browser setup and demo instructions will replace this build-status note when the vertical slice is complete.
+
+## Headless proof
+
+The current machine already has the runtime dependencies. From the repository root:
+
+```bash
+python3 -m billhawk --sample authentic
+python3 -m billhawk --sample synthetic
+python3 -m billhawk --sample authentic --json
+python3 -m pytest
+```
+
+The authentic sample must reconcile every supported calculation. The synthetic sample must report exactly `$5.00` and visibly state that the error did not occur on a real customer bill.

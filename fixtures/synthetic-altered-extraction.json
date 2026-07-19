@@ -1,0 +1,10 @@
+{
+  "base_fixture": "fixtures/authentic-extraction.json",
+  "notice": "SYNTHETIC DEMO: the printed PG&E peak charge is altered from $36.44 to $41.44. This error did not appear on a real customer bill.",
+  "alterations": {
+    "fixture_kind": "synthetic",
+    "charge_id": "pge_peak_energy",
+    "billed_amount": "41.44",
+    "expected_discrepancy": "5.00"
+  }
+}

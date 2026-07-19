@@ -4,69 +4,69 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 
 ## P0 — Preserve the Codex build evidence
 
-- [ ] Start the main implementation in one primary Codex session.
-- [ ] Tell Codex explicitly that this is an OpenAI Build Week project using Codex and GPT-5.6.
+- [x] Start the main implementation in one primary Codex session.
+- [x] Tell Codex explicitly that this is an OpenAI Build Week project using Codex and GPT-5.6.
 - [ ] Keep most core implementation work in that session so its `/feedback` ID is representative.
 - [ ] Run `/feedback` before submission and record the Session ID.
-- [ ] Create `CODEX_LOG.md` and record major prompts, architectural decisions, Codex-generated components, human corrections, failed approaches, and verification results.
-- [ ] Never place API keys, account data, addresses, meter numbers, or unredacted bills in the repository or Codex prompt.
+- [x] Create `CODEX_LOG.md` and record major prompts, architectural decisions, Codex-generated components, human corrections, failed approaches, and verification results.
+- [x] Never place API keys, account data, addresses, meter numbers, or unredacted bills in the repository or Codex prompt.
 
 ## P0 — Bootstrap the repository
 
-- [ ] Create or select the final Git repository for BillHawk.
-- [ ] Copy in `PLAN.md`, `TODO.md`, and only the sanitized/public assets needed for development.
-- [ ] Add `.gitignore`, `.env.example`, license, and a placeholder `README.md`.
-- [ ] Choose the smallest viable stack and document the decision in `CODEX_LOG.md`.
+- [x] Create or select the final Git repository for BillHawk.
+- [x] Copy in `PLAN.md`, `TODO.md`, and only the sanitized/public assets needed for development.
+- [x] Add `.gitignore`, `.env.example`, license, and a placeholder `README.md`.
+- [x] Choose the smallest viable stack and document the decision in `CODEX_LOG.md`.
 - [ ] Add one-command development startup.
-- [ ] Add scripts for test, lint, type-check, and build.
+- [x] Add scripts for test, lint, type-check, and build.
 - [ ] Verify a clean clone can install and start without undocumented local state.
 
 ## P0 — Establish ground truth before coding the engine
 
-- [ ] Inspect `assets/pge-sample-consolidated-bill.pdf` and identify:
-  - [ ] billing period;
-  - [ ] rate schedule;
-  - [ ] delivery utility;
-  - [ ] generation provider/CCA;
-  - [ ] all printed quantities and charge lines;
-  - [ ] actual versus estimated meter readings.
-- [ ] Determine whether the existing pricing PDF matches the sample bill's effective period.
-- [ ] Download/archive the exact official tariff or rate source that governed the sample period.
-- [ ] Record source URL, retrieval date, effective dates, and file hash.
-- [ ] Mark each bill line as `calculable`, `reconcilable only`, or `unsupported`.
-- [ ] Hand-calculate at least one complete supported charge path.
-- [ ] Have a second pass—human or Codex—independently check the hand calculation.
-- [ ] Save expected extraction and expected audit fixtures as JSON.
+- [x] Inspect `assets/pge-sample-consolidated-bill.pdf` and identify:
+  - [x] billing period;
+  - [x] rate schedule;
+  - [x] delivery utility;
+  - [x] generation provider/CCA;
+  - [x] all printed quantities and charge lines;
+  - [x] actual versus estimated meter readings.
+- [x] Determine whether the existing pricing PDF matches the sample bill's effective period.
+- [x] Download/archive the exact official tariff or rate source that governed the sample period.
+- [x] Record source URL, retrieval date, effective dates, and file hash.
+- [x] Mark each bill line as `calculable`, `reconcilable only`, or `unsupported`.
+- [x] Hand-calculate at least one complete supported charge path.
+- [x] Have a second pass—human or Codex—independently check the hand calculation.
+- [x] Save expected extraction and expected audit fixtures as JSON.
 
 ## P0 — Define trustworthy data contracts
 
-- [ ] Define and version `BillExtraction`.
-- [ ] Preserve page number, quoted source text, confidence, units, and printed/inferred status for material fields.
-- [ ] Define `TariffVersion` with schedule, jurisdiction, effective range, source, snapshot hash, and retrieval date.
-- [ ] Define `AuditLine` with billed amount, expected amount, delta, formula, inputs, citation, status, and limitations.
-- [ ] Define explicit statuses: `verified`, `discrepancy`, `estimated`, `cannot_verify`, and `needs_review`.
-- [ ] Use decimal currency arithmetic and document rounding tolerances.
-- [ ] Reject impossible or internally inconsistent extracted data.
+- [x] Define and version `BillExtraction`.
+- [x] Preserve page number, quoted source text, confidence, units, and printed/inferred status for material fields.
+- [x] Define `TariffVersion` with schedule, jurisdiction, effective range, source, snapshot hash, and retrieval date.
+- [x] Define `AuditLine` with billed amount, expected amount, delta, formula, inputs, citation, status, and limitations.
+- [x] Define explicit statuses: `verified`, `discrepancy`, `estimated`, `cannot_verify`, and `needs_review`.
+- [x] Use decimal currency arithmetic and document rounding tolerances.
+- [x] Reject impossible or internally inconsistent extracted data.
 
 ## P0 — Build the headless vertical slice
 
-- [ ] Extract native PDF text before invoking vision.
-- [ ] Use GPT-5.6 structured output to map bill evidence into `BillExtraction`.
-- [ ] Validate line-item, subtotal, total, and meter-usage invariants.
+- [x] Extract native PDF text before invoking vision.
+- [x] Use GPT-5.6 structured output to map bill evidence into `BillExtraction`.
+- [x] Validate line-item, subtotal, total, and meter-usage invariants.
 - [ ] Return low-confidence or inconsistent fields for user correction.
-- [ ] Implement the first PG&E tariff adapter for the exact sample schedule and period.
-- [ ] Produce a calculation trace for every supported charge.
-- [ ] Reconcile expected versus printed amounts within explicit tolerances.
-- [ ] Label unsupported fees/riders without guessing.
-- [ ] Expose the flow through a CLI or API before building the polished UI.
-- [ ] Verify the authentic sanitized fixture produces the hand-checked result.
+- [x] Implement the first PG&E tariff adapter for the exact sample schedule and period.
+- [x] Produce a calculation trace for every supported charge.
+- [x] Reconcile expected versus printed amounts within explicit tolerances.
+- [x] Label unsupported fees/riders without guessing.
+- [x] Expose the flow through a CLI or API before building the polished UI.
+- [x] Verify the authentic sanitized fixture produces the hand-checked result.
 
 ## P0 — Prove discrepancy detection honestly
 
-- [ ] Create a clearly labeled synthetic altered fixture derived from sanitized data.
-- [ ] Change one auditable input or charge by a known amount.
-- [ ] Record the expected discrepancy and rationale.
-- [ ] Add a regression test that catches the exact discrepancy.
+- [x] Create a clearly labeled synthetic altered fixture derived from sanitized data.
+- [x] Change one auditable input or charge by a known amount.
+- [x] Record the expected discrepancy and rationale.
+- [x] Add a regression test that catches the exact discrepancy.
 - [ ] Ensure the UI and demo never imply the synthetic error was found on a real customer's bill.
 
 ## P0 — Build the coherent product flow
@@ -85,22 +85,22 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 ## P0 — Ground the generated review request
 
 - [ ] Pass only structured verified audit facts to GPT-5.6.
-- [ ] Require neutral language asking the provider to clarify or review the bill.
-- [ ] Include tariff citation, disputed/reviewed line, expected amount, billed amount, and delta.
-- [ ] Prevent the model from adding amounts, causes, laws, or accusations absent from the audit.
-- [ ] Add a test ensuring every material claim maps to an `AuditLine`.
-- [ ] Require user review before copy/download; do not send automatically.
+- [x] Require neutral language asking the provider to clarify or review the bill.
+- [x] Include tariff citation, disputed/reviewed line, expected amount, billed amount, and delta.
+- [x] Prevent the model from adding amounts, causes, laws, or accusations absent from the audit.
+- [x] Add a test ensuring every material claim maps to an `AuditLine`.
+- [x] Require user review before copy/download; do not send automatically.
 
 ## P0 — Testing and release gate
 
-- [ ] Unit tests for decimal and rounding behavior.
+- [x] Unit tests for decimal and rounding behavior.
 - [ ] Boundary tests for billing dates, tariff effective dates, tiers, and TOU periods where applicable.
-- [ ] Golden extraction test using the sanitized sample.
-- [ ] Golden audit test using the hand-checked fixture.
-- [ ] Synthetic discrepancy regression test.
-- [ ] Missing-data test that refuses an invalid plan comparison.
-- [ ] Unsupported-provider test with a useful result.
-- [ ] Letter-grounding test.
+- [x] Golden extraction test using the sanitized sample.
+- [x] Golden audit test using the hand-checked fixture.
+- [x] Synthetic discrepancy regression test.
+- [x] Missing-data test that refuses an invalid plan comparison.
+- [x] Unsupported-provider test with a useful result.
+- [x] Letter-grounding test.
 - [ ] Browser-level happy path from sample upload to review request.
 - [ ] Run test, lint, type-check, and production build.
 - [ ] Test from a clean clone/environment.

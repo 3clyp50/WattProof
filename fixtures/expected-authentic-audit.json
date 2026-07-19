@@ -1,0 +1,28 @@
+{
+  "verdict": "reconciled",
+  "discrepancy_total": "0.00",
+  "verified_expected_amounts": {
+    "pge_peak_energy": "36.44",
+    "pge_off_peak_energy": "87.71",
+    "pge_baseline_credit": "-21.05",
+    "pge_franchise_fee": "0.32",
+    "cca_nov_peak": "9.23",
+    "cca_nov_off_peak": "16.27",
+    "cca_nov_uut": "0.26",
+    "cca_dec_peak": "3.60",
+    "cca_dec_off_peak": "4.80",
+    "cca_dec_uut": "0.08",
+    "delivery_subtotal": "62.11",
+    "generation_subtotal": "34.33",
+    "current_charges": "96.44",
+    "amount_due": "96.24"
+  },
+  "cannot_verify": [
+    "pge_generation_credit",
+    "pge_pcia",
+    "pge_uut",
+    "cca_nov_energy_commission_tax",
+    "cca_dec_energy_commission_tax"
+  ],
+  "comparison_status": "cannot_verify"
+}

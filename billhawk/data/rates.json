@@ -1,0 +1,62 @@
+{
+  "id": "pge_3ce_e_tou_c_2022_h2",
+  "provider": "Pacific Gas and Electric Company + Central Coast Community Energy",
+  "schedule": "E-TOU-C / MBRETCH1 3Cchoice",
+  "jurisdiction": "California",
+  "effective_start": "2022-06-01",
+  "effective_end": "2022-12-31",
+  "retrieved_on": "2026-07-19",
+  "citations": {
+    "pge_nov": {
+      "label": "PG&E historic residential inclusive TOU rates, June-November 2022",
+      "source_url": "https://www.pge.com/assets/rates/tariffs/Res_Inclu_TOU_220601-221130.xlsx",
+      "local_path": "sources/pge-residential-inclu-tou-2022-06-01-to-2022-11-30.xlsx",
+      "effective_start": "2022-06-01",
+      "effective_end": "2022-11-30",
+      "sha256": "d25d2042a895e1715fd0bdd5166cfa513d5aa1c715ab0dc51382e034dd093958"
+    },
+    "pge_dec": {
+      "label": "PG&E historic residential inclusive TOU rates, December 2022",
+      "source_url": "https://www.pge.com/assets/rates/tariffs/Res_Inclu_TOU_221201-221231.xlsx",
+      "local_path": "sources/pge-residential-inclu-tou-2022-12-01-to-2022-12-31.xlsx",
+      "effective_start": "2022-12-01",
+      "effective_end": "2022-12-31",
+      "sha256": "2bae786f92efa2eba420adc35e50b80dab71726a43d45f664283fbf744981589"
+    },
+    "baseline": {
+      "label": "PG&E residential baseline quantities",
+      "source_url": "https://www.pge.com/assets/rates/tariffs/ResElecBaselineCurrent.xlsx",
+      "local_path": "sources/pge-residential-baseline-2022-06-01-present.xlsx",
+      "effective_start": "2022-06-01",
+      "effective_end": null,
+      "sha256": "f9069d80c963341d81adcac87684c6a4b0893b9d6fda21cba11fb2f34dc36bfe"
+    },
+    "3ce": {
+      "label": "3CE residential generation rates effective March 1, 2022",
+      "source_url": "https://3cenergy.org/wp-content/uploads/2023/03/3CE-Residential-Rate-Sheet-Mar1.22_FINAL-1.pdf",
+      "local_path": "sources/3ce-residential-rate-sheet-effective-2022-03-01.pdf",
+      "effective_start": "2022-03-01",
+      "effective_end": null,
+      "sha256": "774a4f035824713acb0671935f6276516ff33f30026cd008947b170b2543b279"
+    }
+  },
+  "rules": {
+    "pge_peak_energy": {"kind": "quantity_times_rate", "rate": "0.39193", "citations": ["pge_nov", "pge_dec"]},
+    "pge_off_peak_energy": {"kind": "quantity_times_rate", "rate": "0.37460", "citations": ["pge_nov", "pge_dec"]},
+    "pge_baseline_credit": {"kind": "quantity_times_rate", "rate": "-0.09054", "citation": "baseline"},
+    "pge_franchise_fee": {"kind": "quantity_times_rate", "rate": "0.00099", "citation": "3ce"},
+    "cca_nov_peak": {"kind": "quantity_times_rate", "rate": "0.13800", "citation": "3ce"},
+    "cca_nov_off_peak": {"kind": "quantity_times_rate", "rate": "0.09000", "citation": "3ce"},
+    "cca_dec_peak": {"kind": "quantity_times_rate", "rate": "0.13800", "citation": "3ce"},
+    "cca_dec_off_peak": {"kind": "quantity_times_rate", "rate": "0.09000", "citation": "3ce"},
+    "cca_nov_uut": {"kind": "percent_of_lines", "rate": "0.01000", "line_ids": ["cca_nov_peak", "cca_nov_off_peak"]},
+    "cca_dec_uut": {"kind": "percent_of_lines", "rate": "0.01000", "line_ids": ["cca_dec_peak", "cca_dec_off_peak"]}
+  },
+  "limitations": {
+    "pge_generation_credit": "The matching archived generation-credit component source is unavailable.",
+    "pge_pcia": "The available 3CE sheet calculates $4.50 rather than the printed $4.53, so BillHawk will not force a match.",
+    "pge_uut": "The precise PG&E taxable base and rounding rule are not sourced.",
+    "cca_nov_energy_commission_tax": "The exact effective Energy Commission tax source is not archived.",
+    "cca_dec_energy_commission_tax": "The exact effective Energy Commission tax source is not archived."
+  }
+}

@@ -53,3 +53,25 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - DeepAPI searches `ab653280-b289-433b-9ed9-c2f13348005a`, `887f8dc8-14e5-4891-af60-e918750d5186`, and `260aa254-3e53-438f-b8d3-3f1fa206cfaf` looked for complete official 2025/2026 PG&E residential samples.
 - The searches found current PG&E tariff material and a March 2026 NEM explainer, but no newer complete ordinary residential sample with auditable line items and a matching effective-period source.
 - Retained the December 2022 PG&E/3CE statement as the authentic golden path. The March 2026 PG&E pricing sheet is context only and must never be used to calculate that bill.
+
+## 2026-07-19 - Milestone B headless audit
+
+### Generated components
+
+- Versioned Pydantic contracts for extraction evidence, tariff provenance, audit lines, comparison insufficiency, and review requests.
+- Immutable machine-readable rate rules tied to four archived source snapshots; every calculation verifies snapshot hashes before running.
+- Native-PDF boundary checks, known-fixture hashing, explicit rejection of the two unsuitable supplied samples, and a GPT-5.6 strict-output path for other native PDFs.
+- Decimal half-up reconciliation for ten supported tariff lines plus section, current-charge, amount-due, and meter-data checks.
+- A clearly labeled structured synthetic fixture that changes the PG&E peak charge from `$36.44` to `$41.44` and expects one `$5.00` tariff discrepancy.
+- A CLI proof through `python3 -m billhawk` and JSON output through `--json`.
+
+### Failure and correction
+
+- The first review-letter grounding test exposed a display bug: the formula formatted the official `$0.39193/kWh` rate as `$0.39/kWh`. The calculation itself was exact, but the visible trace was not. The formula now preserves all published rate digits, and the grounding test checks every dollar token against its cited audit line.
+
+### Verification
+
+- `14 passed` across golden extraction, hand-checked audit values, snapshot hashes, Decimal boundaries, synthetic discrepancy, insufficiency, unsupported-provider, invalid-file, rejected-source, CLI, and review-letter grounding tests.
+- Authentic CLI verdict: `Reconciled where the archived sources support a calculation`.
+- Synthetic CLI verdict: `Possible $5.00 source-supported discrepancy`; the delivery-subtotal inconsistency corroborates the altered charge but is not double-counted.
+- Python bytecode compilation and JSON parsing passed.

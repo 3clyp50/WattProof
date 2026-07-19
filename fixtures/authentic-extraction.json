@@ -1,0 +1,255 @@
+{
+  "schema_version": "1.0",
+  "fixture_kind": "authentic",
+  "synthetic_notice": null,
+  "document_sha256": "50cb3a012f46d2ae478079e28b7b109d08fc74ae098d95317a97c2b99175a9e6",
+  "delivery_provider": {
+    "value": "Pacific Gas and Electric Company",
+    "source_page": 3,
+    "source_text": "Details of PG&E Electric Delivery Charges",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "generation_provider": {
+    "value": "Central Coast Community Energy",
+    "source_page": 4,
+    "source_text": "Details of Central Coast Community Energy Electric Generation Charges",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "delivery_schedule": {
+    "value": "E-TOU-C",
+    "source_page": 3,
+    "source_text": "Rate Schedule: Time-of-Use (Peak Pricing 4 - 9 p.m. Every Day)",
+    "confidence": 0.98,
+    "status": "inferred"
+  },
+  "generation_schedule": {
+    "value": "MBRETCH1 3Cchoice",
+    "source_page": 4,
+    "source_text": "Rate Schedule: MBRETCH1 3Cchoice Time-of-Use (Peak Pricing 4 - 9 p.m. Every Day)",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "statement_date": {
+    "value": "2022-12-09",
+    "source_page": 1,
+    "source_text": "Statement Date: 12/09/2022",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "service_start": {
+    "value": "2022-11-08",
+    "source_page": 3,
+    "source_text": "11/08/2022 - 12/08/2022 (31 billing days)",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "service_end": {
+    "value": "2022-12-08",
+    "source_page": 3,
+    "source_text": "11/08/2022 - 12/08/2022 (31 billing days)",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "billing_days": {
+    "value": 31,
+    "unit": "days",
+    "source_page": 3,
+    "source_text": "11/08/2022 - 12/08/2022 (31 billing days)",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "total_usage": {
+    "value": "327.119",
+    "unit": "kWh",
+    "source_page": 3,
+    "source_text": "Total Usage 327.119000 kWh",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "peak_usage": {
+    "value": "92.965",
+    "unit": "kWh",
+    "source_page": 3,
+    "source_text": "Peak 92.965000 kWh @ $0.39193 $36.44",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "off_peak_usage": {
+    "value": "234.154",
+    "unit": "kWh",
+    "source_page": 3,
+    "source_text": "Off Peak 234.154000 kWh @ $0.37460 $87.71",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "baseline_territory": {
+    "value": "T",
+    "source_page": 3,
+    "source_text": "Baseline Territory T",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "heat_source": {
+    "value": "Basic / not electric",
+    "source_page": 3,
+    "source_text": "Heat Source B - Not Electric",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "baseline_allowance": {
+    "value": "232.50",
+    "unit": "kWh",
+    "source_page": 3,
+    "source_text": "Baseline Allowance 232.50 kWh (31 days x 7.5 kWh/day)",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "daily_baseline_quantity": {
+    "value": "7.5",
+    "unit": "kWh/day",
+    "source_page": 3,
+    "source_text": "31 days x 7.5 kWh/day",
+    "confidence": 1.0,
+    "status": "printed"
+  },
+  "meter_read_status": null,
+  "charges": [
+    {
+      "id": "pge_peak_energy",
+      "section": "pge_delivery",
+      "label": "PG&E peak energy",
+      "period": "2022-11-08 through 2022-12-08",
+      "quantity": {"value": "92.965", "unit": "kWh", "source_page": 3, "source_text": "Peak 92.965000 kWh @ $0.39193 $36.44", "confidence": 1.0, "status": "printed"},
+      "rate": {"value": "0.39193", "unit": "USD/kWh", "source_page": 3, "source_text": "Peak 92.965000 kWh @ $0.39193 $36.44", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "36.44", "unit": "USD", "source_page": 3, "source_text": "Peak 92.965000 kWh @ $0.39193 $36.44", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "pge_off_peak_energy",
+      "section": "pge_delivery",
+      "label": "PG&E off-peak energy",
+      "period": "2022-11-08 through 2022-12-08",
+      "quantity": {"value": "234.154", "unit": "kWh", "source_page": 3, "source_text": "Off Peak 234.154000 kWh @ $0.37460 $87.71", "confidence": 1.0, "status": "printed"},
+      "rate": {"value": "0.37460", "unit": "USD/kWh", "source_page": 3, "source_text": "Off Peak 234.154000 kWh @ $0.37460 $87.71", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "87.71", "unit": "USD", "source_page": 3, "source_text": "Off Peak 234.154000 kWh @ $0.37460 $87.71", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "pge_baseline_credit",
+      "section": "pge_delivery",
+      "label": "PG&E baseline credit",
+      "quantity": {"value": "232.50", "unit": "kWh", "source_page": 3, "source_text": "Baseline Credit 232.500000 kWh @ -$0.09054 -$21.05", "confidence": 1.0, "status": "printed"},
+      "rate": {"value": "-0.09054", "unit": "USD/kWh", "source_page": 3, "source_text": "Baseline Credit 232.500000 kWh @ -$0.09054 -$21.05", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "-21.05", "unit": "USD", "source_page": 3, "source_text": "Baseline Credit 232.500000 kWh @ -$0.09054 -$21.05", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "pge_generation_credit",
+      "section": "pge_delivery",
+      "label": "PG&E generation credit",
+      "quantity": null,
+      "rate": null,
+      "billed_amount": {"value": "-46.45", "unit": "USD", "source_page": 3, "source_text": "Generation Credit -$46.45", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "pge_pcia",
+      "section": "pge_delivery",
+      "label": "Power Charge Indifference Adjustment",
+      "quantity": null,
+      "rate": null,
+      "billed_amount": {"value": "4.53", "unit": "USD", "source_page": 3, "source_text": "Power Charge Indifference Adjustment $4.53", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "pge_franchise_fee",
+      "section": "pge_delivery",
+      "label": "Franchise fee surcharge",
+      "quantity": null,
+      "rate": null,
+      "billed_amount": {"value": "0.32", "unit": "USD", "source_page": 3, "source_text": "Franchise Fee Surcharge $0.32", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "pge_uut",
+      "section": "pge_delivery",
+      "label": "Grover Beach utility users' tax",
+      "quantity": null,
+      "rate": {"value": "0.01000", "unit": "fraction", "source_page": 3, "source_text": "Grover Beach Utility Users' Tax (1.000%) $0.61", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "0.61", "unit": "USD", "source_page": 3, "source_text": "Grover Beach Utility Users' Tax (1.000%) $0.61", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "cca_nov_peak",
+      "section": "cca_generation",
+      "label": "3CE November peak generation",
+      "period": "2022-11-08 through 2022-11-30",
+      "quantity": {"value": "66.850", "unit": "kWh", "source_page": 4, "source_text": "Generation - Peak - Winter 66.850000 kWh @ $0.13800 $9.23", "confidence": 1.0, "status": "printed"},
+      "rate": {"value": "0.13800", "unit": "USD/kWh", "source_page": 4, "source_text": "Generation - Peak - Winter 66.850000 kWh @ $0.13800 $9.23", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "9.23", "unit": "USD", "source_page": 4, "source_text": "Generation - Peak - Winter 66.850000 kWh @ $0.13800 $9.23", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "cca_nov_off_peak",
+      "section": "cca_generation",
+      "label": "3CE November off-peak generation",
+      "period": "2022-11-08 through 2022-11-30",
+      "quantity": {"value": "180.769", "unit": "kWh", "source_page": 4, "source_text": "Generation - Off Peak - Winter 180.769000 kWh @ $0.09000 $16.27", "confidence": 1.0, "status": "printed"},
+      "rate": {"value": "0.09000", "unit": "USD/kWh", "source_page": 4, "source_text": "Generation - Off Peak - Winter 180.769000 kWh @ $0.09000 $16.27", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "16.27", "unit": "USD", "source_page": 4, "source_text": "Generation - Off Peak - Winter 180.769000 kWh @ $0.09000 $16.27", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "cca_nov_energy_commission_tax",
+      "section": "cca_generation",
+      "label": "3CE November Energy Commission tax",
+      "period": "2022-11-08 through 2022-11-30",
+      "quantity": null,
+      "rate": null,
+      "billed_amount": {"value": "0.07", "unit": "USD", "source_page": 4, "source_text": "Energy Commission Tax $0.07", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "cca_nov_uut",
+      "section": "cca_generation",
+      "label": "3CE November utility users' tax",
+      "period": "2022-11-08 through 2022-11-30",
+      "quantity": null,
+      "rate": {"value": "0.01000", "unit": "fraction", "source_page": 4, "source_text": "Grover Beach Utility Users' Tax (1.000%) $0.26", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "0.26", "unit": "USD", "source_page": 4, "source_text": "Grover Beach Utility Users' Tax (1.000%) $0.26", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "cca_dec_peak",
+      "section": "cca_generation",
+      "label": "3CE December peak generation",
+      "period": "2022-12-01 through 2022-12-08",
+      "quantity": {"value": "26.115", "unit": "kWh", "source_page": 4, "source_text": "Generation - Peak - Winter 26.115000 kWh @ $0.13800 $3.60", "confidence": 1.0, "status": "printed"},
+      "rate": {"value": "0.13800", "unit": "USD/kWh", "source_page": 4, "source_text": "Generation - Peak - Winter 26.115000 kWh @ $0.13800 $3.60", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "3.60", "unit": "USD", "source_page": 4, "source_text": "Generation - Peak - Winter 26.115000 kWh @ $0.13800 $3.60", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "cca_dec_off_peak",
+      "section": "cca_generation",
+      "label": "3CE December off-peak generation",
+      "period": "2022-12-01 through 2022-12-08",
+      "quantity": {"value": "53.385", "unit": "kWh", "source_page": 4, "source_text": "Generation - Off Peak - Winter 53.385000 kWh @ $0.09000 $4.80", "confidence": 1.0, "status": "printed"},
+      "rate": {"value": "0.09000", "unit": "USD/kWh", "source_page": 4, "source_text": "Generation - Off Peak - Winter 53.385000 kWh @ $0.09000 $4.80", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "4.80", "unit": "USD", "source_page": 4, "source_text": "Generation - Off Peak - Winter 53.385000 kWh @ $0.09000 $4.80", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "cca_dec_energy_commission_tax",
+      "section": "cca_generation",
+      "label": "3CE December Energy Commission tax",
+      "period": "2022-12-01 through 2022-12-08",
+      "quantity": null,
+      "rate": null,
+      "billed_amount": {"value": "0.02", "unit": "USD", "source_page": 4, "source_text": "Energy Commission Tax $0.02", "confidence": 1.0, "status": "printed"}
+    },
+    {
+      "id": "cca_dec_uut",
+      "section": "cca_generation",
+      "label": "3CE December utility users' tax",
+      "period": "2022-12-01 through 2022-12-08",
+      "quantity": null,
+      "rate": {"value": "0.01000", "unit": "fraction", "source_page": 4, "source_text": "Grover Beach Utility Users' Tax (1.000%) $0.08", "confidence": 1.0, "status": "printed"},
+      "billed_amount": {"value": "0.08", "unit": "USD", "source_page": 4, "source_text": "Grover Beach Utility Users' Tax (1.000%) $0.08", "confidence": 1.0, "status": "printed"}
+    }
+  ],
+  "delivery_subtotal": {"value": "62.11", "unit": "USD", "source_page": 3, "source_text": "Total PG&E Electric Delivery Charges $62.11", "confidence": 1.0, "status": "printed"},
+  "generation_subtotal": {"value": "34.33", "unit": "USD", "source_page": 4, "source_text": "Total Central Coast Community Energy Electric Generation Charges $34.33", "confidence": 1.0, "status": "printed"},
+  "current_charges": {"value": "96.44", "unit": "USD", "source_page": 1, "source_text": "Current PG&E Electric Delivery Charges $62.11; Central Coast Community Energy Electric Generation Charges $34.33", "confidence": 1.0, "status": "printed"},
+  "outstanding_balance": {"value": "-0.20", "unit": "USD", "source_page": 1, "source_text": "Outstanding Credit Balance -$0.20", "confidence": 1.0, "status": "printed"},
+  "amount_due": {"value": "96.24", "unit": "USD", "source_page": 1, "source_text": "Total Amount Due by 12/30/2022 $96.24", "confidence": 1.0, "status": "printed"}
+}

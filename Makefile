@@ -1,0 +1,21 @@
+.PHONY: run audit test lint typecheck build verify
+
+run:
+	python3 -m billhawk
+
+audit:
+	python3 -m billhawk --sample authentic
+
+test:
+	python3 -m pytest
+
+lint:
+	python3 -m ruff check .
+
+typecheck:
+	python3 -m mypy billhawk tests
+
+build:
+	python3 -m compileall -q billhawk tests
+
+verify: test lint typecheck build
