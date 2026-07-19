@@ -129,3 +129,19 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - A support-contract review found that the adapter enforced PG&E and E-TOU-C but did not yet reject a different generation provider or schedule. Added explicit Central Coast Community Energy and MBRETCH1 3Cchoice guards, plus 10 MB and 20-page boundary regressions; all 26 tests pass.
 - A release audit tried building the dormant setuptools metadata and exposed ambiguous flat-layout discovery. Explicit discovery made a wheel, but the wheel correctly revealed a deeper mismatch: the supported audit depends on repository-level immutable sources and fixtures that were never intended as Python package data. Removed the unused build metadata and console-script claim rather than ship a misleading partial distribution; the documented repository commands remain the single supported path and all 26 tests/build checks still pass.
 - Read-only Devpost verification at `2026-07-19T21:41Z` confirmed that submissions remain open through July 21 at 5:00 PM PT, Apps for Your Life is field `27947`, the repository URL is field `27948`, `/feedback` is required in field `27950`, and the required public sub-three-minute YouTube demo needs audio covering both Codex and GPT-5.6. A hosted website and ZIP are not required. The connected account has no BillHawk draft; no Devpost project was created or changed.
+
+## 2026-07-20 - Full static release gate
+
+### Environment
+
+- Created the ignored repository-local `.venv` with Python 3.13.11 after explicit approval and installed `requirements-dev.txt` without changing declared dependency ranges.
+- Resolved Flask 3.1.3, OpenAI 1.109.1, Pydantic 2.13.4, Pytest 9.1.1, Ruff 0.15.22, and MyPy 1.20.2.
+
+### Failures and corrections
+
+- The first `make verify` found eight mechanical import-order findings; Ruff's import fixer corrected only those blocks.
+- Strict MyPy then found two narrowing gaps. The audit now stores only non-null discrepancy deltas, and the validated Flask sample route explicitly narrows its value to the two accepted fixture literals.
+
+### Verification
+
+- `make verify` passes in the isolated environment: 26 tests, zero Ruff findings, zero MyPy issues across 10 source files, and successful bytecode compilation.

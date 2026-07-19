@@ -102,7 +102,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Unsupported-provider test with a useful result.
 - [x] Letter-grounding test.
 - [x] Browser-level happy path from sample upload to review request.
-- [ ] Run test, lint, type-check, and production build.
+- [x] Run test, lint, type-check, and production build.
 - [ ] Test from a clean clone/environment.
 - [x] Confirm no secrets or personal data are tracked.
 
@@ -188,7 +188,7 @@ Do not record the final demo until all answers are **yes**:
 - [x] Does the labeled synthetic fixture produce the exact expected discrepancy?
 - [x] Does missing data lead to an honest limitation rather than a guess?
 - [x] Does the product visibly feel complete across all five steps?
-- [ ] Do test, lint, type-check, and build pass?
+- [x] Do test, lint, type-check, and build pass?
 - [x] Does the README describe exact support and limitations?
 - [ ] Does the video show substantive Codex and GPT-5.6 use?
 - [ ] Is the `/feedback` Session ID saved?

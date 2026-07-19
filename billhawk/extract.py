@@ -8,7 +8,6 @@ from pathlib import Path
 from .fixtures import load_sample
 from .models import BillExtraction
 
-
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 20
 AUTHENTIC_SHA256 = "50cb3a012f46d2ae478079e28b7b109d08fc74ae098d95317a97c2b99175a9e6"

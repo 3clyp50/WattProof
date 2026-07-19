@@ -9,7 +9,6 @@ from typing import Any
 
 from .models import Citation, TariffVersion
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RATE_DATA_PATH = Path(__file__).with_name("data") / "rates.json"
 

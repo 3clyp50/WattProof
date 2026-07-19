@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 from pydantic import BaseModel, ValidationError
@@ -48,7 +48,10 @@ def create_app() -> Flask:
     def sample(kind: str) -> Response | tuple[Response, int]:
         if kind not in {"authentic", "synthetic"}:
             return jsonify(error="Choose the authentic or synthetic sample."), 404
-        return jsonify(extraction=_json_model(load_sample(kind)))
+        sample_kind: Literal["authentic", "synthetic"] = (
+            "authentic" if kind == "authentic" else "synthetic"
+        )
+        return jsonify(extraction=_json_model(load_sample(sample_kind)))
 
     @app.post("/api/extract")
     def extract() -> Response | tuple[Response, int]:

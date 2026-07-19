@@ -14,7 +14,6 @@ from .models import (
 )
 from .tariffs import RateRule, TariffBundle, load_tariff_bundle
 
-
 CENT = Decimal("0.01")
 TOLERANCE = Decimal("0.01")
 
@@ -393,7 +392,7 @@ def audit_bill(
     lines = tariff_lines + reconciliation_lines
 
     tariff_discrepancies = [
-        line
+        line.delta
         for line in tariff_lines
         if line.status == "discrepancy" and line.delta is not None
     ]
@@ -401,7 +400,7 @@ def audit_bill(
         line for line in reconciliation_lines if line.status == "discrepancy"
     ]
     discrepancy_total = round_money(
-        sum((abs(line.delta) for line in tariff_discrepancies), Decimal("0"))
+        sum((abs(delta) for delta in tariff_discrepancies), Decimal("0"))
     )
     has_discrepancy = bool(tariff_discrepancies or reconciliation_discrepancies)
     verdict = "possible_discrepancy" if has_discrepancy else "reconciled"

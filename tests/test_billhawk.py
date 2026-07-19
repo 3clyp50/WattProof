@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from billhawk.audit import UnsupportedBillError, audit_bill, round_money
 from billhawk.app import create_app
+from billhawk.audit import UnsupportedBillError, audit_bill, round_money
 from billhawk.cli import main
 from billhawk.extract import (
     MAX_FILE_BYTES,

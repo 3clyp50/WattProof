@@ -4,7 +4,6 @@ import os
 
 from billhawk.app import create_app
 
-
 app = create_app()
 
 

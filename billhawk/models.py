@@ -6,7 +6,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 EvidenceStatus = Literal["printed", "inferred"]
 AuditStatus = Literal[
     "verified", "discrepancy", "estimated", "cannot_verify", "needs_review"

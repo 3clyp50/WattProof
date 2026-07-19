@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 from .models import BillExtraction
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES_DIR = PROJECT_ROOT / "fixtures"
 
