@@ -14,6 +14,8 @@ from billhawk.audit import UnsupportedBillError, audit_bill, round_money
 from billhawk.app import create_app
 from billhawk.cli import main
 from billhawk.extract import (
+    MAX_FILE_BYTES,
+    MAX_PAGES,
     InvalidDocumentError,
     UnsupportedDocumentError,
     extract_pdf,
@@ -131,6 +133,30 @@ def test_unsupported_provider_returns_useful_limitation() -> None:
 
 
 @pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("generation_provider", "Other CCA", "Central Coast Community Energy"),
+        ("generation_schedule", "Other schedule", "MBRETCH1 3Cchoice"),
+    ],
+)
+def test_unsupported_generation_contract_is_rejected(
+    field: str, value: str, message: str
+) -> None:
+    bill = load_sample("authentic")
+    original = getattr(bill, field)
+    changed = TextFact(
+        value=value,
+        source_page=original.source_page,
+        source_text=original.source_text,
+        confidence=original.confidence,
+        status=original.status,
+    )
+    unsupported = bill.model_copy(update={field: changed})
+    with pytest.raises(UnsupportedBillError, match=message):
+        audit_bill(unsupported)
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("service_start", date(2022, 5, 31)),
@@ -205,6 +231,27 @@ def test_non_pdf_is_rejected(tmp_path: Path) -> None:
     file = tmp_path / "not-a-bill.pdf"
     file.write_text("not a PDF", encoding="utf-8")
     with pytest.raises(InvalidDocumentError, match="Only PDF"):
+        extract_pdf(file)
+
+
+def test_oversized_pdf_is_rejected_before_processing(tmp_path: Path) -> None:
+    file = tmp_path / "too-large.pdf"
+    file.write_bytes(b"%PDF-" + b"x" * MAX_FILE_BYTES)
+    with pytest.raises(InvalidDocumentError, match="10 MB"):
+        extract_pdf(file)
+
+
+def test_excess_page_count_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    file = tmp_path / "too-many-pages.pdf"
+    file.write_bytes(b"%PDF-placeholder")
+
+    def page_count(_path: Path) -> int:
+        return MAX_PAGES + 1
+
+    monkeypatch.setattr("billhawk.extract._page_count", page_count)
+    with pytest.raises(InvalidDocumentError, match="20 pages"):
         extract_pdf(file)
 
 

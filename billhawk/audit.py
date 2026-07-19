@@ -55,6 +55,19 @@ def _validate_supported_bill(bill: BillExtraction, bundle: TariffBundle) -> None
         raise UnsupportedBillError(
             "The MVP supports only PG&E E-TOU-C for this verified rate period."
         )
+    generation_provider = bill.generation_provider.value.lower()
+    if (
+        "central coast community energy" not in generation_provider
+        and "3ce" not in generation_provider
+    ):
+        raise UnsupportedBillError(
+            "The MVP supports Central Coast Community Energy generation only."
+        )
+    generation_schedule = bill.generation_schedule.value.lower()
+    if "mbretch1" not in generation_schedule or "3cchoice" not in generation_schedule:
+        raise UnsupportedBillError(
+            "The MVP supports only the 3CE MBRETCH1 3Cchoice schedule for this bill."
+        )
     if (
         bill.service_start.value < bundle.version.effective_start
         or bill.service_end.value > bundle.version.effective_end

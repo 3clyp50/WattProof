@@ -126,3 +126,4 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 
 - The first clean-clone server harness set `BILLHAWK_PORT`, while `run.py` correctly reads the conventional `PORT` variable. The harness failed its probe, stopped the process, and was rerun successfully with `PORT=8877`; no product change was required.
 - A manual strict-typing pass identified untyped Flask route returns, charge parameters, and the test line-map helper. Those interfaces were annotated and their normal and error paths reran with 22 passing tests while the actual Ruff/MyPy install remained permission-gated.
+- A support-contract review found that the adapter enforced PG&E and E-TOU-C but did not yet reject a different generation provider or schedule. Added explicit Central Coast Community Energy and MBRETCH1 3Cchoice guards, plus 10 MB and 20-page boundary regressions; all 26 tests pass.
