@@ -5,7 +5,9 @@ from decimal import ROUND_HALF_UP, Decimal
 from .models import (
     AuditLine,
     AuditResult,
+    AuditStatus,
     BillExtraction,
+    ChargeLine,
     Citation,
     PlanComparison,
     ReviewRequest,
@@ -25,7 +27,7 @@ def round_money(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
-def _status(delta: Decimal) -> str:
+def _status(delta: Decimal) -> AuditStatus:
     return "verified" if abs(delta) <= TOLERANCE else "discrepancy"
 
 
@@ -66,7 +68,7 @@ def _quantity_rule(
     bill: BillExtraction,
     line_id: str,
     rule: RateRule,
-    billed_line,
+    billed_line: ChargeLine,
     bundle: TariffBundle,
 ) -> AuditLine:
     if line_id == "pge_franchise_fee":
@@ -103,7 +105,7 @@ def _quantity_rule(
 def _percentage_rule(
     line_id: str,
     rule: RateRule,
-    billed_line,
+    billed_line: ChargeLine,
     expected_by_id: dict[str, Decimal],
 ) -> AuditLine:
     base = sum((expected_by_id[item] for item in rule.line_ids), Decimal("0"))

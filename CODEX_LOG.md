@@ -120,3 +120,9 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 
 - `22 passed` across the expanded deterministic, schema, extraction, API, and web contract suite.
 - A fresh clone of milestone commit `ab62720` ran all then-current 19 tests and the Flask smoke path using the existing host dependencies; a true dependency install plus Ruff/MyPy run remains pending permission to create the local development environment.
+- A second fresh clone of submission commit `31b4cf7` ran all 22 tests, started the server, rendered the landing route, and returned the authentic sample API payload using only tracked repository files.
+
+### Failure and correction
+
+- The first clean-clone server harness set `BILLHAWK_PORT`, while `run.py` correctly reads the conventional `PORT` variable. The harness failed its probe, stopped the process, and was rerun successfully with `PORT=8877`; no product change was required.
+- A manual strict-typing pass identified untyped Flask route returns, charge parameters, and the test line-map helper. Those interfaces were annotated and their normal and error paths reran with 22 passing tests while the actual Ruff/MyPy install remained permission-gated.

@@ -4,8 +4,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, render_template, request, send_file
-from pydantic import ValidationError
+from flask import Flask, Response, jsonify, render_template, request, send_file
+from pydantic import BaseModel, ValidationError
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from .audit import UnsupportedBillError, audit_bill
@@ -21,7 +21,7 @@ from .models import BillExtraction
 from .tariffs import SourceIntegrityError
 
 
-def _json_model(model: Any) -> dict[str, Any]:
+def _json_model(model: BaseModel) -> dict[str, Any]:
     return model.model_dump(mode="json")
 
 
@@ -37,7 +37,7 @@ def create_app() -> Flask:
         return render_template("index.html")
 
     @app.get("/sample.pdf")
-    def sample_pdf():
+    def sample_pdf() -> Response:
         return send_file(
             PROJECT_ROOT / "assets/pge-anonymous-3ce-sample-bill.pdf",
             mimetype="application/pdf",
@@ -45,13 +45,13 @@ def create_app() -> Flask:
         )
 
     @app.get("/api/sample/<kind>")
-    def sample(kind: str):
+    def sample(kind: str) -> Response | tuple[Response, int]:
         if kind not in {"authentic", "synthetic"}:
             return jsonify(error="Choose the authentic or synthetic sample."), 404
         return jsonify(extraction=_json_model(load_sample(kind)))
 
     @app.post("/api/extract")
-    def extract():
+    def extract() -> Response | tuple[Response, int]:
         upload = request.files.get("bill")
         if upload is None or not upload.filename:
             return jsonify(error="Choose a PDF bill first."), 400
@@ -66,7 +66,7 @@ def create_app() -> Flask:
         return jsonify(extraction=_json_model(extraction))
 
     @app.post("/api/audit")
-    def audit():
+    def audit() -> Response | tuple[Response, int]:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return jsonify(error="The reviewed extraction is missing."), 400
@@ -74,14 +74,17 @@ def create_app() -> Flask:
         return jsonify(audit=_json_model(audit_bill(extraction)))
 
     @app.errorhandler(RequestEntityTooLarge)
-    def too_large(_error: RequestEntityTooLarge):
+    def too_large(_error: RequestEntityTooLarge) -> tuple[Response, int]:
         return jsonify(error="PDFs are limited to 10 MB."), 413
 
     @app.errorhandler(ValidationError)
-    def validation_error(error: ValidationError):
+    def validation_error(error: ValidationError) -> tuple[Response, int]:
         first = error.errors(include_url=False)[0]
         location = ".".join(str(part) for part in first["loc"])
         return jsonify(error=f"Review {location}: {first['msg']}"), 422
+
+    def reviewable_error(error: Exception) -> tuple[Response, int]:
+        return jsonify(error=str(error)), 422
 
     for error_type in (
         ExtractionUnavailableError,
@@ -90,9 +93,6 @@ def create_app() -> Flask:
         UnsupportedBillError,
         UnsupportedDocumentError,
     ):
-        app.register_error_handler(
-            error_type,
-            lambda error: (jsonify(error=str(error)), 422),
-        )
+        app.register_error_handler(error_type, reviewable_error)
 
     return app

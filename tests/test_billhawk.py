@@ -19,11 +19,11 @@ from billhawk.extract import (
     extract_pdf,
 )
 from billhawk.fixtures import FIXTURES_DIR, PROJECT_ROOT, load_sample
-from billhawk.models import BillExtraction, DateFact, TextFact
+from billhawk.models import AuditLine, AuditResult, BillExtraction, DateFact, TextFact
 from billhawk.tariffs import load_tariff_bundle
 
 
-def _lines(result):
+def _lines(result: AuditResult) -> dict[str, AuditLine]:
     return {line.id: line for line in result.lines}
 
 
