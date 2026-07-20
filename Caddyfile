@@ -1,0 +1,11 @@
+wattproof.tech, www.wattproof.tech {
+	encode zstd gzip
+	header {
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:8000
+}

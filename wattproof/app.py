@@ -32,6 +32,10 @@ def create_app() -> Flask:
         SEND_FILE_MAX_AGE_DEFAULT=0,
     )
 
+    @app.get("/healthz")
+    def health() -> Response:
+        return jsonify(status="ok")
+
     @app.get("/")
     def index() -> str:
         return render_template("index.html")

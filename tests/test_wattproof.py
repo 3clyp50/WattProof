@@ -311,6 +311,13 @@ def test_web_flow_exposes_all_five_steps() -> None:
     assert "Decimal arithmetic handles money" in page
 
 
+def test_health_check() -> None:
+    response = create_app().test_client().get("/healthz")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok"}
+
+
 def test_web_sample_review_to_audit_api() -> None:
     client = create_app().test_client()
     extraction_response = client.get("/api/sample/authentic")
