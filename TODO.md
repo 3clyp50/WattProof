@@ -106,22 +106,22 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 - [x] Test from a clean clone/environment.
 - [x] Confirm no secrets or personal data are tracked.
 
-## P1 — Rate-plan comparison
+## Deliberate post-MVP extensions — rate-plan optimization
 
-- [ ] Implement a second supported PG&E schedule only after the initial audit is correct.
-- [x] Define the usage detail required for a valid comparison.
-- [ ] Compare a bill period using actual printed buckets where available.
-- [x] Do not annualize a single month without an explicit, defensible method and disclaimer.
-- [ ] Show assumptions, source, effective date, and calculation trace.
-- [x] If source data is insufficient, explain how the user can obtain interval usage instead of estimating silently.
+These are not release blockers. The fixture's 4–9 p.m. aggregate bucket cannot reconstruct a different plan's hour window, so implementing a second schedule would create imaginary precision.
 
-## P1 — GPT-5.6 extraction robustness
+- Add another PG&E schedule only with matching interval usage and period-correct sources.
+- Show assumptions, effective dates, sources, and calculation traces when a real comparison becomes supportable.
+- Keep the shipped insufficiency state: it names the required Green Button interval data and does not annualize one month.
 
-- [ ] Add rendered-page vision fallback for scanned PDFs/images.
-- [ ] Compare native text values with vision values when both are available.
-- [ ] Retry or request correction on disagreement rather than choosing silently.
-- [ ] Test digit transpositions, missing negative signs, duplicated lines, and unreadable scans.
-- [x] Establish file-size, page-count, and supported-format limits.
+## Deliberate post-MVP extensions — extraction
+
+The submission supports native PDFs and makes the boundary visible. Scanned-document vision is deferred rather than represented by an unreliable demo path.
+
+- Add rendered-page vision extraction and native-text cross-checking together.
+- On disagreement, request correction instead of silently choosing one reading.
+- Add adversarial fixtures for transposed digits, missing negative signs, duplicated lines, and unreadable scans.
+- Keep the shipped 10 MB, 20-page, native-PDF limits at the trust boundary.
 
 ## P1 — README and judge experience
 

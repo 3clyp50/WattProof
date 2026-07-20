@@ -1,5 +1,7 @@
 # WattProof
 
+[![Verify](https://github.com/3clyp50/WattProof/actions/workflows/verify.yml/badge.svg)](https://github.com/3clyp50/WattProof/actions/workflows/verify.yml)
+
 **WattProof checks the math on household electricity bills.** A user uploads a bill, reviews every material fact with page evidence, and gets a deterministic line-by-line audit against the published tariff that actually governed the billing period.
 
 > GPT-5.6 maps document evidence. Typed Decimal code calculates.
@@ -17,6 +19,12 @@ WattProof is an OpenAI Build Week project for the **Apps for Your Life** track. 
 5. **Act** with an editable, neutral bill-review request whose claims map back to audit lines.
 
 The authentic sample reconciles. A separate structured fixture is visibly labeled synthetic and changes one peak charge from `$36.44` to `$41.44`; WattProof detects exactly `$5.00` and never suggests that this occurred on a real bill.
+
+## Why this matters
+
+A nationally representative [Consumer Reports survey](https://advocacy.consumerreports.org/press_release/new-survey-from-consumer-reports-finds-majority-of-households-strained-by-energy-bills-concerned-over-data-centerss-impact-on-bills/) of 2,146 U.S. adults found that **68%** said home energy costs strained their household finances to some degree. [PG&E says](https://www.pge.com/en/about/company-information/company-profile.html) its gas and electric service reaches approximately **16 million people**.
+
+Dedicated utility-bill auditing exists, but products such as [EnergyCAP](https://www.energycap.com/utility-bill-energy-management-software/features/utility-bill-auditing-software/) and [ENGIE Impact](https://www.engieimpact.com/capabilities/utility-bill-audit-services) frame it as organizational software or services. WattProof's bet is that households deserve the same line-by-line discipline in a consumer-readable flow. The MVP begins with one exact schedule because a narrow result that can be proven is more useful than nationwide coverage that merely looks plausible.
 
 ## Quick start
 
@@ -79,9 +87,10 @@ python -m pip install -r requirements-dev.txt
 make verify
 ```
 
-`make verify` runs pytest, Ruff, strict MyPy with the Pydantic plugin, and Python bytecode compilation. The regression suite covers:
+`make verify` runs pytest, Ruff, strict MyPy with the Pydantic plugin, and Python bytecode compilation. The same gate runs publicly on Python 3.12 and 3.13 through GitHub Actions. The regression suite covers:
 
 - golden PDF extraction and hand-checked audit output;
+- the GPT-5.6 strict-schema contract, `store=False`, and trusted document metadata;
 - tariff snapshot hash integrity and effective-period boundaries;
 - Decimal half-up rounding;
 - the exact `$5.00` synthetic discrepancy without double-counting its subtotal symptom;

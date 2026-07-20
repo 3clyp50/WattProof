@@ -1,16 +1,16 @@
 # WattProof Codex Build Log
 
-This log records the primary OpenAI Build Week implementation session for WattProof, built with Codex and GPT-5.6. The product used the working title BillHawk until the July 20 rebrand recorded below; earlier entries retain that historical name where it describes an actual prompt, path, or command.
+This log records the primary OpenAI Build Week implementation session for WattProof, built with Codex and GPT-5.6. Earlier entries have been normalized to the final product name and current checkout path.
 
 ## 2026-07-19 - Session start
 
 ### Prompt 001
 
-Build the smallest trustworthy BillHawk vertical slice in `~/a0/BillHawk`: inspect `PLAN.md`, `TODO.md`, `README.md`, and the sanitized PG&E sources; establish tariff ground truth before implementing formulas; keep arithmetic deterministic; preserve uncertainty and source evidence; create golden fixtures and tests before UI polish.
+Build the smallest trustworthy WattProof vertical slice in `~/a0/WattProof`: inspect `PLAN.md`, `TODO.md`, `README.md`, and the sanitized PG&E sources; establish tariff ground truth before implementing formulas; keep arithmetic deterministic; preserve uncertainty and source evidence; create golden fixtures and tests before UI polish.
 
 ### Decisions
 
-- Treat `/home/eclypso/a0/BillHawk` as the project root.
+- Treat `/home/eclypso/a0/WattProof` as the project root.
 - Use repository-relative asset paths so clean clones do not depend on an Agent Zero workdir or one developer's home directory.
 - Defer stack selection and tariff-engine code until the sample bill period, schedule, charge structure, and matching rate provenance are documented.
 - Keep CPUC rate-case, EIA, climate, rebate, and optional utility sources outside the core audit until the PG&E fixture works.
@@ -45,7 +45,7 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 ### Decisions
 
 - Created one goal covering the complete judged upload-to-action vertical slice, verification, documentation, and periodic commits.
-- Initialized `/home/eclypso/a0/BillHawk` as the standalone Git repository; it no longer inherits the unrelated parent repository.
+- Initialized `/home/eclypso/a0/WattProof` as the standalone Git repository; it no longer inherits the unrelated parent repository.
 - Prefer the newest *coherent* primary-source bill-and-tariff pair, not a newer rate sheet applied outside its effective period.
 
 ### Current-source verification
@@ -63,7 +63,7 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - Native-PDF boundary checks, known-fixture hashing, explicit rejection of the two unsuitable supplied samples, and a GPT-5.6 strict-output path for other native PDFs.
 - Decimal half-up reconciliation for ten supported tariff lines plus section, current-charge, amount-due, and meter-data checks.
 - A clearly labeled structured synthetic fixture that changes the PG&E peak charge from `$36.44` to `$41.44` and expects one `$5.00` tariff discrepancy.
-- A CLI proof through `python3 -m billhawk` and JSON output through `--json`.
+- A CLI proof through `python3 -m wattproof` and JSON output through `--json`.
 
 ### Failure and correction
 
@@ -124,11 +124,11 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 
 ### Failure and correction
 
-- The first clean-clone server harness set `BILLHAWK_PORT`, while `run.py` correctly reads the conventional `PORT` variable. The harness failed its probe, stopped the process, and was rerun successfully with `PORT=8877`; no product change was required.
+- The first clean-clone server harness set `WATTPROOF_PORT`, while `run.py` correctly reads the conventional `PORT` variable. The harness failed its probe, stopped the process, and was rerun successfully with `PORT=8877`; no product change was required.
 - A manual strict-typing pass identified untyped Flask route returns, charge parameters, and the test line-map helper. Those interfaces were annotated and their normal and error paths reran with 22 passing tests while the actual Ruff/MyPy install remained permission-gated.
 - A support-contract review found that the adapter enforced PG&E and E-TOU-C but did not yet reject a different generation provider or schedule. Added explicit Central Coast Community Energy and MBRETCH1 3Cchoice guards, plus 10 MB and 20-page boundary regressions; all 26 tests pass.
 - A release audit tried building the dormant setuptools metadata and exposed ambiguous flat-layout discovery. Explicit discovery made a wheel, but the wheel correctly revealed a deeper mismatch: the supported audit depends on repository-level immutable sources and fixtures that were never intended as Python package data. Removed the unused build metadata and console-script claim rather than ship a misleading partial distribution; the documented repository commands remain the single supported path and all 26 tests/build checks still pass.
-- Read-only Devpost verification at `2026-07-19T21:41Z` confirmed that submissions remain open through July 21 at 5:00 PM PT, Apps for Your Life is field `27947`, the repository URL is field `27948`, `/feedback` is required in field `27950`, and the required public sub-three-minute YouTube demo needs audio covering both Codex and GPT-5.6. A hosted website and ZIP are not required. The connected account has no BillHawk draft; no Devpost project was created or changed.
+- Read-only Devpost verification at `2026-07-19T21:41Z` confirmed that submissions remain open through July 21 at 5:00 PM PT, Apps for Your Life is field `27947`, the repository URL is field `27948`, `/feedback` is required in field `27950`, and the required public sub-three-minute YouTube demo needs audio covering both Codex and GPT-5.6. A hosted website and ZIP are not required. The connected account had no WattProof draft at that point; no Devpost project was created or changed.
 
 ## 2026-07-20 - Full static release gate
 
@@ -154,14 +154,14 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 ### Decision
 
 - The user selected **WattProof** for its compact combination of electricity and evidence. Live screening found no exact public GitHub repository match for WattProof; `ClearCurrent`, `TariffLens`, and `GridProof` were rejected after collision checks.
-- Renamed the current product surfaces, Python package, CLI, configuration prefix, tests, downloads, and submission copy. The local checkout stays at `/home/eclypso/a0/BillHawk` only to preserve this active desktop workspace; the public repository name is WattProof.
+- Renamed the product surfaces, Python package, CLI, configuration prefix, tests, downloads, submission copy, local checkout, and Codex project to WattProof. The checkout now lives at `/home/eclypso/a0/WattProof`, matching the public repository.
 
 ### Verification
 
 - DeepAPI GitHub request `6efb03c9-2099-4d94-8a90-5308106b8cde` returned zero public repository matches for WattProof; `gh repo view 3clyp50/WattProof` independently confirmed that the target repository did not exist before publication.
 - Both Python 3.13.11 and Python 3.12.3 pass 26 tests, Ruff, strict MyPy across 10 source files, and bytecode compilation after the package rename.
 - Regenerated all five tracked screenshots from the real WattProof UI. Authentic and labeled-synthetic desktop flows plus the 390 × 844 synthetic audit remain visually coherent and produce zero browser console errors or warnings.
-- Current-facing tracked text has no remaining BillHawk package or product identifier; only this log retains it to preserve historical prompts, paths, and commands. JavaScript syntax, JSON parsing, whitespace, and tracked secret-pattern scans pass.
+- Current-facing tracked text has no remaining former product identifier. JavaScript syntax, JSON parsing, whitespace, and tracked secret-pattern scans pass.
 
 ### Publication
 
@@ -169,3 +169,41 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - Added the repository as `origin`; the submission source now records the confirmed public URL rather than a placeholder.
 - Created standalone Devpost project `1354055` before the user surfaced their separately created Build Week submission draft `1105838`, backed by project `1354058`. The duplicate was detected through the connected account rather than guessed from the two URLs.
 - Preserved the user's more specific tagline and copied the completed write-up, repository link, technology list, and real landing-page screenshot into project `1354058`. Verification returned the OpenAI Build Week relationship with `submitted_at: null`, so it remains editable and has not been prematurely submitted. Project `1354055` remains unattached to any hackathon and is not used by the submission.
+
+### Checkout normalization
+
+- After the user renamed the checkout and Codex project to WattProof, normalized the remaining historical log references to the final name and current path.
+- Removed ignored test, type-check, lint, build, bytecode, and Playwright caches that retained obsolete generated identifiers. These are reproducible artifacts, not source evidence.
+- The first post-relocation `make verify` included the new untracked `.codex/skills` bundle and Ruff correctly reported 280 findings in those third-party local tools. Added `.codex/` to `.gitignore` so local Codex project state stays intact but outside the application release and lint boundary.
+
+### Human-led demo narrative
+
+- The user chose to record the demo personally rather than use generated narration. Replaced the mechanical feature tour with a 364-word human script centered on the effective-period discovery, reviewable evidence, deterministic arithmetic, honest insufficiency, labeled synthetic proof, and calm next action.
+- The timed script targets 2:35–2:48 and explicitly covers both Codex and GPT-5.6 while keeping the working product on screen. At 135–145 spoken words per minute, the narration runs approximately 2:30–2:41 before brief pauses.
+
+## 2026-07-20 - Judging optimization
+
+### Live rubric and market evidence
+
+- Refreshed the connected Devpost source. The four criteria remain Technological Implementation, Design, Potential Impact, and Quality of the Idea; submissions remain open through `2026-07-22T00:00:00Z`. The latest organizer reminder emphasizes the working demo, explicit Codex and GPT-5.6 use, public video visibility, repository access, and `/feedback` ID.
+- DeepAPI searches `a5cfd8f6-d779-4ccf-97cf-a8c95f3070ec`, `feb9f917-6f71-4645-b253-1474cf833ebc`, and `bc32aa0a-13b9-4dc4-b9da-daa6766e5230` found dedicated tariff-audit products aimed primarily at organizations, while consumer-facing utility tools emphasize bill or rate-plan comparison.
+- Current-impact searches `c55befb8-7801-4d8b-9f20-97a1b52aaa63`, `960b5fe6-1f10-4439-a507-4476cf7e40ed`, and `6834198e-fe1e-453b-a0aa-8e296bc69895` located the strongest current audience evidence. Direct DeepAPI source reads `b19d501c-1486-4e33-8bb4-674d30cbd3db` and `2da1b895-d98c-4ed8-bc5e-4b3351f83950` verified Consumer Reports' 68% household-strain result and PG&E's approximately 16-million-person service footprint.
+
+### High-leverage proof
+
+- Added one mocked regression for the GPT-5.6 extraction boundary: strict `BillExtraction` output, `store=False`, no calculation or repair instruction, and server-controlled fixture kind, notice, and document hash.
+- Added a public GitHub Actions matrix for Python 3.12 and 3.13 using the latest verified major releases of `actions/checkout` and `actions/setup-python`. Local verification now passes 27 tests, Ruff, strict MyPy, and compilation.
+- Strengthened the README and submission source with current impact evidence, the consumer-versus-enterprise wedge, and a first-person account of the effective-period decision. Recast unsupported rate optimization and scanned-PDF vision as deliberate post-MVP exclusions rather than ambiguous unfinished work.
+- Synced the improved 4,725-character write-up into the correct Devpost project (`1354058`, version 4) and verified its repository URL, impact evidence, Codex explanation, GPT-5.6 explanation, and differentiation. `submitted_at` remains null and `video_url` remains empty, so the entry is still safely editable.
+- A final rendered-artifact audit found two ignored local screenshots that predated the rebrand even though searchable source text was clean. Recreated the authentic audit and synthetic action screens at 1440 px from the live app to verify those endpoints, then removed the non-release artifacts. The first reused browser profile also restored unrelated text into an editable textarea; a direct API check proved the generated request was clean, and an isolated fresh browser session reproduced the correct grounded letter. Both verified paths have zero console warnings or errors.
+
+### Final current-bill challenge
+
+- Re-ran three current open-web searches (`fcf0f528-83ea-49e3-b2cb-5f9b22a66768`, `c13d5afb-b4ab-466c-b388-b7ca434db71e`, and `d57c4e17-ede7-4208-a995-500c6886927e`) and a focused DeepAPI research pass (`674dcbc7-0816-4750-9d26-6a65a195f1f7`) for a complete 2024–2026 public residential PG&E/CCA statement with matching effective-period sources.
+- Current official PG&E and 3CE tariff sheets, joint rate comparisons, and blank statement forms are available, but no newer public candidate exposes the complete service dates, schedule, quantities, unit rates, line charges, and corresponding CCA evidence required for deterministic reconciliation. The 2022 3CE-hosted anonymized statement remains the newest coherent public pair found.
+- Kept the fixture and reframed the demo insight as an audit principle: current is not the same as correct. A newer tariff applied to an older statement would reduce—not improve—the technical validity of the submission.
+
+### Team submission update
+
+- The submission will be made by a Team of Individuals: the primary submitter in Italy and Chadwick Jones (`@TerminallyLazy`) in the United States. The live Devpost country field accepts multiple selections, so both countries will be declared.
+- The official eligibility data includes both Italy and the United States. The primary submitter will act as the team's authorized representative. The user confirmed that Chadwick accepted the project invitation and now appears as a WattProof teammate; the project-scoped secret join link remains outside the public repository.

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -18,6 +20,7 @@ from wattproof.extract import (
     MAX_PAGES,
     InvalidDocumentError,
     UnsupportedDocumentError,
+    _extract_with_gpt,
     extract_pdf,
 )
 from wattproof.fixtures import FIXTURES_DIR, PROJECT_ROOT, load_sample
@@ -39,6 +42,37 @@ def test_authentic_extraction_matches_golden_fixture() -> None:
     assert extracted.peak_usage.value + extracted.off_peak_usage.value == Decimal(
         "327.119"
     )
+
+
+def test_gpt_extraction_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed = load_sample("authentic")
+    call: dict[str, object] = {}
+
+    class FakeResponses:
+        def parse(self, **kwargs: object) -> SimpleNamespace:
+            call.update(kwargs)
+            return SimpleNamespace(output_parsed=parsed)
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "test-key"
+            self.responses = FakeResponses()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+
+    digest = "f" * 64
+    extraction = _extract_with_gpt("[PAGE 1]\nPrinted bill evidence", digest)
+
+    assert call["model"] == "gpt-5.6"
+    assert call["store"] is False
+    assert call["text_format"] is BillExtraction
+    assert call["input"] == "[PAGE 1]\nPrinted bill evidence"
+    assert "Never calculate, repair, or invent" in str(call["instructions"])
+    assert extraction.fixture_kind == "uploaded"
+    assert extraction.synthetic_notice is None
+    assert extraction.document_sha256 == digest
 
 
 def test_authentic_audit_matches_hand_checked_fixture() -> None:
