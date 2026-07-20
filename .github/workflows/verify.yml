@@ -23,3 +23,32 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install --yes poppler-utils
       - run: python -m pip install -r requirements-dev.txt
       - run: make verify
+
+  deploy:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: wattproof-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Configure deployment SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.WATTPROOF_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.WATTPROOF_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/wattproof_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/wattproof_deploy ~/.ssh/known_hosts
+
+      - name: Deploy verified commit
+        env:
+          DEPLOY_HOST: ${{ secrets.WATTPROOF_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.WATTPROOF_DEPLOY_USER }}
+        run: |
+          ssh -i ~/.ssh/wattproof_deploy -o IdentitiesOnly=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd /srv/wattproof/app && git fetch --quiet origin main && git checkout --force --detach '$GITHUB_SHA' && docker compose up --detach --build --remove-orphans && docker image prune --force"

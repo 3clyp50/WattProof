@@ -207,3 +207,19 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 
 - The submission will be made by a Team of Individuals: the primary submitter in Italy and Chadwick Jones (`@TerminallyLazy`) in the United States. The live Devpost country field accepts multiple selections, so both countries will be declared.
 - The official eligibility data includes both Italy and the United States. The primary submitter will act as the team's authorized representative. The user confirmed that Chadwick accepted the project invitation and now appears as a WattProof teammate; the project-scoped secret join link remains outside the public repository.
+
+## 2026-07-20 - Production judge demo
+
+### Deployment
+
+- Pointed `wattproof.tech` and `www.wattproof.tech` at the Debian 13 Google Cloud VM and verified both DNS answers. The provider's 900-second TTL is short enough for launch and requires no special handling.
+- Built a non-root Python 3.13 and Gunicorn container with Poppler, bound it only to the VM loopback interface, and placed Caddy in front for automatic HTTPS and security headers.
+- Added a minimal GitHub Actions deployment job. A push to `main` can reach production only after both Python verification jobs pass; the server then checks out the exact verified commit before rebuilding the container.
+- Kept `OPENAI_API_KEY` unset on the public host. Authentic, synthetic, and known-public-PDF paths remain fully functional, while unknown documents fail safely instead of exposing an unauthenticated paid inference endpoint.
+
+### Verification
+
+- The production container reported healthy and served the committed `/healthz` response through both loopback and `https://wattproof.tech`.
+- HTTPS returned HTTP/2 `200` for both apex and `www`; plain HTTP returned a permanent redirect to HTTPS. The served sample PDF's SHA-256 matched the tracked source exactly.
+- The real public endpoints reconciled the authentic fixture, returned `cannot_verify` for unsupported plan comparison, preserved required user review, detected exactly `$5.00` in the labeled synthetic fixture, and extracted E-TOU-C from an actual upload of the known public PDF.
+- A fresh Chromium production pass completed the authentic review-to-audit interaction at desktop width, rendered the landing page at 390 px, and reported zero console errors or warnings.

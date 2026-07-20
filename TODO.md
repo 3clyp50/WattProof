@@ -133,7 +133,7 @@ The submission supports native PDFs and makes the boundary visible. Scanned-docu
 - [x] Explain: GPT-5.6 reads and drafts; deterministic code validates and calculates.
 - [x] Explain how Codex accelerated tariff implementation, schemas, tests, debugging, and product development.
 - [x] Include sample screenshots/GIF only after the UI is final.
-- [x] Provide a hosted demo or a judge-friendly local/sandbox route.
+- [x] Provide the live HTTPS demo at `https://wattproof.tech` plus a judge-friendly local route.
 
 ## P1 — Submission package
 

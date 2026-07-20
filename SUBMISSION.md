@@ -11,10 +11,11 @@ This file is the source of truth for the Devpost entry and demo recording. Repla
 - **Countries of residence:** Italy; United States (multi-select field)
 - **Category:** Apps for Your Life
 - **Repository:** https://github.com/3clyp50/WattProof
+- **Live demo:** https://wattproof.tech
 - **Devpost project:** https://devpost.com/software/wattproof-xtw6ib
 - **Demo video:** `TODO(submission): public YouTube URL, under three minutes`
 - **Primary Codex feedback Session ID:** `TODO(submission): run /feedback in the main build session`
-- **Judge testing instructions:** No credentials or API key are required. Clone the repository, install `poppler-utils`, create a Python 3.12+ virtual environment, install `requirements.txt`, run `make run`, open `http://127.0.0.1:8000`, and click **Audit authentic sample**. The complete authentic and labeled-synthetic paths run locally without network access.
+- **Judge testing instructions:** Open https://wattproof.tech and click **Audit authentic sample**; no credentials or API key are required for the complete authentic and labeled-synthetic paths. The known public PDF can also be uploaded directly. For local verification, clone the repository, install `poppler-utils`, create a Python 3.12+ virtual environment, install `requirements.txt`, run `make run`, and open `http://127.0.0.1:8000`.
 
 ## Live Devpost requirements
 

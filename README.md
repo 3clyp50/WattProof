@@ -2,6 +2,8 @@
 
 [![Verify](https://github.com/3clyp50/WattProof/actions/workflows/verify.yml/badge.svg)](https://github.com/3clyp50/WattProof/actions/workflows/verify.yml)
 
+**Live demo:** [wattproof.tech](https://wattproof.tech) — no credentials or API key are required for the authentic and labeled-synthetic audit paths.
+
 **WattProof checks the math on household electricity bills.** A user uploads a bill, reviews every material fact with page evidence, and gets a deterministic line-by-line audit against the published tariff that actually governed the billing period.
 
 > GPT-5.6 maps document evidence. Typed Decimal code calculates.
@@ -62,6 +64,8 @@ make run
 
 WattProof sends unknown native-PDF text to the OpenAI Responses API with strict Pydantic output and `store=False`. The bundled known fixture is recognized by SHA-256 and stays entirely local.
 
+The public deployment intentionally has no OpenAI API key, so it accepts the known public PDF but returns a controlled extraction-unavailable error for unknown bills. This keeps the judge demo reproducible and prevents an unauthenticated endpoint from spending API credits.
+
 ## CLI proof
 
 The same engine runs headlessly:
@@ -99,6 +103,8 @@ make verify
 - Flask upload, review-validation, audit, and five-step page contracts.
 
 A real Chromium pass also covers the authentic sample, actual PDF upload, synthetic discrepancy, rejection state, mobile layout, plan insufficiency, action letter, and copy control. Rendered evidence is under `output/playwright/`.
+
+The live app runs from the repository's non-root Docker image behind Caddy-managed HTTPS. Pushes to `main` deploy the exact commit only after the public Python 3.12 and 3.13 verification matrix passes.
 
 ## Exact support boundary
 
