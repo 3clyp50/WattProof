@@ -63,16 +63,20 @@ def test_gpt_extraction_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
 
     digest = "f" * 64
-    extraction = _extract_with_gpt("[PAGE 1]\nPrinted bill evidence", digest)
+    extraction = _extract_with_gpt(
+        "[PAGE 1]\nPrinted bill evidence", digest, page_count=2
+    )
 
     assert call["model"] == "gpt-5.6"
     assert call["store"] is False
     assert call["text_format"] is BillExtraction
     assert call["input"] == "[PAGE 1]\nPrinted bill evidence"
     assert "Never calculate, repair, or invent" in str(call["instructions"])
+    assert "trusted page count 2" in str(call["instructions"])
     assert extraction.fixture_kind == "uploaded"
     assert extraction.synthetic_notice is None
     assert extraction.document_sha256 == digest
+    assert extraction.page_count == 2
 
 
 def test_authentic_audit_matches_hand_checked_fixture() -> None:

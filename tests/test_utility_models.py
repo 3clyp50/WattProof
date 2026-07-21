@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -12,6 +13,7 @@ from wattproof.models import BillExtraction, EvidenceBase
 from wattproof.utility_models import (
     CalculationSpec,
     DateFactV2,
+    DecimalFactV2,
     EvidenceRef,
     FactBaseV2,
     IntegerFactV2,
@@ -82,6 +84,16 @@ def test_legacy_translation_preserves_pg_and_e_statement() -> None:
     assert translated.sections[0].usage.value == Decimal("327.119")
     assert translated.current_charges.value == Decimal("96.44")
     assert translated.amount_due.value == Decimal("96.24")
+
+
+def test_legacy_translation_preserves_authoritative_page_count() -> None:
+    legacy = load_sample("authentic")
+
+    translated = translate_legacy_bill(legacy)
+
+    assert max(line.billed_amount.source_page for line in legacy.charges) == 4
+    assert legacy.page_count == 6
+    assert translated.page_count == 6
 
 
 def test_legacy_translation_preserves_charge_math_and_evidence() -> None:
@@ -221,6 +233,26 @@ def test_legacy_non_corrected_fact_rejects_original_value(status: str) -> None:
         BillExtraction.model_validate(payload)
 
 
+def test_legacy_bill_requires_pge_delivery_charge() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload["charges"] = [
+        charge for charge in payload["charges"] if charge["section"] != "pge_delivery"
+    ]
+
+    with pytest.raises(ValidationError, match="at least one pge_delivery charge"):
+        BillExtraction.model_validate(payload)
+
+
+def test_legacy_bill_requires_cca_generation_charge() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload["charges"] = [
+        charge for charge in payload["charges"] if charge["section"] != "cca_generation"
+    ]
+
+    with pytest.raises(ValidationError, match="at least one cca_generation charge"):
+        BillExtraction.model_validate(payload)
+
+
 def test_document_rejects_duplicate_charge_ids() -> None:
     bill = translate_legacy_bill(load_sample("authentic"))
     duplicate = bill.sections[0].charges[0].model_copy(
@@ -253,6 +285,97 @@ def test_percent_calculation_requires_charge_ids() -> None:
 def test_quantity_times_rate_rejects_charge_ids() -> None:
     with pytest.raises(ValidationError, match="charge_ids"):
         CalculationSpec(kind="quantity_times_rate", charge_ids=("other_charge",))
+
+
+def test_quantity_times_rate_requires_quantity() -> None:
+    amount = MoneyFactV2(
+        value=Decimal("10.00"), currency="USD", status="printed", evidence=evidence()
+    )
+    rate = DecimalFactV2(
+        value=Decimal("5.00"), unit="USD/kgal", status="printed", evidence=evidence()
+    )
+
+    with pytest.raises(ValidationError, match="requires both quantity and rate"):
+        UtilityCharge(
+            id="water_usage",
+            label="Water usage",
+            rate=rate,
+            amount=amount,
+            calculation=CalculationSpec(kind="quantity_times_rate"),
+        )
+
+
+def test_quantity_times_rate_requires_rate() -> None:
+    amount = MoneyFactV2(
+        value=Decimal("10.00"), currency="USD", status="printed", evidence=evidence()
+    )
+    quantity = DecimalFactV2(
+        value=Decimal("2"), unit="kgal", status="printed", evidence=evidence()
+    )
+
+    with pytest.raises(ValidationError, match="requires both quantity and rate"):
+        UtilityCharge(
+            id="water_usage",
+            label="Water usage",
+            quantity=quantity,
+            amount=amount,
+            calculation=CalculationSpec(kind="quantity_times_rate"),
+        )
+
+
+def test_quantity_times_rate_accepts_both_operands() -> None:
+    amount = MoneyFactV2(
+        value=Decimal("10.00"), currency="USD", status="printed", evidence=evidence()
+    )
+    quantity = DecimalFactV2(
+        value=Decimal("2"), unit="kgal", status="printed", evidence=evidence()
+    )
+    rate = DecimalFactV2(
+        value=Decimal("5.00"), unit="USD/kgal", status="printed", evidence=evidence()
+    )
+
+    charge = UtilityCharge(
+        id="water_usage",
+        label="Water usage",
+        quantity=quantity,
+        rate=rate,
+        amount=amount,
+        calculation=CalculationSpec(kind="quantity_times_rate"),
+    )
+
+    assert charge.quantity == quantity
+    assert charge.rate == rate
+
+
+def document_with_percent_references(charge_ids: tuple[str, ...]) -> dict[str, Any]:
+    payload = translate_legacy_bill(load_sample("authentic")).model_dump()
+    for section in payload["sections"]:
+        for charge in section["charges"]:
+            if charge["id"] == "cca_nov_uut":
+                charge["calculation"]["charge_ids"] = charge_ids
+                return payload
+    raise AssertionError("cca_nov_uut fixture charge not found")
+
+
+def test_document_rejects_unknown_percent_charge_reference() -> None:
+    with pytest.raises(ValidationError, match="unknown charge ID"):
+        UtilityDocument.model_validate(
+            document_with_percent_references(("missing_charge",))
+        )
+
+
+def test_document_rejects_duplicate_percent_charge_references() -> None:
+    with pytest.raises(ValidationError, match="charge_ids must be unique"):
+        UtilityDocument.model_validate(
+            document_with_percent_references(("cca_nov_peak", "cca_nov_peak"))
+        )
+
+
+def test_document_rejects_self_referencing_percent_charge() -> None:
+    with pytest.raises(ValidationError, match="cannot reference its own charge ID"):
+        UtilityDocument.model_validate(
+            document_with_percent_references(("cca_nov_uut",))
+        )
 
 
 def test_document_rejects_evidence_after_last_page() -> None:

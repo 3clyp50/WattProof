@@ -146,40 +146,6 @@ def _supplemental_facts(bill: BillExtraction) -> tuple[NamedFactV2, ...]:
     return tuple(facts)
 
 
-def _evidence_facts(bill: BillExtraction) -> tuple[EvidenceBase, ...]:
-    facts: list[EvidenceBase] = [
-        bill.delivery_provider,
-        bill.generation_provider,
-        bill.delivery_schedule,
-        bill.generation_schedule,
-        bill.statement_date,
-        bill.service_start,
-        bill.service_end,
-        bill.billing_days,
-        bill.total_usage,
-        bill.peak_usage,
-        bill.off_peak_usage,
-        bill.baseline_territory,
-        bill.heat_source,
-        bill.baseline_allowance,
-        bill.daily_baseline_quantity,
-        bill.delivery_subtotal,
-        bill.generation_subtotal,
-        bill.current_charges,
-        bill.outstanding_balance,
-        bill.amount_due,
-    ]
-    if bill.meter_read_status is not None:
-        facts.append(bill.meter_read_status)
-    for line in bill.charges:
-        if line.quantity is not None:
-            facts.append(line.quantity)
-        if line.rate is not None:
-            facts.append(line.rate)
-        facts.append(line.billed_amount)
-    return tuple(facts)
-
-
 def translate_legacy_bill(bill: BillExtraction) -> UtilityDocument:
     """Translate a schema-1 PG&E extraction without tariff lookup or arithmetic."""
 
@@ -219,7 +185,7 @@ def translate_legacy_bill(bill: BillExtraction) -> UtilityDocument:
         schema_version="2.0",
         fixture_kind=bill.fixture_kind,
         document_sha256=bill.document_sha256,
-        page_count=max(fact.source_page for fact in _evidence_facts(bill)),
+        page_count=bill.page_count,
         statement_date=_date_fact(bill.statement_date),
         currency=bill.current_charges.unit,
         sections=sections,

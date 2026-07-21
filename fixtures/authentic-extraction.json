@@ -3,6 +3,7 @@
   "fixture_kind": "authentic",
   "synthetic_notice": null,
   "document_sha256": "50cb3a012f46d2ae478079e28b7b109d08fc74ae098d95317a97c2b99175a9e6",
+  "page_count": 6,
   "delivery_provider": {
     "value": "Pacific Gas and Electric Company",
     "source_page": 3,

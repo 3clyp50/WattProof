@@ -109,6 +109,16 @@ class UtilityCharge(BaseModel):
     amount: MoneyFactV2
     calculation: CalculationSpec | None = None
 
+    @model_validator(mode="after")
+    def validate_calculation_operands(self) -> Self:
+        if (
+            self.calculation is not None
+            and self.calculation.kind == "quantity_times_rate"
+            and (self.quantity is None or self.rate is None)
+        ):
+            raise ValueError("quantity_times_rate requires both quantity and rate")
+        return self
+
 
 class MeterCheck(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -202,6 +212,31 @@ class UtilityDocument(BaseModel):
         charge_ids = [charge.id for section in self.sections for charge in section.charges]
         if len(charge_ids) != len(set(charge_ids)):
             raise ValueError("charge IDs must be unique across all sections")
+
+        known_charge_ids = set(charge_ids)
+        for section in self.sections:
+            for charge in section.charges:
+                calculation = charge.calculation
+                if calculation is None or calculation.kind != "percent_of_charges":
+                    continue
+                references = calculation.charge_ids
+                if len(references) != len(set(references)):
+                    raise ValueError(
+                        "percent_of_charges charge_ids must be unique"
+                    )
+                if charge.id in references:
+                    raise ValueError(
+                        "percent_of_charges cannot reference its own charge ID"
+                    )
+                unknown = [
+                    reference
+                    for reference in references
+                    if reference not in known_charge_ids
+                ]
+                if unknown:
+                    raise ValueError(
+                        f"percent_of_charges references unknown charge ID: {unknown[0]}"
+                    )
 
         nested = tuple(_walk_nested(self))
         if any(

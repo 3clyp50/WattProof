@@ -78,7 +78,9 @@ def _native_text(path: Path) -> str:
     return marked
 
 
-def _extract_with_gpt(text: str, document_sha256: str) -> BillExtraction:
+def _extract_with_gpt(
+    text: str, document_sha256: str, *, page_count: int
+) -> BillExtraction:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise ExtractionUnavailableError(
@@ -98,7 +100,8 @@ def _extract_with_gpt(text: str, document_sha256: str) -> BillExtraction:
             "the shortest supporting source text and preserve its [PAGE n] number. "
             "Mark a schedule as inferred if the bill prints only its description. "
             "Use fixture_kind='uploaded', synthetic_notice=null, and the supplied "
-            f"document SHA-256 {document_sha256}. Never calculate, repair, or invent "
+            f"document SHA-256 {document_sha256} and trusted page count {page_count}. "
+            "Never calculate, repair, or invent "
             "a value. Use null for a missing meter-read status."
         ),
         input=text,
@@ -110,6 +113,7 @@ def _extract_with_gpt(text: str, document_sha256: str) -> BillExtraction:
     raw["fixture_kind"] = "uploaded"
     raw["synthetic_notice"] = None
     raw["document_sha256"] = document_sha256
+    raw["page_count"] = page_count
     return BillExtraction.model_validate(raw)
 
 
@@ -132,4 +136,4 @@ def extract_pdf(path: str | Path) -> BillExtraction:
     pages = _page_count(pdf_path)
     if pages > MAX_PAGES:
         raise InvalidDocumentError(f"PDFs are limited to {MAX_PAGES} pages.")
-    return _extract_with_gpt(_native_text(pdf_path), digest)
+    return _extract_with_gpt(_native_text(pdf_path), digest, page_count=pages)

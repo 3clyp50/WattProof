@@ -69,6 +69,7 @@ class BillExtraction(BaseModel):
     fixture_kind: Literal["authentic", "synthetic", "uploaded"]
     synthetic_notice: str | None = None
     document_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    page_count: int = Field(ge=1, le=20)
     delivery_provider: TextFact
     generation_provider: TextFact
     delivery_schedule: TextFact
@@ -111,6 +112,13 @@ class BillExtraction(BaseModel):
         charge_ids = [line.id for line in self.charges]
         if len(charge_ids) != len(set(charge_ids)):
             raise ValueError("charge line IDs must be unique")
+
+        charge_sections = {line.section for line in self.charges}
+        for required_section in ("pge_delivery", "cca_generation"):
+            if required_section not in charge_sections:
+                raise ValueError(
+                    f"charges must include at least one {required_section} charge"
+                )
 
         if self.fixture_kind == "synthetic" and not self.synthetic_notice:
             raise ValueError("synthetic fixtures require a visible notice")
