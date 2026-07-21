@@ -1,0 +1,251 @@
+from __future__ import annotations
+
+from collections.abc import Iterator, Mapping
+from datetime import date
+from decimal import Decimal
+from typing import Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from .models import Citation, PlanComparison, TariffVersion
+
+FactStatus = Literal["printed", "inferred", "user_corrected"]
+ServiceType = Literal[
+    "electricity",
+    "natural_gas",
+    "water",
+    "wastewater",
+    "stormwater",
+    "sanitation",
+    "other",
+]
+AuditStatusV2 = Literal["verified", "discrepancy", "cannot_verify", "needs_review"]
+AuditScope = Literal["printed_math", "statement_reconciliation", "published_tariff"]
+VerificationLevel = Literal[
+    "evidence_extracted",
+    "internally_reconciled",
+    "tariff_verified",
+]
+
+
+class EvidenceRef(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    page: int = Field(ge=1)
+    text: str = Field(min_length=1)
+    confidence: Decimal = Field(ge=0, le=1)
+    provenance: Literal["rendered_page"] = "rendered_page"
+
+
+class FactBaseV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: FactStatus
+    evidence: EvidenceRef
+    original_value: str | None = None
+
+    @model_validator(mode="after")
+    def validate_correction(self) -> Self:
+        if self.status == "user_corrected" and self.original_value is None:
+            raise ValueError("user-corrected facts require original_value")
+        if self.status != "user_corrected" and self.original_value is not None:
+            raise ValueError("original_value is only valid for user-corrected facts")
+        return self
+
+
+class TextFactV2(FactBaseV2):
+    value: str = Field(min_length=1)
+
+
+class DateFactV2(FactBaseV2):
+    value: date
+
+
+class DecimalFactV2(FactBaseV2):
+    value: Decimal
+    unit: str = Field(min_length=1)
+
+
+class MoneyFactV2(FactBaseV2):
+    value: Decimal
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+
+
+class CalculationSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["quantity_times_rate", "percent_of_charges"]
+    charge_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_charge_ids(self) -> Self:
+        if self.kind == "percent_of_charges" and not self.charge_ids:
+            raise ValueError("percent_of_charges requires charge_ids")
+        if self.kind == "quantity_times_rate" and self.charge_ids:
+            raise ValueError("quantity_times_rate does not accept charge_ids")
+        return self
+
+
+class UtilityCharge(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=r"^[a-z0-9_]+$")
+    label: str = Field(min_length=1)
+    quantity: DecimalFactV2 | None = None
+    rate: DecimalFactV2 | None = None
+    amount: MoneyFactV2
+    calculation: CalculationSpec | None = None
+
+
+class MeterCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    previous: DecimalFactV2
+    current: DecimalFactV2
+    usage: DecimalFactV2
+
+
+class ConversionCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=r"^[a-z0-9_]+$")
+    label: str
+    source: DecimalFactV2
+    factor: DecimalFactV2
+    result: DecimalFactV2
+
+
+class ServiceSection(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=r"^[a-z0-9_]+$")
+    service_type: ServiceType
+    provider: TextFactV2
+    normalized_provider: str | None = None
+    jurisdiction: TextFactV2 | None = None
+    schedule: TextFactV2 | None = None
+    service_start: DateFactV2 | None = None
+    service_end: DateFactV2 | None = None
+    usage: DecimalFactV2 | None = None
+    meter: MeterCheck | None = None
+    conversions: tuple[ConversionCheck, ...] = ()
+    charges: tuple[UtilityCharge, ...] = Field(min_length=1)
+    subtotal: MoneyFactV2
+
+    @model_validator(mode="after")
+    def validate_service_dates(self) -> Self:
+        if (
+            self.service_start is not None
+            and self.service_end is not None
+            and self.service_start.value > self.service_end.value
+        ):
+            raise ValueError("service_start must be on or before service_end")
+        return self
+
+
+def _walk_nested(value: object) -> Iterator[object]:
+    yield value
+    if isinstance(value, BaseModel):
+        for field_name in type(value).model_fields:
+            yield from _walk_nested(getattr(value, field_name))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _walk_nested(item)
+    elif isinstance(value, Mapping):
+        for item in value.values():
+            yield from _walk_nested(item)
+
+
+class UtilityDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["2.0"]
+    fixture_kind: Literal[
+        "authentic",
+        "synthetic",
+        "duke",
+        "centerpoint",
+        "bloomington",
+        "uploaded",
+    ]
+    document_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    page_count: int = Field(ge=1, le=20)
+    source_url: str | None = None
+    statement_date: DateFactV2 | None = None
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    sections: tuple[ServiceSection, ...] = Field(min_length=1)
+    current_charges: MoneyFactV2
+    outstanding_balance: MoneyFactV2 | None = None
+    amount_due: MoneyFactV2
+    warnings: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_document_invariants(self) -> Self:
+        section_ids = [section.id for section in self.sections]
+        if len(section_ids) != len(set(section_ids)):
+            raise ValueError("section IDs must be unique")
+
+        charge_ids = [charge.id for section in self.sections for charge in section.charges]
+        if len(charge_ids) != len(set(charge_ids)):
+            raise ValueError("charge IDs must be unique across all sections")
+
+        nested = tuple(_walk_nested(self))
+        if any(
+            isinstance(value, MoneyFactV2) and value.currency != self.currency
+            for value in nested
+        ):
+            raise ValueError("every money fact currency must match the document currency")
+
+        if any(
+            isinstance(value, EvidenceRef) and value.page > self.page_count
+            for value in nested
+        ):
+            raise ValueError("evidence page cannot exceed the trusted page_count")
+
+        return self
+
+
+class UtilityAuditLine(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str
+    section_id: str | None
+    label: str
+    scope: AuditScope
+    unit: str
+    billed_amount: Decimal | None
+    expected_amount: Decimal | None
+    delta: Decimal | None
+    formula: str
+    inputs: dict[str, str]
+    evidence: tuple[EvidenceRef, ...]
+    citations: tuple[Citation, ...] = ()
+    status: AuditStatusV2
+    limitation: str | None = None
+    root_cause_id: str | None = None
+
+
+class ProviderReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: str
+    subject: str
+    body: str
+    grounded_audit_line_ids: tuple[str, ...]
+    requires_user_review: Literal[True] = True
+
+
+class UtilityAuditResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["2.0"]
+    fixture_kind: str
+    verdict: Literal["reconciled", "possible_discrepancy", "needs_review"]
+    verification_level: VerificationLevel
+    headline: str
+    discrepancy_total: Decimal
+    currency: str
+    lines: tuple[UtilityAuditLine, ...]
+    tariff: TariffVersion | None = None
+    comparison: PlanComparison | None = None
+    review_requests: tuple[ProviderReviewRequest, ...] = ()
