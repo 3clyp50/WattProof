@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -34,6 +35,19 @@ TOOL_ITEM_TYPES = {
     "webSearch",
 }
 MAX_CODEX_JSON_NUMBER_CHARACTERS = 128
+CORRECTION_TURN_TIMEOUT_SECONDS = 60
+OUTPUT_INVARIANT_RULES = (
+    "Initial extraction facts use only printed or inferred status, never "
+    "user_corrected, and original_value must be null. IDs must be unique within "
+    "their documented scope. quantity_times_rate uses an empty charge_ids array and "
+    "requires both quantity and rate; percent_of_charges uses unique existing charge "
+    "IDs and cannot reference itself. Quantity sums use unique existing charge IDs. "
+    "All money facts use the document currency. Evidence pages are between 1 and "
+    "page_count. Service start is not after service end. If an optional relationship "
+    "is not visibly supported, return null or an empty array instead of inventing it."
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_decimal_token(value: str) -> RawJSONDecimal:
@@ -56,8 +70,72 @@ class CodexUnavailableError(RuntimeError):
     pass
 
 
+class CodexOutputInvalidError(CodexUnavailableError):
+    pass
+
+
 class CodexNotConnectedError(RuntimeError):
     pass
+
+
+class _CodexOutputFailure(RuntimeError):
+    def __init__(self, issues: tuple[str, ...]) -> None:
+        super().__init__("Codex output failed validation")
+        self.issues = issues
+
+
+def _safe_validation_issues(error: Exception) -> tuple[str, ...]:
+    if not isinstance(error, ValidationError):
+        return ("document:json_syntax",)
+    issues: list[str] = []
+    for item in error.errors(
+        include_url=False,
+        include_context=False,
+        include_input=False,
+    ):
+        location = (
+            ".".join(
+                "*" if isinstance(part, int) else str(part)
+                for part in item.get("loc", ())
+            )
+            or "document"
+        )
+        issue = f"{location}:{item.get('type', 'validation_error')}"
+        if issue not in issues:
+            issues.append(issue)
+        if len(issues) == 8:
+            break
+    return tuple(issues) or ("document:validation_error",)
+
+
+def _validated_document(
+    answer: str,
+    *,
+    document_sha256: str,
+    page_count: int,
+) -> UtilityDocument:
+    try:
+        raw = json.loads(
+            answer,
+            parse_float=_parse_decimal_token,
+            parse_int=_parse_integer_token,
+            parse_constant=_reject_json_constant,
+        )
+        if not isinstance(raw, dict):
+            raise ValueError
+        raw["fixture_kind"] = "uploaded"
+        raw["document_sha256"] = document_sha256
+        raw["page_count"] = page_count
+        raw["source_url"] = None
+        return UtilityDocument.model_validate(raw)
+    except (
+        json.JSONDecodeError,
+        OverflowError,
+        RecursionError,
+        ValidationError,
+        ValueError,
+    ) as error:
+        raise _CodexOutputFailure(_safe_validation_issues(error)) from None
 
 
 def strict_bill_schema() -> dict[str, Any]:
@@ -82,6 +160,7 @@ def strict_bill_schema() -> dict[str, Any]:
                 make_strict(value)
 
     make_strict(schema)
+    schema["description"] = OUTPUT_INVARIANT_RULES
     return schema
 
 
@@ -428,7 +507,8 @@ trust_level = "untrusted"
             "or meter identifiers into evidence excerpts unless material to an audited fact. "
             "Set fixture_kind to uploaded, source_url to null, schema_version to 2.0, "
             f"document_sha256 to {document_sha256}, and page_count to {page_count}. These "
-            "document metadata fields are server-owned and will be replaced after parsing."
+            "document metadata fields are server-owned and will be replaced after parsing. "
+            f"Cross-field contract: {OUTPUT_INVARIANT_RULES}"
         )
         turn_input: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for page in rendered_pages:
@@ -451,6 +531,7 @@ trust_level = "untrusted"
             }
         )
         with self._extract_lock:
+            output_schema = strict_bill_schema()
             thread_result = self._call(
                 "thread/start",
                 {
@@ -479,7 +560,7 @@ trust_level = "untrusted"
                     "effort": "low",
                     "approvalPolicy": "never",
                     "input": turn_input,
-                    "outputSchema": strict_bill_schema(),
+                    "outputSchema": output_schema,
                 },
                 timeout=15,
             )
@@ -487,31 +568,65 @@ trust_level = "untrusted"
             if not isinstance(turn, dict) or not isinstance(turn.get("id"), str):
                 raise CodexUnavailableError("Codex could not start the extraction.")
             _, answer = self._wait_for_turn(turn["id"], timeout=120)
+            try:
+                return _validated_document(
+                    answer,
+                    document_sha256=document_sha256,
+                    page_count=page_count,
+                )
+            except _CodexOutputFailure as first_failure:
+                validation_issues = first_failure.issues
+                logger.warning(
+                    "Codex output validation failed phase=initial issues=%s",
+                    ",".join(validation_issues),
+                )
 
-        try:
-            raw = json.loads(
-                answer,
-                parse_float=_parse_decimal_token,
-                parse_int=_parse_integer_token,
-                parse_constant=_reject_json_constant,
+            correction_result = self._call(
+                "turn/start",
+                {
+                    "threadId": thread["id"],
+                    "effort": "low",
+                    "approvalPolicy": "never",
+                    "input": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Return a complete replacement JSON extraction. The previous "
+                                "answer failed WattProof's validation. Do not invent, calculate, "
+                                "or alter evidence to make it pass; omit unsupported optional "
+                                "relationships with null or empty arrays. Follow this contract: "
+                                f"{OUTPUT_INVARIANT_RULES} Safe validation locations: "
+                                f"{', '.join(validation_issues)}."
+                            ),
+                        }
+                    ],
+                    "outputSchema": output_schema,
+                },
+                timeout=15,
             )
-            if not isinstance(raw, dict):
-                raise ValueError
-            raw["fixture_kind"] = "uploaded"
-            raw["document_sha256"] = document_sha256
-            raw["page_count"] = page_count
-            raw["source_url"] = None
-            return UtilityDocument.model_validate(raw)
-        except (
-            json.JSONDecodeError,
-            OverflowError,
-            RecursionError,
-            ValidationError,
-            ValueError,
-        ) as error:
-            raise CodexUnavailableError(
-                "Codex could not produce a reviewable bill extraction."
-            ) from error
+            correction_turn = correction_result.get("turn")
+            if not isinstance(correction_turn, dict) or not isinstance(
+                correction_turn.get("id"), str
+            ):
+                raise CodexUnavailableError("Codex could not start output correction.")
+            _, corrected_answer = self._wait_for_turn(
+                correction_turn["id"], timeout=CORRECTION_TURN_TIMEOUT_SECONDS
+            )
+            try:
+                return _validated_document(
+                    corrected_answer,
+                    document_sha256=document_sha256,
+                    page_count=page_count,
+                )
+            except _CodexOutputFailure as final_failure:
+                logger.warning(
+                    "Codex output validation failed phase=correction issues=%s",
+                    ",".join(final_failure.issues),
+                )
+                raise CodexOutputInvalidError(
+                    "Codex produced an extraction that did not pass WattProof's safety "
+                    "checks. Please try again."
+                ) from None
 
     def close(self) -> None:
         with self._lock:
