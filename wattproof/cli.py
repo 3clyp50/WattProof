@@ -49,8 +49,15 @@ def _load_bundled_sample(kind: str) -> Extraction:
     raise ValueError(f"Unsupported bundled sample: {kind}")
 
 
-def _money(value: Decimal | None) -> str:
-    return "unavailable" if value is None else f"${value:.2f}"
+def _display_value(value: Decimal | None, unit: str, currency: str) -> str:
+    if value is None:
+        return "unavailable"
+    if unit == currency:
+        if currency == "USD":
+            sign = "-" if value < 0 else ""
+            return f"{sign}${abs(value):.2f}"
+        return f"{value:.2f} {currency}"
+    return f"{value} {unit}"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -101,8 +108,11 @@ def main(argv: list[str] | None = None) -> int:
     for line in result.lines:
         if line.status == "discrepancy":
             print(
-                f"- {line.label}: billed {_money(line.billed_amount)}, "
-                f"expected {_money(line.expected_amount)}, delta {_money(line.delta)}"
+                f"- {line.label}: billed "
+                f"{_display_value(line.billed_amount, line.unit, result.currency)}, "
+                f"expected "
+                f"{_display_value(line.expected_amount, line.unit, result.currency)}, "
+                f"delta {_display_value(line.delta, line.unit, result.currency)}"
             )
     if result.comparison is not None:
         print(f"Plan comparison: {result.comparison.headline}")

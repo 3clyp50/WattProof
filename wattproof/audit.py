@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unicodedata
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from .models import (
     AuditLine,
@@ -13,6 +13,7 @@ from .models import (
     PlanComparison,
     ReviewRequest,
 )
+from .numeric import add_exact, multiply_exact, quantize_exact, subtract_exact, sum_exact
 from .tariffs import RateRule, TariffBundle, load_tariff_bundle
 
 CENT = Decimal("0.01")
@@ -24,7 +25,7 @@ class UnsupportedBillError(ValueError):
 
 
 def round_money(value: Decimal) -> Decimal:
-    return value.quantize(CENT, rounding=ROUND_HALF_UP)
+    return quantize_exact(value, CENT)
 
 
 def _status(delta: Decimal) -> AuditStatus:
@@ -122,9 +123,9 @@ def _quantity_rule(
     else:
         raise ValueError(f"Missing quantity for calculable line: {line_id}")
 
-    expected = round_money(quantity * rule.rate)
+    expected = round_money(multiply_exact(quantity, rule.rate))
     billed = billed_line.billed_amount.value
-    delta = round_money(billed - expected)
+    delta = round_money(subtract_exact(billed, expected))
     return AuditLine(
         id=line_id,
         label=billed_line.label,
@@ -152,10 +153,10 @@ def _percentage_rule(
     billed_line: ChargeLine,
     expected_by_id: dict[str, Decimal],
 ) -> AuditLine:
-    base = sum((expected_by_id[item] for item in rule.line_ids), Decimal("0"))
-    expected = round_money(base * rule.rate)
+    base = sum_exact(tuple(expected_by_id[item] for item in rule.line_ids))
+    expected = round_money(multiply_exact(base, rule.rate))
     billed = billed_line.billed_amount.value
-    delta = round_money(billed - expected)
+    delta = round_money(subtract_exact(billed, expected))
     return AuditLine(
         id=line_id,
         label=billed_line.label,
@@ -235,7 +236,7 @@ def _reconciliation_line(
     formula: str,
     inputs: dict[str, str],
 ) -> AuditLine:
-    delta = round_money(billed - expected)
+    delta = round_money(subtract_exact(billed, expected))
     return AuditLine(
         id=line_id,
         label=label,
@@ -263,10 +264,12 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
         for line in bill.charges
         if line.section == "cca_generation"
     ]
-    delivery_sum = sum(delivery_lines, Decimal("0"))
-    generation_sum = sum(generation_lines, Decimal("0"))
-    current_sum = bill.delivery_subtotal.value + bill.generation_subtotal.value
-    due_sum = bill.current_charges.value + bill.outstanding_balance.value
+    delivery_sum = sum_exact(tuple(delivery_lines))
+    generation_sum = sum_exact(tuple(generation_lines))
+    current_sum = add_exact(
+        bill.delivery_subtotal.value, bill.generation_subtotal.value
+    )
+    due_sum = add_exact(bill.current_charges.value, bill.outstanding_balance.value)
 
     checks = [
         _reconciliation_line(
@@ -434,7 +437,7 @@ def audit_bill_with_bundle(
         line for line in reconciliation_lines if line.status == "discrepancy"
     ]
     discrepancy_total = round_money(
-        sum((abs(delta) for delta in tariff_discrepancies), Decimal("0"))
+        sum_exact(tuple(abs(delta) for delta in tariff_discrepancies))
     )
     has_discrepancy = bool(tariff_discrepancies or reconciliation_discrepancies)
     verdict = "possible_discrepancy" if has_discrepancy else "reconciled"

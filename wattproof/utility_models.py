@@ -8,6 +8,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .models import Citation, PlanComparison, TariffVersion
+from .numeric import UtilityDecimal
 
 FactStatus = Literal["printed", "inferred", "user_corrected"]
 ServiceType = Literal[
@@ -33,7 +34,7 @@ class EvidenceRef(BaseModel):
 
     page: int = Field(ge=1)
     text: str = Field(min_length=1)
-    confidence: Decimal = Field(ge=0, le=1)
+    confidence: UtilityDecimal = Field(ge=0, le=1)
     provenance: Literal["rendered_page"] = "rendered_page"
 
 
@@ -67,12 +68,12 @@ class IntegerFactV2(FactBaseV2):
 
 
 class DecimalFactV2(FactBaseV2):
-    value: Decimal
+    value: UtilityDecimal
     unit: str = Field(min_length=1)
 
 
 class MoneyFactV2(FactBaseV2):
-    value: Decimal
+    value: UtilityDecimal
     currency: str = Field(pattern=r"^[A-Z]{3}$")
 
 

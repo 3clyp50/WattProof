@@ -7,6 +7,8 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .numeric import UtilityDecimal
+
 EvidenceStatus = Literal["printed", "inferred", "user_corrected"]
 AuditStatus = Literal[
     "verified", "discrepancy", "estimated", "cannot_verify", "needs_review"
@@ -47,7 +49,7 @@ class IntegerFact(EvidenceBase):
 
 
 class DecimalFact(EvidenceBase):
-    value: Decimal
+    value: UtilityDecimal
     unit: str
 
 

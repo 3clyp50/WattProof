@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
+from .numeric import (
+    add_exact,
+    multiply_exact,
+    quantize_exact,
+    subtract_exact,
+    sum_exact,
+)
 from .utility_models import (
     AuditStatusV2,
     DecimalFactV2,
@@ -23,7 +30,7 @@ _PROVENANCE_INPUT_PREFIX = "__provenance__::"
 
 
 def round_money(value: Decimal) -> Decimal:
-    return value.quantize(CENT, rounding=ROUND_HALF_UP)
+    return quantize_exact(value, CENT)
 
 
 def compatible_rate(quantity_unit: str, rate_unit: str, currency: str) -> bool:
@@ -73,7 +80,7 @@ def _money_status(delta: Decimal) -> AuditStatusV2:
 
 
 def _money_result(billed: Decimal, expected: Decimal) -> tuple[Decimal, AuditStatusV2]:
-    delta = billed - expected
+    delta = subtract_exact(billed, expected)
     return delta, _money_status(delta)
 
 
@@ -132,7 +139,7 @@ def _quantity_charge_line(
             limitation="The reported quantity and rate units are incompatible.",
         )
 
-    expected = round_money(quantity.value * rate.value)
+    expected = round_money(multiply_exact(quantity.value, rate.value))
     delta, status = _money_result(charge.amount.value, expected)
     return UtilityAuditLine(
         id=f"charge::{charge.id}",
@@ -325,8 +332,8 @@ def _percentage_charge_line(
             limitation="The reported percentage rate unit must be exactly fraction.",
         )
 
-    reported_base = sum((item.amount.value for item in referenced), Decimal("0"))
-    expected = round_money(rate.value * reported_base)
+    reported_base = sum_exact(tuple(item.amount.value for item in referenced))
+    expected = round_money(multiply_exact(rate.value, reported_base))
     delta, status = _money_result(charge.amount.value, expected)
     base_terms = " + ".join(
         _annotated_value(item.amount.value, currency, item.amount)
@@ -462,12 +469,10 @@ def _meter_line(section: ServiceSection) -> UtilityAuditLine | None:
             meter.usage,
         )
     quantum = _printed_quantum(meter.usage.value)
-    expected = (meter.current.value - meter.previous.value).quantize(
-        quantum, rounding=ROUND_HALF_UP
+    expected = quantize_exact(
+        subtract_exact(meter.current.value, meter.previous.value), quantum
     )
-    delta = (meter.usage.value - expected).quantize(
-        quantum, rounding=ROUND_HALF_UP
-    )
+    delta = quantize_exact(subtract_exact(meter.usage.value, expected), quantum)
     return _with_billed_provenance(
         UtilityAuditLine(
             id=f"meter::{section.id}",
@@ -558,11 +563,12 @@ def _conversion_lines(section: ServiceSection) -> tuple[UtilityAuditLine, ...]:
             )
             continue
         quantum = _printed_quantum(conversion.result.value)
-        expected = (conversion.source.value * conversion.factor.value).quantize(
-            quantum, rounding=ROUND_HALF_UP
+        expected = quantize_exact(
+            multiply_exact(conversion.source.value, conversion.factor.value),
+            quantum,
         )
-        delta = (conversion.result.value - expected).quantize(
-            quantum, rounding=ROUND_HALF_UP
+        delta = quantize_exact(
+            subtract_exact(conversion.result.value, expected), quantum
         )
         source_trace = _annotated_value(
             conversion.source.value,
@@ -719,7 +725,7 @@ def _usage_consistency_line(section: ServiceSection) -> UtilityAuditLine | None:
         return _with_billed_provenance(line, usage)
 
     source_name, source = compatible_sources[0]
-    delta = usage.value - source.value
+    delta = subtract_exact(usage.value, source.value)
     return _with_billed_provenance(
         UtilityAuditLine(
             id=f"usage::{section.id}",
@@ -835,8 +841,8 @@ def _quantity_sum_lines(section: ServiceSection) -> tuple[UtilityAuditLine, ...]
             lines.append(_with_billed_provenance(line, target))
             continue
 
-        expected = sum((quantity.value for quantity in quantities), Decimal("0"))
-        delta = target.value - expected
+        expected = sum_exact(tuple(quantity.value for quantity in quantities))
+        delta = subtract_exact(target.value, expected)
         component_trace = " + ".join(
             _annotated_value(quantity.value, quantity.unit, quantity)
             for quantity in quantities
@@ -871,9 +877,7 @@ def _subtotal_line(
     section: ServiceSection,
     currency: str,
 ) -> UtilityAuditLine:
-    expected = sum(
-        (charge.amount.value for charge in section.charges), Decimal("0")
-    )
+    expected = sum_exact(tuple(charge.amount.value for charge in section.charges))
     delta, status = _money_result(section.subtotal.value, expected)
     return _with_billed_provenance(
         UtilityAuditLine(
@@ -911,9 +915,7 @@ def _subtotal_line(
 def _current_charges_line(
     document: UtilityDocument,
 ) -> UtilityAuditLine:
-    expected = sum(
-        (section.subtotal.value for section in document.sections), Decimal("0")
-    )
+    expected = sum_exact(tuple(section.subtotal.value for section in document.sections))
     delta, status = _money_result(document.current_charges.value, expected)
     return _with_billed_provenance(
         UtilityAuditLine(
@@ -969,7 +971,9 @@ def _amount_due_line(
         document.current_charges,
     )
     if document.outstanding_balance is not None:
-        expected_unrounded += document.outstanding_balance.value
+        expected_unrounded = add_exact(
+            expected_unrounded, document.outstanding_balance.value
+        )
         operands.append(document.outstanding_balance.evidence)
         inputs["outstanding_balance"] = (
             f"{document.outstanding_balance.value} {document.currency}"
@@ -1011,7 +1015,7 @@ class _ReconciledValue:
 
 
 def _money_reconciles(billed: Decimal, expected: Decimal) -> bool:
-    return abs(billed - expected) <= MONEY_TOLERANCE
+    return abs(subtract_exact(billed, expected)) <= MONEY_TOLERANCE
 
 
 def _corrected_charge_value(
@@ -1076,11 +1080,10 @@ def _corrected_charge_value(
                         root_ids.add(line.id)
                     provable = all(value.provable for value in referenced_values)
                     if root_ids:
-                        corrected_base = sum(
-                            (value.amount for value in referenced_values),
-                            Decimal("0"),
+                        corrected_base = sum_exact(
+                            tuple(value.amount for value in referenced_values)
                         )
-                        amount = round_money(rate.value * corrected_base)
+                        amount = round_money(multiply_exact(rate.value, corrected_base))
                     else:
                         amount = charge.amount.value
                     result = _ReconciledValue(
@@ -1112,9 +1115,7 @@ def _reconcile_section_root(
         )
         for charge in section.charges
     )
-    corrected_subtotal = sum(
-        (value.amount for value in charge_values), Decimal("0")
-    )
+    corrected_subtotal = sum_exact(tuple(value.amount for value in charge_values))
     root_ids = set().union(*(value.root_ids for value in charge_values))
     provable = all(value.provable for value in charge_values)
     rooted_line = subtotal_line
@@ -1141,9 +1142,7 @@ def _reconcile_current_root(
     current_line: UtilityAuditLine,
     section_values: tuple[_ReconciledValue, ...],
 ) -> tuple[UtilityAuditLine, _ReconciledValue]:
-    corrected_current = sum(
-        (value.amount for value in section_values), Decimal("0")
-    )
+    corrected_current = sum_exact(tuple(value.amount for value in section_values))
     root_ids = set().union(*(value.root_ids for value in section_values))
     provable = all(value.provable for value in section_values)
     rooted_line = current_line
@@ -1175,7 +1174,7 @@ def _reconcile_amount_due_root(
 ) -> UtilityAuditLine:
     corrected_due = current_value.amount
     if document.outstanding_balance is not None:
-        corrected_due += document.outstanding_balance.value
+        corrected_due = add_exact(corrected_due, document.outstanding_balance.value)
     if (
         amount_due_line.status == "discrepancy"
         and current_value.provable
@@ -1447,8 +1446,8 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
         else "evidence_extracted"
     )
     line_tuple = tuple(lines)
-    discrepancy_total = sum(
-        (
+    discrepancy_total = sum_exact(
+        tuple(
             abs(line.delta)
             for line in line_tuple
             if line.status == "discrepancy"
@@ -1458,8 +1457,7 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
             and not line.id.startswith(
                 ("meter::", "conversion::", "usage::", "quantity_sum::")
             )
-        ),
-        Decimal("0"),
+        )
     )
     provider_sections: dict[str, set[str]] = {}
     for section in document.sections:
