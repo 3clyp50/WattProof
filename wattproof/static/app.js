@@ -207,6 +207,8 @@ function showStep(step) {
 function setLoading(button, loading, label) {
   if (!button.dataset.originalLabel) button.dataset.originalLabel = button.innerHTML;
   button.disabled = loading;
+  if (loading) button.setAttribute("aria-busy", "true");
+  else button.removeAttribute("aria-busy");
   button.innerHTML = loading ? label : button.dataset.originalLabel;
 }
 
@@ -457,7 +459,6 @@ function renderLegacyReview() {
         <div class="fact-fields charge-facts">${editors.join("")}</div>
       </article>`;
   }).join("");
-
   byId("service-review-sections").innerHTML = `
     <article class="service-review-card">
       <header class="service-review-header">
@@ -929,7 +930,7 @@ function renderProviderReviewRequests(result = null) {
             <span class="card-kicker">${escapeHtml(request.provider)}</span>
             <label for="${subjectId}">Subject</label><input id="${subjectId}" data-bundle-id="${escapeHtml(summary.id)}" data-request-index="${requestIndex}" data-request-field="subject" type="text" value="${escapeHtml(request.subject)}">
             <label for="${bodyId}">Message</label><textarea id="${bodyId}" data-bundle-id="${escapeHtml(summary.id)}" data-request-index="${requestIndex}" data-request-field="body" rows="12">${escapeHtml(request.body)}</textarea>
-            <div class="letter-actions"><button class="button primary" type="button" data-copy-request="${index}">Copy request</button><button class="button secondary" type="button" data-download-request="${index}">Download .txt</button></div>
+            <div class="letter-actions"><button class="button primary" type="button" data-copy-request="${index}" aria-live="polite">Copy request</button><button class="button secondary" type="button" data-download-request="${index}">Download .txt</button></div>
             <p class="review-note"><span aria-hidden="true">!</span><strong>User review required.</strong> Edits stay in this page. WattProof never sends messages or adds account details automatically.</p>
           </div>
           <aside class="request-grounding"><span class="card-kicker">Completed summary</span><h2>Draft boundary</h2><div class="grounded-claim"><strong>${escapeHtml(summary.providers.join(" + ") || request.provider)}</strong><br>${escapeHtml(services || "Utility service")} · ${escapeHtml(summary.period)} · ${escapeHtml(verificationSummary(summary.verificationLevel))}</div><p class="grounding-limit">Only the provider, subject, and message draft are retained for this request.</p></aside>
@@ -1342,7 +1343,8 @@ byId("provider-review-requests").addEventListener("click", async (event) => {
       byId(`letter-body-${index}`).select();
       document.execCommand("copy");
     }
-    copyButton.textContent = "Copied";
+    copyButton.textContent = "Copied — review before sending";
+    window.setTimeout(() => { copyButton.textContent = "Copy request"; }, 2500);
   }
   if (downloadButton) {
     const index = downloadButton.dataset.downloadRequest;

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="WattProof reviews utility-bill evidence, reconciles printed math, and verifies supported published tariffs without overstating coverage.">
     <title>WattProof — Check the math on your utility bill</title>
-    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ url_for('static', filename='logo-mark.png') }}" type="image/png">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
   </head>
@@ -13,10 +13,9 @@
     <a class="skip-link" href="#workspace">Skip to audit workspace</a>
     <header class="site-header">
       <a class="brand" href="/" aria-label="WattProof home">
-        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <img class="brand-logo" src="{{ url_for('static', filename='logo-mark.png') }}" alt="" width="42" height="42">
         <span>WattProof</span>
       </a>
-      <p class="header-proof"><span></span> Public sample mode · deterministic math</p>
     </header>
 
     <main id="workspace">
@@ -89,7 +88,7 @@
             <iframe id="pdf-preview" title="Utility bill preview" hidden></iframe>
             <div id="synthetic-preview" class="synthetic-preview" hidden>
               <span id="document-placeholder-mark" aria-hidden="true">±</span>
-              <h3 id="document-placeholder-title">Structured synthetic fixture</h3>
+              <h2 id="document-placeholder-title">Structured synthetic fixture</h2>
               <p id="document-placeholder-copy">The authentic public PDF is unchanged. Only the extracted peak-charge value is altered for this detection test.</p>
             </div>
           </div>
@@ -118,7 +117,7 @@
           <details id="calculation-ledger">
             <summary><span><span class="card-kicker">Calculation ledger</span><strong>Every check, line by line</strong></span><span>Expand ledger</span></summary>
             <div class="ledger-toolbar"><button class="button text" type="button" id="show-all-lines">Show all checks</button></div>
-            <div class="table-scroll"><table class="audit-table"><thead><tr><th>Status</th><th>Line</th><th>Scope</th><th>Billed</th><th>Expected</th><th>Delta</th><th>Trace &amp; evidence</th></tr></thead><tbody id="audit-lines"></tbody></table></div>
+            <div class="table-scroll" role="region" aria-label="Line-by-line calculation ledger" tabindex="0"><table class="audit-table"><thead><tr><th>Status</th><th>Line</th><th>Scope</th><th>Billed</th><th>Expected</th><th>Delta</th><th>Trace &amp; evidence</th></tr></thead><tbody id="audit-lines"></tbody></table></div>
           </details>
         </div>
         <section id="optional-comparison" class="optional-comparison" aria-labelledby="comparison-title" hidden></section>

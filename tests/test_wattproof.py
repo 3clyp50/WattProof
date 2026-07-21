@@ -78,6 +78,21 @@ def test_synthetic_fixture_catches_exact_five_dollar_error() -> None:
     assert lines["delivery_subtotal"].delta == Decimal("-5.00")
 
 
+def test_reconciliation_only_mismatch_is_review_not_a_zero_dollar_claim() -> None:
+    raw = load_sample("authentic").model_dump(mode="json")
+    raw["amount_due"]["value"] = "97.24"
+
+    result = audit_bill(BillExtraction.model_validate(raw))
+
+    assert result.verdict == "needs_review"
+    assert result.discrepancy_total == Decimal("0.00")
+    assert result.headline == "Printed bill totals need review"
+    assert result.review_request.grounded_audit_line_ids == ("amount_due",)
+    assert "$97.24" in result.review_request.body
+    assert "$96.24" in result.review_request.body
+    assert "$1.00" in result.review_request.body
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -355,6 +370,46 @@ def test_web_flow_exposes_all_five_steps() -> None:
         assert f"<b>{obsolete_label}</b>" not in page
     assert "GPT-5.6 may read" in page
     assert "Decimal arithmetic handles money" in page
+    assert "Local sample mode" not in page
+    assert "logo-mark.png" in page
+
+
+def test_web_shell_keeps_provider_neutral_accessibility_contract() -> None:
+    page = create_app().test_client().get("/").get_data(as_text=True)
+
+    assert 'aria-label="WattProof home"' in page
+    assert 'class="brand-logo"' in page
+    assert 'alt=""' in page
+    assert "favicon.svg" not in page
+    assert "header-proof" not in page
+    assert '<h2 id="document-placeholder-title">' in page
+    assert '<h3 id="document-placeholder-title">' not in page
+    assert (
+        '<div class="table-scroll" role="region" '
+        'aria-label="Line-by-line calculation ledger" tabindex="0">'
+    ) in page
+    assert 'id="show-all-lines"' in page
+    for obsolete_id in ("charge-review", "audit-details", "copy-letter"):
+        assert f'id="{obsolete_id}"' not in page
+    for title_id in (
+        "upload-title",
+        "review-title",
+        "verify-title",
+        "household-title",
+        "next-steps-title",
+    ):
+        assert f'id="{title_id}" tabindex="-1"' in page
+
+
+def test_web_script_announces_loading_and_provider_copy_feedback() -> None:
+    script = (PROJECT_ROOT / "wattproof/static/app.js").read_text(encoding="utf-8")
+
+    assert 'button.setAttribute("aria-busy", "true");' in script
+    assert 'button.removeAttribute("aria-busy");' in script
+    assert 'data-copy-request="${index}" aria-live="polite"' in script
+    assert 'copyButton.textContent = "Copied — review before sending";' in script
+    assert 'copyButton.textContent = "Copy request";' in script
+    assert '.focus({ preventScroll: true })' in script
 
 
 def test_health_check() -> None:

@@ -107,7 +107,7 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 
 - `19 passed` after adding Flask route, actual upload, validation, and authentic-letter grounding coverage.
 - `node --check`, Python bytecode compilation, JSON parsing, and whitespace checks passed.
-- Rendered screenshots are saved under `output/playwright/` for README and judging evidence.
+- The electricity-only screenshots saved under `output/playwright/` were historical README and judging evidence for that UI. They are retained in commit history, not presented as current provider-neutral proof.
 
 ## 2026-07-19 - Milestone D release preparation
 
@@ -225,3 +225,42 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - A fresh Chromium production pass completed the authentic review-to-audit interaction at desktop width, rendered the landing page at 390 px, and reported zero console errors or warnings.
 - Three pushes during GitHub's July 20 Actions incident were recorded as zero-job `startup_failure` runs while Actions and API Requests were degraded. Repository Actions permissions, four deployment secrets, and the workflow's independent Actionlint validation were all correct; no product or workflow change was made for the external outage.
 - After GitHub returned to operational status, retry commit `ae92e51` created run [`29722762233`](https://github.com/3clyp50/WattProof/actions/runs/29722762233). Python 3.12 and 3.13 verification passed, the dependent deployment job passed, the VM checked out the exact commit, and the public health and authentic-audit probes remained green.
+
+## 2026-07-21 - Calm, accessible audit experience
+
+> **Historical proof scope:** This section records the electricity-only interface deployed at commit `c51bf9d`. Its browser, screenshot, and WAVE results do not verify the later provider-neutral merged DOM; that interface requires a fresh screenshot and accessibility pass.
+
+### Human direction and design decisions
+
+- Removed the complete `Local sample mode · deterministic math` header treatment, including its status dot. The header now holds only the WattProof identity.
+- Replaced the CSS placeholder with a generated symbol-only mark: a restrained `W` waveform/check with receipt-line detail. WattProof remains live text for crisp rendering and accessibility. The source was generated with the built-in image tool, chroma-keyed to transparency with the provided helper, and optimized to a 512 px RGBA PNG.
+- Kept the landing headline and lede typography, while removing decorative result rings, gradient page effects, redundant pills, and other dashboard-template cues.
+- Preserved the twelve material facts as the required human-review surface. Moved the fifteen printed charge rows and the full twenty-check calculation ledger into closed native disclosures so the default path explains the result before exposing dense evidence.
+- Raised the smallest evidence, table, label, status, trace, citation, note, and footer text. Added explicit mobile scroll cues and kept wide tables inside keyboard-focusable local regions rather than widening the page.
+- Added Chadwick Jones (`@TerminallyLazy`) to the README and submission source for the U.S. electricity-billing research and domain specification that shaped the charge model, support boundary, and review language.
+
+### Emotional design and interaction craft
+
+- Direct source read `49fc7231-edeb-4d66-9f59-fa129cfb561f` confirmed the useful emotional-design pattern for WattProof: respectful waiting language, low-friction behavior, collapsible depth, tone matched to the consequence, and a clear human handoff.
+- Chose a calm corporate motion identity: one 260 ms decelerating step entrance, 120 ms button/file/disclosure feedback, and no bounce, particles, ambient loops, or animation library.
+- Loading states already explained the work in progress (`Extracting native PDF…`, `Running exact tariff math…`), so they were retained and now expose `aria-busy`. Copying a review request gives the warmer temporary confirmation `Copied — review before sending`.
+- Added a complete `prefers-reduced-motion` path that disables transitions and animation and restores non-smooth scrolling.
+
+### Reliability and accessibility corrections
+
+- A read-only review found that a reconciliation-only mismatch could be described as a `$0.00` discrepancy and that generic uploaded discrepancies inherited synthetic-specific wording. Reconciliation-only failures now use the existing `needs_review` verdict, no unsupported amount claim, and fixture-aware copy. Every permitted line status has an explicit visible label.
+- A second end-to-end review followed that state through Act and found the draft still fell back to a missing-rate request. Reconciliation-only failures now produce a separate printed-total request grounded in the exact mismatched audit line and its printed inputs; the regression asserts every amount in the draft.
+- The pre-change public WAVE report scored 7.3/10 and mapped one empty heading, one skipped heading, five low-contrast elements, and thirteen small-text alerts. The worktree fixes supply the dynamic heading fallback, repair heading order, darken inactive progress/divider text, and raise all flagged text floors.
+- Mobile progress names remain available to assistive technology, active-step navigation returns focus to the visible `h1`, fact and disclosure summaries have strong focus rings, and the decorative logo image stays silent inside the named home link.
+- Expanded mobile tables remain locally scrollable: at a 390 px viewport the document/body width is 375 px, while the charge-table region is 283/760 px. Reduced-motion emulation reports a 0.01 ms animation duration and automatic scroll behavior.
+- Keyboard Space toggled the native charge disclosure, the reconciliation-only review state was exercised through the browser, the copy confirmation was exposed in the accessibility tree, and the complete local flow produced zero console warnings or errors.
+
+### Verification
+
+- `make verify` passes with 29 tests, zero Ruff findings, strict MyPy clean across 10 source files, and successful bytecode compilation.
+- The final production-equivalent Docker image builds successfully, JavaScript syntax and whitespace checks pass, and the existing-source secret-pattern scan is clean.
+- Regenerated all five tracked desktop/mobile Playwright artifacts from the real application after the layout and typography changes.
+- The first deployed WAVE re-analysis reduced the landing page from the 7.3/10 baseline to 0 errors, 3 contrast errors, 0 alerts, and 8.8/10. WAVE traced all three remaining findings to the amber `01`, `02`, and `03` proof-list numerals.
+- Darkened only those numerals from `#eca72c` (1.85:1) to `#765414` (6.16:1 against the paper background), retaining the brighter amber for non-text brand accents. An independent read-only accessibility pass confirmed WCAG AA contrast with no layout, motion, focus, or responsive side effects.
+- GitHub Actions run [`29861714811`](https://github.com/3clyp50/WattProof/actions/runs/29861714811) passed both Python verification jobs and deployed exact commit `c51bf9d314e119c86930c80271499c4b29705af2`.
+- A fresh cache-busted WAVE evaluation of the deployed domain returned **0 errors, 0 contrast errors, 0 alerts, and an AIM score of 10/10**. WAVE correctly retains the intentionally empty alternative text on the decorative logo image as a feature inside the named `WattProof home` link, not an error.

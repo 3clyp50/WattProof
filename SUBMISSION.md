@@ -7,7 +7,7 @@ This file is the source of truth for the Devpost entry and demo recording. Repla
 - **Project name:** WattProof
 - **Tagline:** Review electric, gas, water, and sanitation bills from rendered-page evidence. Deterministic code checks printed math, and exact adapters verify published tariffs only where archived sources support them.
 - **Submitter type:** Team of Individuals
-- **Team:** Primary submitter and [Chadwick Jones (`@TerminallyLazy`)](https://devpost.com/TerminallyLazy) — invitation accepted; confirmed WattProof teammate
+- **Team:** Primary submitter and [Chadwick Jones (`@TerminallyLazy`)](https://devpost.com/TerminallyLazy) — invitation accepted; confirmed WattProof teammate; U.S. electricity-billing research and domain specification
 - **Countries of residence:** Italy; United States (multi-select field)
 - **Category:** Apps for Your Life
 - **Repository:** https://github.com/3clyp50/WattProof

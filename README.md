@@ -28,6 +28,8 @@ support a product check, but it is not an independent source for itself. Unsuppo
 tariff coverage is reported as a limitation and does not prevent useful internal
 checks.
 
+**Domain specification:** [Chadwick Jones (`@TerminallyLazy`)](https://devpost.com/TerminallyLazy) contributed the U.S. electricity-billing research and practical interpretation that shaped WattProof's charge model, support boundary, and review language.
+
 When several independent discrepancies explain the same downstream tax, subtotal,
 current-charge, or amount-due symptom, the ledger keeps the complete ordered root set.
 Dependent symptoms remain visible with a `Derived from roots` trace, but only the
