@@ -1199,15 +1199,17 @@ function renderComparison(comparison) {
   if (!comparison) {
     container.hidden = true;
     container.innerHTML = "";
+    container.removeAttribute("aria-labelledby");
     return;
   }
-  container.hidden = false;
   container.innerHTML = `
     <div class="comparison-card">
       <div class="insufficiency-mark" aria-hidden="true"><span>?</span></div>
       <div><span class="status-pill cannot_verify">More data needed</span><h2 id="comparison-title">${escapeHtml(comparison.headline)}</h2><p>${escapeHtml(comparison.explanation)}</p></div>
       <div class="needed-data"><h3>What unlocks a real comparison</h3><ul>${comparison.required_data.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul><p>WattProof does not turn missing interval or historical usage into a savings claim.</p></div>
     </div>`;
+  container.setAttribute("aria-labelledby", "comparison-title");
+  container.hidden = false;
 }
 
 function renderAudit() {
@@ -1284,6 +1286,7 @@ function clearCurrentDocument({ resetUpload = true } = {}) {
     ]
   )) byId(id).innerHTML = "";
   byId("review-warnings").hidden = true;
+  byId("optional-comparison").removeAttribute("aria-labelledby");
   byId("optional-comparison").hidden = true;
   byId("calculation-ledger").open = false;
 }

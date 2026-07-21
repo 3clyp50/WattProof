@@ -400,6 +400,7 @@ async function main() {
           verdictText: document.getElementById("verdict-card").innerText,
           comparisonHidden: comparison.hidden,
           comparisonVisible: visible(comparison),
+          comparisonLabelledBy: comparison.getAttribute("aria-labelledby"),
           requestCount: document.querySelectorAll(".provider-request-card").length,
           message: document.getElementById("global-message-text").innerText,
         };
@@ -2925,7 +2926,9 @@ def test_result_markup_exposes_neutral_contract() -> None:
     ):
         assert f'id="{element_id}"' in page
     assert 'id="optional-comparison"' in page
-    assert "hidden" in page[page.index('id="optional-comparison"') :][:160]
+    comparison_markup = page[page.index('id="optional-comparison"') :][:160]
+    assert "hidden" in comparison_markup
+    assert "aria-labelledby" not in comparison_markup
     warnings_markup = page[page.index('id="review-warnings"') :][:240]
     assert 'role="alert"' in warnings_markup
     assert 'aria-live="polite"' in warnings_markup
@@ -4408,6 +4411,9 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         assert result["verificationLabel"] == expected["verification"]
         assert result["comparisonHidden"] is (not expected["comparison"])
         assert result["comparisonVisible"] is expected["comparison"]
+        assert result["comparisonLabelledBy"] == (
+            "comparison-title" if expected["comparison"] else None
+        )
         assert result["requestCount"] == expected["requests"]
         assert result["message"] == ""
         for unit in expected["result_units"]:

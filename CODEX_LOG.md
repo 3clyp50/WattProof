@@ -381,3 +381,22 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
   certification of the provider-neutral branch; that branch requires a fresh public
   WAVE run after deployment. Its current local accessibility evidence is the real-
   browser suite and the eight explicitly non-certification screenshots.
+
+### Merge and deployed accessibility follow-up
+
+- Merged PR #1 with merge commit `0eb82e779e0652de8c48929e794f4a8d465c78df`,
+  preserving Chadwick's complete 56-commit branch ancestry. GitHub now recognizes him
+  as a repository contributor. The merge-triggered Python 3.12, Python 3.13, and deploy
+  jobs all passed in Actions run
+  [`29876294564`](https://github.com/3clyp50/WattProof/actions/runs/29876294564).
+- Verified the deployed provider-neutral release through its health endpoint, schema
+  2.0 Duke sample endpoint, landing-page utility choices, and official Codex sign-in
+  affordance.
+- A new public WAVE evaluation of that deployed merge found **1 error, 0 contrast
+  errors, 0 alerts, and 9.7/10 AIM**. The error was an empty hidden comparison section
+  whose initial `aria-labelledby` value referenced a heading created only when a
+  comparison is rendered.
+- Corrected the relationship at its lifecycle boundary: the label is now added only
+  after the heading exists and removed whenever comparison content is cleared. Static
+  and real-Chromium tests lock both states. The full verification gate again passes
+  **575 tests**, Ruff, strict MyPy across 28 source files, and bytecode compilation.
