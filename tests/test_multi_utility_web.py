@@ -596,10 +596,10 @@ async function main() {
         amountDelta: amountLine?.delta,
         ledgerText: document.getElementById("audit-lines").textContent,
         serviceText: document.getElementById("service-results").innerText,
-        issues: new Set(state.audit.lines
-          .filter((line) => ["discrepancy", "needs_review"].includes(line.status))
-          .map((line, index) => String(line.root_cause_id || line.id || "issue-" + index)))
-          .size,
+        issues: state.audit.lines.filter((line) => (
+          ["discrepancy", "needs_review"].includes(line.status)
+          && lineRootCauseIds(line).length === 0
+        )).length,
       };
     })()`);
     await evaluate(`document.querySelector('[data-step="3"] [data-back="2"]').click(); true`);
@@ -3153,7 +3153,8 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
     corrected_line.update(
         {
             "id": "corrected-root-line",
-            "root_cause_id": "corrected-root",
+            "root_cause_id": None,
+            "root_cause_ids": [],
             "status": "discrepancy",
             "delta": "7.250000000000000001",
             "label": "Corrected amount review",
@@ -3564,7 +3565,8 @@ def test_internal_reconciliation_copy_keeps_unverified_categories_explicit() -> 
     )
 
     assert (
-        "Only deterministic relationships with printed operands were checked. "
+        "Only deterministic relationships supported by printed or explicitly "
+        "labeled inferred operands were checked. "
         "Unsupported lines remain explicitly unverified; this does not claim "
         "tariff truth."
     ) in rendered["verdictHtml"]
@@ -3599,7 +3601,7 @@ def test_review_warnings_are_visible_accessible_and_inert_before_audit() -> None
     assert not any(name.startswith("on") for name, _value in probe.attributes)
 
 
-def test_priority_findings_hide_dependent_symptom_when_root_is_present() -> None:
+def test_priority_and_bundle_counts_hide_single_and_multi_root_dependents() -> None:
     client = create_app().test_client()
     extraction = client.get("/api/sample/duke").get_json()["extraction"]
     audit = client.post("/api/audit", json=extraction).get_json()["audit"]
@@ -3613,24 +3615,46 @@ def test_priority_findings_hide_dependent_symptom_when_root_is_present() -> None
         }
     )
     root.pop("root_cause_id", None)
+    second_root = json.loads(json.dumps(root))
+    second_root.update(
+        {
+            "id": "second-root-finding",
+            "label": "Second root printed mismatch",
+            "delta": "2.00",
+        }
+    )
     dependent = json.loads(json.dumps(root))
     dependent.update(
         {
             "id": "dependent-symptom",
-            "root_cause_id": "root-finding",
+            "root_cause_id": None,
+            "root_cause_ids": ["root-finding", "second-root-finding"],
             "label": "Downstream total symptom",
         }
     )
-    audit["lines"] = [root, dependent]
+    legacy_dependent = json.loads(json.dumps(root))
+    legacy_dependent.update(
+        {
+            "id": "legacy-dependent-symptom",
+            "root_cause_id": "root-finding",
+            "label": "Legacy downstream symptom",
+        }
+    )
+    audit["lines"] = [root, second_root, dependent, legacy_dependent]
     audit["verdict"] = "possible_discrepancy"
 
     rendered = _exercise_javascript_contract(extraction, audit, mode="duke")
 
     assert "Root printed mismatch" in rendered["priorityHtml"]
+    assert "Second root printed mismatch" in rendered["priorityHtml"]
     assert "Downstream total symptom" not in rendered["priorityHtml"]
+    assert "Legacy downstream symptom" not in rendered["priorityHtml"]
     assert "Root printed mismatch" in rendered["auditHtml"]
     assert "Downstream total symptom" in rendered["auditHtml"]
-    assert rendered["summaryIssueCount"] == 1
+    assert "Legacy downstream symptom" in rendered["auditHtml"]
+    assert "Derived from roots" in rendered["auditHtml"]
+    assert "root-finding, second-root-finding" in rendered["auditHtml"]
+    assert rendered["summaryIssueCount"] == 2
     for request in audit["review_requests"]:
         assert escape(request["subject"]) in rendered["requestsHtml"]
 
@@ -4380,9 +4404,10 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         for unit in expected["result_units"]:
             assert unit in result["servicesText"]
         if flow["sample"] == "bloomington":
-            assert "Only deterministic relationships with printed operands" in result[
-                "verdictText"
-            ]
+            assert (
+                "deterministic relationships supported by printed or explicitly "
+                "labeled inferred operands"
+            ) in result["verdictText"]
             assert "Unsupported lines remain explicitly unverified" in result[
                 "verdictText"
             ]

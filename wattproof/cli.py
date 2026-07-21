@@ -20,7 +20,7 @@ from .models import BillExtraction
 from .numeric import format_decimal_exact, format_fixed_exact, format_usd_exact
 from .tariffs import SourceIntegrityError
 from .utility_fixtures import load_utility_sample
-from .utility_models import VerificationLevel
+from .utility_models import VerificationLevel, root_cause_ids_for
 
 SAMPLE_CHOICES = (
     "authentic",
@@ -128,12 +128,19 @@ def main(argv: list[str] | None = None) -> int:
         print(bill.synthetic_notice)
     for line in result.lines:
         if line.status == "discrepancy":
+            root_ids = root_cause_ids_for(line)
+            dependency = (
+                f" (derived from roots: {', '.join(root_ids)})"
+                if root_ids
+                else ""
+            )
             print(
                 f"- {line.label}: billed "
                 f"{_display_value(line.billed_amount, line.unit, result.currency)}, "
                 f"expected "
                 f"{_display_value(line.expected_amount, line.unit, result.currency)}, "
                 f"delta {_display_value(line.delta, line.unit, result.currency)}"
+                f"{dependency}"
             )
     if result.comparison is not None:
         print(f"Plan comparison: {result.comparison.headline}")

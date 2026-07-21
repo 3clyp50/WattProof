@@ -17,9 +17,9 @@ coverage and is never inferred from a provider family name.
 Verification is cumulative and the UI displays the highest completed level:
 
 1. **Evidence extracted** — every material fact has visible rendered-page support.
-2. **Internally reconciled** — deterministic rules reproduce the statement's printed
-   meter, conversion, rate, tax, subtotal, and total math where all operands are
-   present.
+2. **Internally reconciled** — deterministic rules reproduce meter, conversion, rate,
+   tax, subtotal, and total relationships where every operand is printed or is an
+   explicitly labeled inferred fact with rendered-page evidence.
 3. **Tariff verified** — an exact adapter independently matches applicable published
    rates for the provider, jurisdiction, schedule, and service period.
 
@@ -27,6 +27,13 @@ Internal reconciliation is not tariff verification. A rate printed on a bill can
 support a product check, but it is not an independent source for itself. Unsupported
 tariff coverage is reported as a limitation and does not prevent useful internal
 checks.
+
+When several independent discrepancies explain the same downstream tax, subtotal,
+current-charge, or amount-due symptom, the ledger keeps the complete ordered root set.
+Dependent symptoms remain visible with a `Derived from roots` trace, but only the
+independent roots contribute to the discrepancy total, priority findings, household
+issue count, and provider-request grounding. The legacy `root_cause_id` field remains
+populated when there is exactly one root; `root_cause_ids` carries one or many roots.
 
 The top-level level is cumulative but does not claim that every charge is
 tariff-backed. Each ledger line carries its own scope. In the PG&E/3CE fixture, the

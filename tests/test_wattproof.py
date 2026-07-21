@@ -306,6 +306,43 @@ def test_cli_audits_provider_neutral_extraction(
     assert output.err == ""
 
 
+def test_cli_labels_multi_root_dependent_discrepancies(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    document = load_utility_sample("duke")
+    electricity = document.sections[0]
+    changed = electricity.model_copy(
+        update={
+            "charges": tuple(
+                charge.model_copy(
+                    update={
+                        "amount": charge.amount.model_copy(
+                            update={"value": charge.amount.value + Decimal("1.00")}
+                        )
+                    }
+                )
+                if charge.id in {"energy_tier_1", "energy_tier_2"}
+                else charge
+                for charge in electricity.charges
+            )
+        }
+    )
+    changed_document = document.model_copy(
+        update={"sections": (changed, *document.sections[1:])}
+    )
+    monkeypatch.setattr("wattproof.cli.extract_pdf", lambda _path: changed_document)
+
+    assert main(["--file", "multi-root.pdf"]) == 0
+    output = capsys.readouterr()
+
+    assert "Possible discrepancy found" in output.out
+    assert "Printed energy tier quantities" not in output.out
+    assert "derived from roots: charge::energy_tier_1, charge::energy_tier_2" in (
+        output.out
+    )
+
+
 def test_web_flow_exposes_all_five_steps() -> None:
     client = create_app().test_client()
     response = client.get("/")

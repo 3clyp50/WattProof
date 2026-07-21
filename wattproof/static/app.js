@@ -701,13 +701,23 @@ function serviceBounds(sections) {
   };
 }
 
+function lineRootCauseIds(line) {
+  const multiple = Array.isArray(line?.root_cause_ids)
+    ? line.root_cause_ids.map(String).filter(Boolean)
+    : [];
+  if (multiple.length) return [...new Set(multiple)];
+  const single = String(line?.root_cause_id || "");
+  return single ? [single] : [];
+}
+
 function rootIssueCount(lines) {
-  const rootIds = new Set();
+  let count = 0;
   lines.forEach((line, index) => {
     if (!["discrepancy", "needs_review"].includes(line.status)) return;
-    rootIds.add(String(line.root_cause_id || line.id || `issue-${index}`));
+    if (lineRootCauseIds(line).length) return;
+    if (String(line.id || `issue-${index}`)) count += 1;
   });
-  return rootIds.size;
+  return count;
 }
 
 function reviewRequestDrafts(result) {
@@ -989,11 +999,7 @@ function renderPriorityFindings(result) {
   const findings = result.lines.filter((line) => (
     line.status === "discrepancy" || line.status === "needs_review"
   ));
-  const findingIds = new Set(findings.map((line) => String(line.id || "")));
-  const rootFindings = findings.filter((line) => {
-    const rootId = String(line.root_cause_id || "");
-    return !rootId || rootId === String(line.id || "") || !findingIds.has(rootId);
-  });
+  const rootFindings = findings.filter((line) => !lineRootCauseIds(line).length);
   byId("priority-findings").innerHTML = rootFindings.length
     ? rootFindings.map((line) => `
       <article class="priority-finding ${escapeHtml(line.status)}">
@@ -1013,6 +1019,10 @@ function renderAuditLedger(result) {
         ? `<a href="${sourceUrl}" target="_blank" rel="noreferrer">${escapeHtml(citation.label)} ↗</a>`
         : `<span>${escapeHtml(citation.label)}</span>`;
     }).join("");
+    const rootIds = lineRootCauseIds(line);
+    const dependencyTrace = rootIds.length
+      ? `<div class="evidence-line dependency-line"><strong>Derived from roots:</strong> ${escapeHtml(rootIds.join(", "))}</div>`
+      : "";
     return `
       <tr class="${optional ? "optional-line" : ""}" ${optional && state.compactAudit ? "hidden" : ""}>
         <td data-label="Status"><span class="status-pill ${escapeHtml(line.status)}">${escapeHtml(auditStatusLabel(line))}</span></td>
@@ -1021,7 +1031,7 @@ function renderAuditLedger(result) {
         <td data-label="Billed">${auditValue(line.billed_amount, line.unit, result.currency)}</td>
         <td data-label="Expected">${auditValue(line.expected_amount, line.unit, result.currency)}</td>
         <td data-label="Delta">${auditValue(line.delta, line.unit, result.currency)}</td>
-        <td data-label="Trace and evidence"><div class="trace">${escapeHtml(line.formula)}</div><div class="evidence-line">${lineEvidence(line)}</div>${line.limitation ? `<div class="evidence-line"><strong>Limit:</strong> ${escapeHtml(line.limitation)}</div>` : ""}<div class="citation-links">${links}</div></td>
+        <td data-label="Trace and evidence"><div class="trace">${escapeHtml(line.formula)}</div>${dependencyTrace}<div class="evidence-line">${lineEvidence(line)}</div>${line.limitation ? `<div class="evidence-line"><strong>Limit:</strong> ${escapeHtml(line.limitation)}</div>` : ""}<div class="citation-links">${links}</div></td>
       </tr>`;
   }).join("");
   byId("show-all-lines").textContent = state.compactAudit ? "Show all checks" : "Compact view";
@@ -1058,7 +1068,7 @@ function renderAudit() {
   if (result.verification_level === "tariff_verified") {
     explanation = "At least one governing charge matched an exact, period-bound published-tariff adapter.";
   } else if (result.verification_level === "internally_reconciled") {
-    explanation = "Only deterministic relationships with printed operands were checked. Unsupported lines remain explicitly unverified; this does not claim tariff truth.";
+    explanation = "Only deterministic relationships supported by printed or explicitly labeled inferred operands were checked. Unsupported lines remain explicitly unverified; this does not claim tariff truth.";
   }
   verdict.innerHTML = `
     <div class="verdict-icon" aria-hidden="true">${discrepancy || needsReview ? "!" : "✓"}</div>

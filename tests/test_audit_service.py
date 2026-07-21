@@ -338,6 +338,113 @@ def test_synthetic_error_remains_exactly_five_dollars() -> None:
     assert result.discrepancy_total == Decimal("5.00")
 
 
+def test_exact_adapter_two_tariff_roots_do_not_double_count_subtotal() -> None:
+    bill = _changed_charge_amount(
+        load_sample("synthetic"),
+        "pge_off_peak_energy",
+        Decimal("2.00"),
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+    roots = ("pge_peak_energy", "pge_off_peak_energy")
+
+    assert lines["delivery_subtotal"].status == "discrepancy"
+    assert lines["delivery_subtotal"].root_cause_id is None
+    assert lines["delivery_subtotal"].root_cause_ids == roots
+    assert result.discrepancy_total == Decimal("7.00")
+    assert result.review_requests[0].grounded_audit_line_ids == roots
+    assert lines["delivery_subtotal"].label not in result.review_requests[0].body
+
+
+def test_exact_adapter_mixed_roots_exclude_dependent_subtotal_from_drafts() -> None:
+    bill = _changed_charge_amount(
+        load_sample("synthetic"),
+        "pge_off_peak_energy",
+        Decimal("2.00"),
+    )
+    bill = bill.model_copy(
+        update={
+            "amount_due": bill.amount_due.model_copy(
+                update={"value": bill.amount_due.value + Decimal("2.00")}
+            )
+        }
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["delivery_subtotal"].root_cause_ids == (
+        "pge_peak_energy",
+        "pge_off_peak_energy",
+    )
+    assert lines["amount_due"].root_cause_ids == ()
+    assert result.discrepancy_total == Decimal("9.00")
+    assert tuple(
+        request.grounded_audit_line_ids for request in result.review_requests
+    ) == (
+        ("pge_peak_energy", "pge_off_peak_energy"),
+        ("amount_due",),
+    )
+
+
+def test_exact_adapter_multi_root_uut_and_subtotal_are_dependent() -> None:
+    bill = _changed_charge_amount(
+        _changed_charge_amount(
+            load_sample("authentic"),
+            "cca_nov_peak",
+            Decimal("3.00"),
+        ),
+        "cca_nov_off_peak",
+        Decimal("2.00"),
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+    roots = ("cca_nov_peak", "cca_nov_off_peak")
+
+    assert lines["cca_nov_uut"].status == "discrepancy"
+    assert lines["cca_nov_uut"].root_cause_ids == roots
+    assert lines["generation_subtotal"].root_cause_ids == roots
+    assert result.discrepancy_total == Decimal("5.00")
+    assert result.review_requests[0].grounded_audit_line_ids == roots
+
+
+@pytest.mark.parametrize("dependent_line_id", ["current_charges", "amount_due"])
+def test_exact_adapter_cross_section_multi_roots_propagate_without_neutral_draft(
+    dependent_line_id: str,
+) -> None:
+    bill = load_sample("authentic")
+    updates = {
+        "delivery_subtotal": bill.delivery_subtotal.model_copy(
+            update={"value": bill.delivery_subtotal.value + Decimal("2.00")}
+        ),
+        "generation_subtotal": bill.generation_subtotal.model_copy(
+            update={"value": bill.generation_subtotal.value + Decimal("3.00")}
+        ),
+    }
+    if dependent_line_id == "amount_due":
+        updates["current_charges"] = bill.current_charges.model_copy(
+            update={"value": bill.current_charges.value + Decimal("5.00")}
+        )
+    changed = bill.model_copy(update=updates)
+
+    result = audit_extraction(changed)
+    lines = {line.id: line for line in result.lines}
+    roots = ("delivery_subtotal", "generation_subtotal")
+
+    assert lines[dependent_line_id].status == "discrepancy"
+    assert lines[dependent_line_id].root_cause_ids == roots
+    assert result.discrepancy_total == Decimal("5.00")
+    assert tuple(request.provider for request in result.review_requests) == (
+        bill.delivery_provider.value,
+        bill.generation_provider.value,
+    )
+    assert tuple(
+        request.grounded_audit_line_ids for request in result.review_requests
+    ) == (("delivery_subtotal",), ("generation_subtotal",))
+
+
 def test_unsupported_legacy_provider_falls_back_to_internal() -> None:
     bill = _changed_text(
         load_sample("authentic"),
@@ -990,7 +1097,7 @@ def test_current_charges_root_explains_amount_due_symptom() -> None:
     )
 
 
-def test_multiple_section_roots_do_not_collapse_current_charges() -> None:
+def test_multiple_section_roots_collapse_exactly_explained_current_charges() -> None:
     bill = load_sample("authentic")
     bill = bill.model_copy(
         update={
@@ -1008,12 +1115,15 @@ def test_multiple_section_roots_do_not_collapse_current_charges() -> None:
 
     assert lines["current_charges"].status == "discrepancy"
     assert lines["current_charges"].root_cause_id is None
+    assert lines["current_charges"].root_cause_ids == (
+        "delivery_subtotal",
+        "generation_subtotal",
+    )
     assert tuple(
         request.grounded_audit_line_ids for request in result.review_requests
     ) == (
         ("delivery_subtotal",),
         ("generation_subtotal",),
-        ("current_charges",),
     )
 
 

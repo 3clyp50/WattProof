@@ -428,18 +428,17 @@ def test_charge_discrepancy_is_root_for_subtotal_and_provider_request() -> None:
     assert "$1.00" in result.review_requests[0].body
 
 
-def test_two_direct_charge_roots_keep_subtotal_as_a_separate_root() -> None:
+def test_percentage_and_subtotal_symptoms_collapse_to_one_charge_root() -> None:
     result = reconcile_document(water_document(water_usage_amount="8.46"))
     lines = {line.id: line for line in result.lines}
 
     assert lines["charge::water_usage"].root_cause_id is None
-    assert lines["charge::sales_tax"].root_cause_id is None
-    assert lines["subtotal::water"].root_cause_id is None
-    assert result.discrepancy_total == Decimal("2.07")
+    assert lines["charge::sales_tax"].root_cause_id == "charge::water_usage"
+    assert lines["charge::sales_tax"].root_cause_ids == ("charge::water_usage",)
+    assert lines["subtotal::water"].root_cause_id == "charge::water_usage"
+    assert result.discrepancy_total == Decimal("1.00")
     assert result.review_requests[0].grounded_audit_line_ids == (
         "charge::water_usage",
-        "charge::sales_tax",
-        "subtotal::water",
     )
 
 
@@ -757,7 +756,7 @@ def test_multiple_providers_receive_separate_requests_in_statement_order() -> No
     )
 
 
-def test_two_section_roots_do_not_hide_current_charges_root() -> None:
+def test_two_section_roots_explain_current_charges_without_double_counting() -> None:
     water = water_document()
     gas = gas_document()
     water_section = water.sections[0].model_copy(
@@ -780,7 +779,11 @@ def test_two_section_roots_do_not_hide_current_charges_root() -> None:
     assert lines["subtotal::water"].root_cause_id is None
     assert lines["subtotal::gas"].root_cause_id is None
     assert lines["statement::current_charges"].root_cause_id is None
-    assert result.discrepancy_total == Decimal("4.00")
+    assert lines["statement::current_charges"].root_cause_ids == (
+        "subtotal::water",
+        "subtotal::gas",
+    )
+    assert result.discrepancy_total == Decimal("2.00")
     assert result.review_requests[0].grounded_audit_line_ids == (
         "subtotal::water",
     )
@@ -1393,3 +1396,141 @@ def test_quantity_sum_cannot_verify_incompatible_component_units() -> None:
         target.evidence,
     )
     assert "units" in (line.limitation or "").lower()
+
+
+@pytest.mark.parametrize(
+    ("tier_ids", "expected_total"),
+    [
+        (("energy_tier_1", "energy_tier_2"), Decimal("2.00")),
+        (
+            ("energy_tier_1", "energy_tier_2", "energy_tier_3"),
+            Decimal("3.00"),
+        ),
+    ],
+)
+def test_duke_multi_root_tier_errors_do_not_double_count_dependent_math(
+    tier_ids: tuple[str, ...],
+    expected_total: Decimal,
+) -> None:
+    document = load_utility_sample("duke")
+    electricity = document.sections[0]
+    changed_charges = tuple(
+        charge.model_copy(
+            update={
+                "amount": charge.amount.model_copy(
+                    update={"value": charge.amount.value + Decimal("1.00")}
+                )
+            }
+        )
+        if charge.id in tier_ids
+        else charge
+        for charge in electricity.charges
+    )
+    changed_electricity = electricity.model_copy(
+        update={"charges": changed_charges}
+    )
+
+    result = reconcile_document(
+        document.model_copy(
+            update={"sections": (changed_electricity, *document.sections[1:])}
+        )
+    )
+    lines = {line.id: line for line in result.lines}
+    roots = tuple(f"charge::{tier_id}" for tier_id in tier_ids)
+
+    for root_id in roots:
+        assert lines[root_id].root_cause_id is None
+        assert lines[root_id].root_cause_ids == ()
+    for dependent_id in ("charge::state_tax", "subtotal::electricity"):
+        assert lines[dependent_id].status == "discrepancy"
+        assert lines[dependent_id].root_cause_id is None
+        assert lines[dependent_id].root_cause_ids == roots
+    assert result.discrepancy_total == expected_total
+    assert result.review_requests[0].grounded_audit_line_ids == roots
+    for dependent_id in ("charge::state_tax", "subtotal::electricity"):
+        assert lines[dependent_id].label not in result.review_requests[0].body
+
+
+def test_single_root_dependency_keeps_legacy_field_and_new_tuple() -> None:
+    result = reconcile_document(
+        water_document(water_usage_amount="8.46", tax_amount="1.35")
+    )
+    subtotal = next(line for line in result.lines if line.id == "subtotal::water")
+
+    assert subtotal.root_cause_id == "charge::water_usage"
+    assert subtotal.root_cause_ids == ("charge::water_usage",)
+    serialized = subtotal.model_dump(mode="json")
+    assert serialized["root_cause_id"] == "charge::water_usage"
+    assert serialized["root_cause_ids"] == ["charge::water_usage"]
+
+
+def test_multi_root_dependents_and_independent_due_are_grounded_once_each() -> None:
+    document = load_utility_sample("duke")
+    electricity = document.sections[0]
+    changed_electricity = electricity.model_copy(
+        update={
+            "charges": tuple(
+                charge.model_copy(
+                    update={
+                        "amount": charge.amount.model_copy(
+                            update={"value": charge.amount.value + Decimal("1.00")}
+                        )
+                    }
+                )
+                if charge.id in {"energy_tier_1", "energy_tier_2"}
+                else charge
+                for charge in electricity.charges
+            )
+        }
+    )
+    changed_document = document.model_copy(
+        update={
+            "sections": (changed_electricity, *document.sections[1:]),
+            "amount_due": document.amount_due.model_copy(
+                update={"value": document.amount_due.value + Decimal("3.00")}
+            ),
+        }
+    )
+
+    result = reconcile_document(changed_document)
+    lines = {line.id: line for line in result.lines}
+    roots = ("charge::energy_tier_1", "charge::energy_tier_2")
+
+    assert lines["charge::state_tax"].root_cause_ids == roots
+    assert lines["subtotal::electricity"].root_cause_ids == roots
+    assert lines["statement::amount_due"].root_cause_ids == ()
+    assert result.discrepancy_total == Decimal("5.00")
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        *roots,
+        "statement::amount_due",
+    )
+
+
+def test_generic_cross_section_roots_explain_amount_due_through_verified_current() -> None:
+    water = water_document()
+    gas = gas_document()
+    water_section = water.sections[0].model_copy(
+        update={"subtotal": money_fact("20.53", "Water subtotal $20.53")}
+    )
+    gas_section = gas.sections[0].model_copy(
+        update={"subtotal": money_fact("11.00", "Gas subtotal $11.00")}
+    )
+    combined = water.model_copy(
+        update={
+            "sections": (water_section, gas_section),
+            "current_charges": money_fact("31.53", "Current charges $31.53"),
+            "amount_due": money_fact("29.53", "Amount due $29.53"),
+        }
+    )
+
+    result = reconcile_document(combined)
+    lines = {line.id: line for line in result.lines}
+    roots = ("subtotal::water", "subtotal::gas")
+
+    assert lines["statement::current_charges"].status == "verified"
+    assert lines["statement::amount_due"].status == "discrepancy"
+    assert lines["statement::amount_due"].root_cause_ids == roots
+    assert result.discrepancy_total == Decimal("2.00")
+    assert tuple(
+        request.grounded_audit_line_ids for request in result.review_requests
+    ) == (("subtotal::water",), ("subtotal::gas",))

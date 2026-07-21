@@ -25,6 +25,9 @@ from .utility_models import (
     UtilityAuditResult,
     UtilityCharge,
     UtilityDocument,
+    ordered_root_cause_ids,
+    root_cause_ids_for,
+    root_cause_update,
 )
 
 CENT = Decimal("0.01")
@@ -1024,7 +1027,7 @@ def _amount_due_line(
 @dataclass(frozen=True)
 class _ReconciledValue:
     amount: Decimal
-    root_ids: frozenset[str]
+    root_ids: tuple[str, ...]
     provable: bool
 
 
@@ -1047,24 +1050,24 @@ def _corrected_charge_value(
     line = charge_lines_by_id[charge_id]
     calculation = charge.calculation
     if calculation is None:
-        result = _ReconciledValue(charge.amount.value, frozenset(), True)
+        result = _ReconciledValue(charge.amount.value, (), True)
     elif line.expected_amount is None:
-        result = _ReconciledValue(charge.amount.value, frozenset(), False)
+        result = _ReconciledValue(charge.amount.value, (), False)
     elif calculation.kind == "quantity_times_rate":
         if line.status == "discrepancy":
             result = _ReconciledValue(
                 line.expected_amount,
-                frozenset((line.id,)),
+                (line.id,),
                 True,
             )
         else:
-            result = _ReconciledValue(charge.amount.value, frozenset(), True)
+            result = _ReconciledValue(charge.amount.value, (), True)
     elif charge_id in visiting:
-        result = _ReconciledValue(charge.amount.value, frozenset(), False)
+        result = _ReconciledValue(charge.amount.value, (), False)
     else:
         rate = charge.rate
         if rate is None or rate.unit != "fraction":
-            result = _ReconciledValue(charge.amount.value, frozenset(), False)
+            result = _ReconciledValue(charge.amount.value, (), False)
         else:
             visiting.add(charge_id)
             referenced_values: list[_ReconciledValue] = []
@@ -1073,7 +1076,7 @@ def _corrected_charge_value(
                     if referenced_id not in charges_by_id:
                         result = _ReconciledValue(
                             charge.amount.value,
-                            frozenset(),
+                            (),
                             False,
                         )
                         break
@@ -1087,22 +1090,35 @@ def _corrected_charge_value(
                         )
                     )
                 else:
-                    root_ids = set().union(
+                    dependency_root_ids = ordered_root_cause_ids(
                         *(value.root_ids for value in referenced_values)
                     )
-                    if line.status == "discrepancy":
-                        root_ids.add(line.id)
                     provable = all(value.provable for value in referenced_values)
-                    if root_ids:
+                    if dependency_root_ids or line.status == "discrepancy":
                         corrected_base = sum_exact(
                             tuple(value.amount for value in referenced_values)
                         )
                         amount = round_money(multiply_exact(rate.value, corrected_base))
                     else:
                         amount = charge.amount.value
+                    root_ids = dependency_root_ids
+                    if line.status == "discrepancy":
+                        if (
+                            provable
+                            and dependency_root_ids
+                            and _money_reconciles(charge.amount.value, amount)
+                        ):
+                            charge_lines_by_id[charge_id] = line.model_copy(
+                                update=root_cause_update(dependency_root_ids)
+                            )
+                        else:
+                            root_ids = ordered_root_cause_ids(
+                                dependency_root_ids,
+                                (line.id,),
+                            )
                     result = _ReconciledValue(
                         amount,
-                        frozenset(root_ids),
+                        root_ids,
                         provable,
                     )
             finally:
@@ -1130,23 +1146,23 @@ def _reconcile_section_root(
         for charge in section.charges
     )
     corrected_subtotal = sum_exact(tuple(value.amount for value in charge_values))
-    root_ids = set().union(*(value.root_ids for value in charge_values))
+    root_ids = ordered_root_cause_ids(*(value.root_ids for value in charge_values))
     provable = all(value.provable for value in charge_values)
     rooted_line = subtotal_line
     if subtotal_line.status == "discrepancy":
         if (
             provable
-            and len(root_ids) == 1
+            and root_ids
             and _money_reconciles(section.subtotal.value, corrected_subtotal)
         ):
             rooted_line = subtotal_line.model_copy(
-                update={"root_cause_id": next(iter(root_ids))}
+                update=root_cause_update(root_ids)
             )
         else:
-            root_ids.add(subtotal_line.id)
+            root_ids = ordered_root_cause_ids(root_ids, (subtotal_line.id,))
     return rooted_line, _ReconciledValue(
         corrected_subtotal,
-        frozenset(root_ids),
+        root_ids,
         provable,
     )
 
@@ -1157,26 +1173,26 @@ def _reconcile_current_root(
     section_values: tuple[_ReconciledValue, ...],
 ) -> tuple[UtilityAuditLine, _ReconciledValue]:
     corrected_current = sum_exact(tuple(value.amount for value in section_values))
-    root_ids = set().union(*(value.root_ids for value in section_values))
+    root_ids = ordered_root_cause_ids(*(value.root_ids for value in section_values))
     provable = all(value.provable for value in section_values)
     rooted_line = current_line
     if current_line.status == "discrepancy":
         if (
             provable
-            and len(root_ids) == 1
+            and root_ids
             and _money_reconciles(
                 document.current_charges.value,
                 corrected_current,
             )
         ):
             rooted_line = current_line.model_copy(
-                update={"root_cause_id": next(iter(root_ids))}
+                update=root_cause_update(root_ids)
             )
         else:
-            root_ids.add(current_line.id)
+            root_ids = ordered_root_cause_ids(root_ids, (current_line.id,))
     return rooted_line, _ReconciledValue(
         corrected_current,
-        frozenset(root_ids),
+        root_ids,
         provable,
     )
 
@@ -1192,11 +1208,11 @@ def _reconcile_amount_due_root(
     if (
         amount_due_line.status == "discrepancy"
         and current_value.provable
-        and len(current_value.root_ids) == 1
+        and current_value.root_ids
         and _money_reconciles(document.amount_due.value, corrected_due)
     ):
         return amount_due_line.model_copy(
-            update={"root_cause_id": next(iter(current_value.root_ids))}
+            update=root_cause_update(current_value.root_ids)
         )
     return amount_due_line
 
@@ -1283,7 +1299,7 @@ def _review_request(
             line.section_id in section_ids
             or (include_statement_roots and line.section_id is None)
         )
-        and line.root_cause_id is None
+        and not root_cause_ids_for(line)
         and line.status in {"discrepancy", "needs_review"}
     )
     discrepancies = tuple(
@@ -1427,6 +1443,11 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
         lines[subtotal_index] = rooted_subtotal
         section_values.append(section_value)
 
+    rooted_charge_lines = {
+        line.id: line for line in charge_lines_by_id.values()
+    }
+    lines = [rooted_charge_lines.get(line.id, line) for line in lines]
+
     current_charges_line, current_value = _reconcile_current_root(
         document,
         _current_charges_line(document),
@@ -1464,7 +1485,7 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
             abs_exact(line.delta)
             for line in line_tuple
             if line.status == "discrepancy"
-            and line.root_cause_id is None
+            and not root_cause_ids_for(line)
             and line.delta is not None
             and line.unit == document.currency
             and not line.id.startswith(
@@ -1481,7 +1502,7 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
         for line in line_tuple
         if len(provider_sections) > 1
         and line.section_id is None
-        and line.root_cause_id is None
+        and not root_cause_ids_for(line)
         and line.status in {"discrepancy", "needs_review"}
     )
     provider_requests = tuple(

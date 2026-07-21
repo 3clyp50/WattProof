@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import date
 from decimal import Decimal
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -322,9 +322,36 @@ class UtilityAuditLine(BaseModel):
     status: AuditStatusV2
     limitation: str | None = None
     root_cause_id: str | None = None
+    root_cause_ids: tuple[str, ...] = Field(
+        default=(),
+        exclude_if=lambda root_ids: not root_ids,
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_root_cause_fields(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        fields = dict(value)
+        single = fields.get("root_cause_id")
+        raw_multiple = fields.get("root_cause_ids", ())
+        if raw_multiple is not None and not isinstance(raw_multiple, (list, tuple)):
+            raise ValueError("root_cause_ids must be an array of audit line IDs")
+        multiple = tuple(raw_multiple) if raw_multiple is not None else ()
+        if single is not None and multiple and multiple != (single,):
+            raise ValueError(
+                "root_cause_id must match the sole root_cause_ids dependency"
+            )
+        if single is not None and not multiple:
+            multiple = (single,)
+        if single is None and len(multiple) == 1:
+            single = multiple[0]
+        fields["root_cause_id"] = single
+        fields["root_cause_ids"] = multiple
+        return fields
 
     @model_validator(mode="after")
-    def validate_billed_provenance(self) -> Self:
+    def validate_line_invariants(self) -> Self:
         if self.billed_status == "user_corrected" and self.billed_original_value is None:
             raise ValueError(
                 "billed_original_value is required for a user-corrected billed fact"
@@ -333,7 +360,56 @@ class UtilityAuditLine(BaseModel):
             raise ValueError(
                 "billed_original_value is only valid for a user-corrected billed fact"
             )
+        root_ids = self.root_cause_ids
+        if len(root_ids) != len(set(root_ids)):
+            raise ValueError("root cause dependencies must be distinct")
+        if any(not root_id for root_id in root_ids):
+            raise ValueError("root cause dependency IDs must not be empty")
+        if self.id in root_ids:
+            raise ValueError("an audit line cannot name itself as a root cause")
+        if root_ids and self.status != "discrepancy":
+            raise ValueError("only discrepancy lines may declare root causes")
+        if len(root_ids) == 1 and self.root_cause_id != root_ids[0]:
+            raise ValueError("root_cause_id must match the sole root cause dependency")
+        if len(root_ids) != 1 and self.root_cause_id is not None:
+            raise ValueError(
+                "root_cause_id is only valid for one root cause dependency"
+            )
         return self
+
+
+def ordered_root_cause_ids(*groups: Iterable[str]) -> tuple[str, ...]:
+    """Merge root IDs in first-seen order without duplicating dependencies."""
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for root_id in group:
+            if root_id in seen:
+                continue
+            seen.add(root_id)
+            ordered.append(root_id)
+    return tuple(ordered)
+
+
+def root_cause_ids_for(line: UtilityAuditLine) -> tuple[str, ...]:
+    """Read both the multi-root field and the retained legacy single-root field."""
+
+    if line.root_cause_ids:
+        return line.root_cause_ids
+    if line.root_cause_id is not None:
+        return (line.root_cause_id,)
+    return ()
+
+
+def root_cause_update(root_ids: Iterable[str]) -> dict[str, object]:
+    """Return a canonical model-copy update for zero, one, or many roots."""
+
+    ordered = ordered_root_cause_ids(root_ids)
+    return {
+        "root_cause_id": ordered[0] if len(ordered) == 1 else None,
+        "root_cause_ids": ordered,
+    }
 
 
 class ProviderReviewRequest(BaseModel):
@@ -362,7 +438,58 @@ class UtilityAuditResult(BaseModel):
     review_requests: tuple[ProviderReviewRequest, ...] = ()
 
     @model_validator(mode="after")
-    def validate_published_tariff_evidence(self) -> Self:
+    def validate_result_invariants(self) -> Self:
+        line_ids = tuple(line.id for line in self.lines)
+        if len(line_ids) != len(set(line_ids)):
+            raise ValueError("audit line IDs must be unique")
+        lines_by_id = {line.id: line for line in self.lines}
+        line_order = {line_id: index for index, line_id in enumerate(line_ids)}
+        for line in self.lines:
+            root_ids = root_cause_ids_for(line)
+            if len(root_ids) != len(set(root_ids)):
+                raise ValueError("root cause dependencies must be distinct")
+            if line.id in root_ids:
+                raise ValueError("an audit line cannot name itself as a root cause")
+            expected_single = root_ids[0] if len(root_ids) == 1 else None
+            if line.root_cause_id != expected_single:
+                raise ValueError(
+                    "root_cause_id must preserve single-root compatibility"
+                )
+            missing = tuple(root_id for root_id in root_ids if root_id not in lines_by_id)
+            if missing:
+                raise ValueError(
+                    f"root cause dependency references missing audit line: {missing[0]}"
+                )
+            expected_order = tuple(
+                sorted(root_ids, key=line_order.__getitem__)
+            )
+            if root_ids != expected_order:
+                raise ValueError(
+                    "root cause dependencies must follow stable audit-line order"
+                )
+            for root_id in root_ids:
+                root = lines_by_id[root_id]
+                if root.status != "discrepancy" or root_cause_ids_for(root):
+                    raise ValueError(
+                        "root cause dependencies must reference independent "
+                        "discrepancy lines"
+                    )
+
+        for request in self.review_requests:
+            grounded = request.grounded_audit_line_ids
+            if len(grounded) != len(set(grounded)):
+                raise ValueError("review request grounding IDs must be distinct")
+            for line_id in grounded:
+                grounded_line = lines_by_id.get(line_id)
+                if grounded_line is None:
+                    raise ValueError(
+                        f"review request references missing audit line: {line_id}"
+                    )
+                if root_cause_ids_for(grounded_line):
+                    raise ValueError(
+                        "review request cannot ground a dependent audit line"
+                    )
+
         published = tuple(
             line for line in self.lines if line.scope == "published_tariff"
         )

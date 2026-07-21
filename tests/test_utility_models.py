@@ -19,10 +19,12 @@ from wattproof.utility_models import (
     FactBaseV2,
     IntegerFactV2,
     MoneyFactV2,
+    ProviderReviewRequest,
     QuantitySumCheck,
     ServiceSection,
     TextFactV2,
     UtilityAuditLine,
+    UtilityAuditResult,
     UtilityCharge,
     UtilityDocument,
 )
@@ -82,6 +84,144 @@ def test_audit_line_allows_legacy_provenance_to_remain_absent() -> None:
 
     assert line.billed_status is None
     assert line.billed_original_value is None
+
+
+def discrepancy_line_payload(line_id: str) -> dict[str, Any]:
+    payload = audit_line_payload()
+    payload.update(
+        id=line_id,
+        label=line_id,
+        billed_amount=Decimal("10.00"),
+        expected_amount=Decimal("9.00"),
+        delta=Decimal("1.00"),
+        status="discrepancy",
+    )
+    return payload
+
+
+def audit_result_with_lines(*lines: UtilityAuditLine) -> UtilityAuditResult:
+    return UtilityAuditResult(
+        schema_version="2.0",
+        fixture_kind="uploaded",
+        verdict="possible_discrepancy",
+        verification_level="internally_reconciled",
+        headline="Possible discrepancy",
+        discrepancy_total=Decimal("1.00"),
+        currency="USD",
+        lines=lines,
+    )
+
+
+def test_single_root_cause_id_remains_backward_compatible_json() -> None:
+    line = UtilityAuditLine(
+        **discrepancy_line_payload("dependent"),
+        root_cause_id="root",
+    )
+
+    assert line.root_cause_id == "root"
+    assert line.root_cause_ids == ("root",)
+    assert line.model_dump(mode="json")["root_cause_id"] == "root"
+    assert line.model_dump(mode="json")["root_cause_ids"] == ["root"]
+
+
+def test_multi_root_dependency_serializes_without_a_false_single_root() -> None:
+    roots = (
+        UtilityAuditLine(**discrepancy_line_payload("root_a")),
+        UtilityAuditLine(**discrepancy_line_payload("root_b")),
+    )
+    dependent = UtilityAuditLine(
+        **discrepancy_line_payload("dependent"),
+        root_cause_ids=("root_a", "root_b"),
+    )
+
+    result = audit_result_with_lines(*roots, dependent)
+    serialized = result.model_dump(mode="json")["lines"][-1]
+
+    assert dependent.root_cause_id is None
+    assert dependent.root_cause_ids == ("root_a", "root_b")
+    assert serialized["root_cause_id"] is None
+    assert serialized["root_cause_ids"] == ["root_a", "root_b"]
+
+
+@pytest.mark.parametrize(
+    "root_cause_ids",
+    [
+        ("root", "root"),
+        ("dependent",),
+    ],
+)
+def test_audit_line_rejects_duplicate_or_self_root_dependencies(
+    root_cause_ids: tuple[str, ...],
+) -> None:
+    with pytest.raises(ValidationError, match="root cause"):
+        UtilityAuditLine(
+            **discrepancy_line_payload("dependent"),
+            root_cause_ids=root_cause_ids,
+        )
+
+
+def test_audit_line_rejects_conflicting_single_and_multi_root_fields() -> None:
+    with pytest.raises(ValidationError, match="root_cause_id"):
+        UtilityAuditLine(
+            **discrepancy_line_payload("dependent"),
+            root_cause_id="root_a",
+            root_cause_ids=("root_a", "root_b"),
+        )
+
+
+def test_audit_line_rejects_unordered_root_dependency_input() -> None:
+    with pytest.raises(ValidationError, match="must be an array"):
+        UtilityAuditLine.model_validate(
+            {
+                **discrepancy_line_payload("dependent"),
+                "root_cause_ids": {"root"},
+            }
+        )
+
+
+def test_audit_result_rejects_missing_or_out_of_order_root_dependencies() -> None:
+    root_a = UtilityAuditLine(**discrepancy_line_payload("root_a"))
+    root_b = UtilityAuditLine(**discrepancy_line_payload("root_b"))
+    missing = UtilityAuditLine(
+        **discrepancy_line_payload("missing_dependent"),
+        root_cause_ids=("missing",),
+    )
+    out_of_order = UtilityAuditLine(
+        **discrepancy_line_payload("ordered_dependent"),
+        root_cause_ids=("root_b", "root_a"),
+    )
+
+    with pytest.raises(ValidationError, match="missing audit line"):
+        audit_result_with_lines(root_a, missing)
+    with pytest.raises(ValidationError, match="stable audit-line order"):
+        audit_result_with_lines(root_a, root_b, out_of_order)
+
+
+def test_audit_result_rejects_review_grounding_to_a_dependent_symptom() -> None:
+    root = UtilityAuditLine(**discrepancy_line_payload("root"))
+    dependent = UtilityAuditLine(
+        **discrepancy_line_payload("dependent"),
+        root_cause_id="root",
+    )
+    request = ProviderReviewRequest(
+        provider="Example Utility",
+        subject="Review",
+        body="Review this calculation.",
+        grounded_audit_line_ids=("dependent",),
+    )
+
+    with pytest.raises(ValidationError, match="dependent audit line"):
+        UtilityAuditResult(
+            schema_version="2.0",
+            fixture_kind="uploaded",
+            verdict="possible_discrepancy",
+            verification_level="internally_reconciled",
+            headline="Possible discrepancy",
+            discrepancy_total=Decimal("1.00"),
+            currency="USD",
+            lines=(root, dependent),
+            review_requests=(request,),
+        )
 
 
 def test_document_supports_multiple_service_sections() -> None:
