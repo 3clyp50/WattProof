@@ -323,6 +323,7 @@ class UtilityAuditLine(BaseModel):
     status: AuditStatusV2
     limitation: str | None = None
     root_cause_id: str | None = None
+    root_cause_ids: tuple[str, ...] = ()
 
 
 class ProviderReviewRequest(BaseModel):
@@ -348,6 +349,11 @@ class UtilityAuditResult(BaseModel):
     comparison: PlanComparison | None = None
     review_requests: tuple[ProviderReviewRequest, ...] = ()
 ```
+
+`root_cause_ids` is the canonical ordered dependency representation. Retain
+`root_cause_id` as a singleton-compatibility view: validators normalize either
+spelling, require both to agree when supplied together, and leave `root_cause_id`
+unset for zero or multiple dependencies.
 
 Import `Citation`, `PlanComparison`, and `TariffVersion` from `wattproof.models`.
 
@@ -404,6 +410,7 @@ def test_counts_root_discrepancy_once() -> None:
     result = reconcile_document(water_document(printed_usage_charge=Decimal("8.46")))
     lines = {line.id: line for line in result.lines}
     assert lines["charge::water_usage"].delta == Decimal("1.00")
+    assert lines["subtotal::water"].root_cause_ids == ("charge::water_usage",)
     assert lines["subtotal::water"].root_cause_id == "charge::water_usage"
     assert result.discrepancy_total == Decimal("1.00")
 
@@ -458,8 +465,9 @@ current charges; current charges plus optional outstanding balance to amount due
 Stable IDs are `charge::<charge_id>`, `meter::<section_id>`,
 `conversion::<section_id>::<conversion_id>`, `subtotal::<section_id>`,
 `statement::current_charges`, and `statement::amount_due`. Invalid units return
-`needs_review`, never a guessed conversion. Propagate a direct discrepancy ID to
-subtotal/current/due symptoms through `root_cause_id`. Sum USD root discrepancies only.
+`needs_review`, never a guessed conversion. Propagate all direct discrepancy IDs to
+subtotal/current/due symptoms through ordered `root_cause_ids`; retain `root_cause_id`
+as the singleton-compatibility view. Sum USD root discrepancies only.
 
 Reach `internally_reconciled` whenever at least one rule produced an expected value.
 Create one neutral provider request per provider, grounded to root lines: describe a

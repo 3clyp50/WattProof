@@ -15,7 +15,7 @@ This file is the source of truth for the Devpost entry and demo recording. Repla
 - **Devpost project:** https://devpost.com/software/wattproof-xtw6ib
 - **Demo video:** `TODO(submission): public YouTube URL, under three minutes`
 - **Primary Codex feedback Session ID:** `TODO(submission): run /feedback in the main build session`
-- **Judge testing instructions:** Open https://wattproof.tech and choose **Audit authentic sample**, **Duke Electric**, **CenterPoint Gas**, or **Bloomington Water**. All five bundled sample paths are deterministic and keyless. Review each statement separately, then add its minimized summary to the temporary Household bundle. For local verification, clone the repository, install `poppler-utils`, create a Python 3.12+ virtual environment, install `requirements.txt`, run `make run`, and open `http://127.0.0.1:8000`.
+- **Judge testing instructions:** Open https://wattproof.tech and choose **Audit authentic sample**, **Detect a labeled $5 synthetic error**, **Duke Electric**, **CenterPoint Gas**, or **Bloomington Water**. All five bundled sample paths are deterministic and keyless. Review each statement separately, then add its minimized summary to the temporary Household bundle. For local verification, clone the repository, install `poppler-utils`, create a Python 3.12+ virtual environment, install `requirements-dev.txt`, run `make verify`, then run `make run` and open `http://127.0.0.1:8000`.
 
 ## Live Devpost requirements
 
