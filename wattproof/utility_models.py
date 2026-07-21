@@ -263,6 +263,8 @@ class UtilityAuditLine(BaseModel):
     scope: AuditScope
     unit: str
     billed_amount: Decimal | None
+    billed_status: FactStatus | None = None
+    billed_original_value: str | None = None
     expected_amount: Decimal | None
     delta: Decimal | None
     formula: str
@@ -272,6 +274,18 @@ class UtilityAuditLine(BaseModel):
     status: AuditStatusV2
     limitation: str | None = None
     root_cause_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_billed_provenance(self) -> Self:
+        if self.billed_status == "user_corrected" and self.billed_original_value is None:
+            raise ValueError(
+                "billed_original_value is required for a user-corrected billed fact"
+            )
+        if self.billed_status != "user_corrected" and self.billed_original_value is not None:
+            raise ValueError(
+                "billed_original_value is only valid for a user-corrected billed fact"
+            )
+        return self
 
 
 class ProviderReviewRequest(BaseModel):

@@ -20,6 +20,7 @@ from wattproof.utility_models import (
     MoneyFactV2,
     ServiceSection,
     TextFactV2,
+    UtilityAuditLine,
     UtilityCharge,
     UtilityDocument,
 )
@@ -27,6 +28,58 @@ from wattproof.utility_models import (
 
 def evidence() -> EvidenceRef:
     return EvidenceRef(page=1, text="visible statement text", confidence=Decimal("1"))
+
+
+def audit_line_payload() -> dict[str, Any]:
+    return {
+        "id": "charge::example",
+        "section_id": "water",
+        "label": "Example charge",
+        "scope": "printed_math",
+        "unit": "USD",
+        "billed_amount": Decimal("10.00"),
+        "expected_amount": Decimal("10.00"),
+        "delta": Decimal("0.00"),
+        "formula": "10.00 USD",
+        "inputs": {"amount": "10.00 USD"},
+        "evidence": (evidence(),),
+        "status": "verified",
+    }
+
+
+def test_audit_line_serializes_typed_billed_provenance() -> None:
+    line = UtilityAuditLine(
+        **audit_line_payload(),
+        billed_status="printed",
+    )
+
+    serialized = line.model_dump(mode="json")
+    assert serialized["billed_status"] == "printed"
+    assert serialized["billed_original_value"] is None
+
+
+def test_audit_line_user_correction_requires_original_value() -> None:
+    with pytest.raises(ValidationError, match="billed_original_value"):
+        UtilityAuditLine(
+            **audit_line_payload(),
+            billed_status="user_corrected",
+        )
+
+
+def test_audit_line_non_correction_rejects_original_value() -> None:
+    with pytest.raises(ValidationError, match="billed_original_value"):
+        UtilityAuditLine(
+            **audit_line_payload(),
+            billed_status="inferred",
+            billed_original_value="9.00",
+        )
+
+
+def test_audit_line_allows_legacy_provenance_to_remain_absent() -> None:
+    line = UtilityAuditLine(**audit_line_payload())
+
+    assert line.billed_status is None
+    assert line.billed_original_value is None
 
 
 def test_document_supports_multiple_service_sections() -> None:

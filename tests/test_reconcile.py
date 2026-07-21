@@ -10,6 +10,7 @@ from wattproof.utility_models import (
     ConversionCheck,
     DecimalFactV2,
     EvidenceRef,
+    FactStatus,
     MeterCheck,
     MoneyFactV2,
     ServiceSection,
@@ -36,12 +37,20 @@ def decimal_fact(value: str, unit: str, label: str) -> DecimalFactV2:
     )
 
 
-def money_fact(value: str, label: str, currency: str = "USD") -> MoneyFactV2:
+def money_fact(
+    value: str,
+    label: str,
+    currency: str = "USD",
+    *,
+    status: FactStatus = "printed",
+    original_value: str | None = None,
+) -> MoneyFactV2:
     return MoneyFactV2(
         value=Decimal(value),
         currency=currency,
-        status="printed",
+        status=status,
         evidence=evidence(label),
+        original_value=original_value,
     )
 
 
@@ -164,6 +173,29 @@ def gas_document() -> UtilityDocument:
     )
 
 
+def water_document_with_usage_status(
+    status: FactStatus,
+    *,
+    original_value: str | None = None,
+) -> UtilityDocument:
+    document = water_document(water_usage_amount="8.46", tax_amount="1.35")
+    section = document.sections[0]
+    usage = section.charges[0].model_copy(
+        update={
+            "amount": money_fact(
+                "8.46",
+                "Water usage $8.46",
+                status=status,
+                original_value=original_value,
+            )
+        }
+    )
+    changed_section = section.model_copy(
+        update={"charges": (usage, *section.charges[1:])}
+    )
+    return document.model_copy(update={"sections": (changed_section,)})
+
+
 def test_round_money_uses_decimal_half_up() -> None:
     assert round_money(Decimal("1.005")) == Decimal("1.01")
 
@@ -238,6 +270,42 @@ def test_charge_discrepancy_is_root_for_subtotal_and_provider_request() -> None:
         "charge::water_usage",
     )
     assert "$1.00" in result.review_requests[0].body
+
+
+def test_two_direct_charge_roots_keep_subtotal_as_a_separate_root() -> None:
+    result = reconcile_document(water_document(water_usage_amount="8.46"))
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["charge::water_usage"].root_cause_id is None
+    assert lines["charge::sales_tax"].root_cause_id is None
+    assert lines["subtotal::water"].root_cause_id is None
+    assert result.discrepancy_total == Decimal("2.07")
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        "charge::water_usage",
+        "charge::sales_tax",
+        "subtotal::water",
+    )
+
+
+def test_charge_root_does_not_hide_an_independent_subtotal_error() -> None:
+    document = water_document(
+        water_usage_amount="8.46",
+        tax_amount="1.35",
+        subtotal="19.00",
+        current_charges="19.00",
+        amount_due="19.00",
+    )
+
+    result = reconcile_document(document)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["charge::water_usage"].root_cause_id is None
+    assert lines["subtotal::water"].root_cause_id is None
+    assert result.discrepancy_total == Decimal("2.60")
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        "charge::water_usage",
+        "subtotal::water",
+    )
 
 
 def test_quantity_rate_with_incompatible_units_needs_review_without_guessing() -> None:
@@ -428,11 +496,11 @@ def test_derived_only_subtotal_discrepancy_is_a_counted_root() -> None:
     assert result.discrepancy_total == Decimal("0.03")
 
 
-def test_current_and_due_symptoms_point_to_first_upstream_root() -> None:
+def test_current_symptom_points_to_the_proven_single_upstream_root() -> None:
     document = water_document(
         subtotal="20.53",
         current_charges="19.53",
-        amount_due="20.53",
+        amount_due="19.53",
     )
 
     result = reconcile_document(document)
@@ -443,9 +511,58 @@ def test_current_and_due_symptoms_point_to_first_upstream_root() -> None:
         lines["statement::current_charges"].root_cause_id
         == "subtotal::water"
     )
+    assert result.discrepancy_total == Decimal("1.00")
+
+
+def test_direct_charge_root_does_not_hide_an_independent_current_error() -> None:
+    document = water_document(
+        water_usage_amount="8.46",
+        tax_amount="1.35",
+        current_charges="20.53",
+        amount_due="20.53",
+    )
+
+    result = reconcile_document(document)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["subtotal::water"].root_cause_id == "charge::water_usage"
+    assert lines["statement::current_charges"].root_cause_id is None
+    assert result.discrepancy_total == Decimal("2.00")
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        "charge::water_usage",
+        "statement::current_charges",
+    )
+
+
+def test_amount_due_error_not_explained_by_current_stays_a_root() -> None:
+    document = water_document(
+        subtotal="20.53",
+        current_charges="19.53",
+        amount_due="20.53",
+    )
+
+    result = reconcile_document(document)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["statement::current_charges"].root_cause_id == "subtotal::water"
+    assert lines["statement::amount_due"].root_cause_id is None
+    assert result.discrepancy_total == Decimal("2.00")
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        "subtotal::water",
+        "statement::amount_due",
+    )
+
+
+def test_amount_due_symptom_points_to_proven_current_root() -> None:
+    document = water_document(current_charges="20.53", amount_due="19.53")
+
+    result = reconcile_document(document)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["statement::current_charges"].root_cause_id is None
     assert (
         lines["statement::amount_due"].root_cause_id
-        == "subtotal::water"
+        == "statement::current_charges"
     )
     assert result.discrepancy_total == Decimal("1.00")
 
@@ -482,6 +599,109 @@ def test_multiple_providers_receive_separate_requests_in_statement_order() -> No
     assert all(
         request.requires_user_review for request in result.review_requests
     )
+
+
+def test_two_section_roots_do_not_hide_current_charges_root() -> None:
+    water = water_document()
+    gas = gas_document()
+    water_section = water.sections[0].model_copy(
+        update={"subtotal": money_fact("20.53", "Water subtotal $20.53")}
+    )
+    gas_section = gas.sections[0].model_copy(
+        update={"subtotal": money_fact("11.00", "Gas subtotal $11.00")}
+    )
+    combined = water.model_copy(
+        update={
+            "sections": (water_section, gas_section),
+            "current_charges": money_fact("29.53", "Current charges $29.53"),
+            "amount_due": money_fact("29.53", "Amount due $29.53"),
+        }
+    )
+
+    result = reconcile_document(combined)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["subtotal::water"].root_cause_id is None
+    assert lines["subtotal::gas"].root_cause_id is None
+    assert lines["statement::current_charges"].root_cause_id is None
+    assert result.discrepancy_total == Decimal("4.00")
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        "subtotal::water",
+    )
+    assert result.review_requests[1].grounded_audit_line_ids == (
+        "subtotal::gas",
+    )
+
+
+def test_multi_provider_current_root_gets_neutral_consolidated_request() -> None:
+    water = water_document()
+    gas = gas_document()
+    combined = water.model_copy(
+        update={
+            "sections": (water.sections[0], gas.sections[0]),
+            "current_charges": money_fact("30.53", "Current charges $30.53"),
+            "amount_due": money_fact("30.53", "Amount due $30.53"),
+        }
+    )
+
+    result = reconcile_document(combined)
+    lines = {line.id: line for line in result.lines}
+
+    assert result.verdict == "possible_discrepancy"
+    assert lines["statement::current_charges"].root_cause_id is None
+    assert result.discrepancy_total == Decimal("1.00")
+    assert [request.provider for request in result.review_requests] == [
+        "City Water",
+        "Example Gas",
+        "Consolidated statement",
+    ]
+    for request in result.review_requests[:2]:
+        assert request.grounded_audit_line_ids == ()
+        assert "section math reconciled" in request.body
+        assert "separate consolidated statement issue" in request.body
+    neutral = result.review_requests[-1]
+    assert neutral.grounded_audit_line_ids == ("statement::current_charges",)
+    assert "not attributed to a particular provider" in neutral.body
+    assert "$1.00" in neutral.body
+
+
+def test_user_corrected_billed_value_preserves_provenance_in_line_and_draft() -> None:
+    result = reconcile_document(
+        water_document_with_usage_status(
+            "user_corrected",
+            original_value="7.46",
+        )
+    )
+    lines = {line.id: line for line in result.lines}
+    charge = lines["charge::water_usage"]
+    subtotal = lines["subtotal::water"]
+
+    serialized = charge.model_dump(mode="json")
+    assert serialized["billed_status"] == "user_corrected"
+    assert serialized["billed_original_value"] == "7.46"
+    assert "user-corrected" in subtotal.formula
+    assert "original extracted value: 7.46" in subtotal.formula
+    assert "user-corrected" in subtotal.inputs["charge::water_usage"]
+    body = result.review_requests[0].body
+    assert "user-corrected $8.46" in body
+    assert "original extracted value: 7.46" in body
+    assert "printed $8.46" not in body
+
+
+def test_inferred_billed_value_is_not_described_as_printed() -> None:
+    result = reconcile_document(water_document_with_usage_status("inferred"))
+    lines = {line.id: line for line in result.lines}
+    charge = lines["charge::water_usage"]
+    subtotal = lines["subtotal::water"]
+
+    serialized = charge.model_dump(mode="json")
+    assert serialized["billed_status"] == "inferred"
+    assert serialized["billed_original_value"] is None
+    assert "inferred extraction" in subtotal.formula
+    assert "inferred extraction" in subtotal.inputs["charge::water_usage"]
+    body = result.review_requests[0].body
+    assert "inferred extraction $8.46" in body
+    assert "printed $8.46" not in body
 
 
 def test_evidence_is_limited_to_exact_printed_operands() -> None:
