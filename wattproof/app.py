@@ -111,8 +111,23 @@ def create_app() -> Flask:
 
     @app.errorhandler(ValidationError)
     def validation_error(error: ValidationError) -> tuple[Response, int]:
-        first = error.errors(include_url=False)[0]
-        location = ".".join(str(part) for part in first["loc"]) or "document"
+        errors = error.errors(include_url=False)
+        first = next(
+            (
+                item
+                for item in errors
+                if "utility-bill" in str(item["msg"])
+            ),
+            errors[0],
+        )
+        location = ".".join(
+            str(part)
+            for part in first["loc"]
+            if not (
+                isinstance(part, str)
+                and part.startswith(("function-after[", "function-before["))
+            )
+        ) or "document"
         message = str(first["msg"])
         if "percent_of_charges references unknown charge ID:" in message:
             message = (

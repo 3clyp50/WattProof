@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from decimal import ROUND_HALF_UP, Decimal, localcontext
+from math import isfinite
 from typing import Annotated
 
 from pydantic import AfterValidator, BeforeValidator
@@ -11,10 +12,18 @@ MAX_UTILITY_DECIMAL_DIGITS = 28
 MIN_UTILITY_DECIMAL_EXPONENT = -18
 MAX_UTILITY_DECIMAL_EXPONENT = 11
 MAX_UTILITY_DECIMAL_ADJUSTED_EXPONENT = 11
+MAX_UTILITY_INTEGER_ABS = 999_999_999_999
+MAX_UTILITY_INTEGER_CHARACTERS = 64
 
 _DECIMAL_SPELLING = re.compile(
     r"[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?)|(?:\.[0-9]+))(?:[eE][+-]?[0-9]+)?"
 )
+
+
+def abs_exact(value: Decimal) -> Decimal:
+    """Return a Decimal magnitude without applying the ambient context."""
+
+    return value.copy_abs()
 
 
 def _validate_decimal_spelling(value: object) -> object:
@@ -77,6 +86,80 @@ UtilityDecimal = Annotated[
     Decimal,
     BeforeValidator(_validate_decimal_spelling),
     AfterValidator(validate_utility_decimal),
+]
+
+
+def _exact_integer(value: Decimal) -> int:
+    if not value.is_finite():
+        raise ValueError("utility-bill integer must be finite")
+    if value != value.to_integral_value():
+        raise ValueError("utility-bill integer must not contain a fractional value")
+    if abs_exact(value) > MAX_UTILITY_INTEGER_ABS:
+        raise ValueError(
+            "utility-bill integer magnitude must be at most "
+            f"{MAX_UTILITY_INTEGER_ABS}"
+        )
+    return int(value)
+
+
+def _validate_integer_input(value: object) -> int:
+    """Normalize only exact integer forms before Pydantic's integer coercion."""
+
+    if isinstance(value, bool):
+        raise ValueError("utility-bill integer must not be a boolean")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not isfinite(value):
+            raise ValueError("utility-bill integer must be finite")
+        if not value.is_integer():
+            raise ValueError("utility-bill integer must not contain a fractional value")
+        if abs(value) > MAX_UTILITY_INTEGER_ABS:
+            raise ValueError(
+                "utility-bill integer magnitude must be at most "
+                f"{MAX_UTILITY_INTEGER_ABS}"
+            )
+        return int(value)
+    if isinstance(value, Decimal):
+        return _exact_integer(value)
+    if isinstance(value, (str, bytes, bytearray)):
+        if len(value) > MAX_UTILITY_INTEGER_CHARACTERS:
+            raise ValueError(
+                "utility-bill integer spelling is limited to "
+                f"{MAX_UTILITY_INTEGER_CHARACTERS} characters"
+            )
+        if isinstance(value, str):
+            spelling = value
+        else:
+            try:
+                spelling = bytes(value).decode("ascii")
+            except UnicodeDecodeError as error:
+                raise ValueError(
+                    "utility-bill integer must use an ASCII numeric spelling"
+                ) from error
+        if _DECIMAL_SPELLING.fullmatch(spelling) is None:
+            raise ValueError(
+                "utility-bill integer must use a finite numeric spelling"
+            )
+        return _exact_integer(Decimal(spelling))
+    raise ValueError("utility-bill integer must use an integer numeric value")
+
+
+def validate_utility_integer(value: int) -> int:
+    if isinstance(value, bool):
+        raise ValueError("utility-bill integer must not be a boolean")
+    if abs(value) > MAX_UTILITY_INTEGER_ABS:
+        raise ValueError(
+            "utility-bill integer magnitude must be at most "
+            f"{MAX_UTILITY_INTEGER_ABS}"
+        )
+    return value
+
+
+UtilityInteger = Annotated[
+    int,
+    BeforeValidator(_validate_integer_input),
+    AfterValidator(validate_utility_integer),
 ]
 
 

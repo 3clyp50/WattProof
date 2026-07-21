@@ -22,6 +22,7 @@ from .models import (
     EvidenceBase,
     TariffVersion,
 )
+from .numeric import abs_exact, add_exact, subtract_exact, sum_exact
 from .tariffs import RateRule, TariffBundle, load_tariff_bundle
 from .utility_models import (
     AuditScope,
@@ -372,7 +373,7 @@ def _section_by_line_id(bill: BillExtraction) -> dict[str, str | None]:
 
 
 def _evidence(line: AuditLine, fact: EvidenceBase | None) -> EvidenceRef:
-    confidence = Decimal("0") if fact is None else Decimal(str(fact.confidence))
+    confidence = Decimal("0") if fact is None else fact.confidence
     return EvidenceRef(
         page=line.source_page,
         text=line.source_text,
@@ -389,7 +390,7 @@ class _ReconciledValue:
 
 
 def _money_reconciles(billed: Decimal, expected: Decimal) -> bool:
-    return abs(billed - expected) <= _TOLERANCE
+    return abs_exact(subtract_exact(billed, expected)) <= _TOLERANCE
 
 
 def _root_causes(
@@ -426,10 +427,7 @@ def _root_causes(
                     )
                 )
 
-        corrected_subtotal = sum(
-            (value.amount for value in charge_values),
-            Decimal("0"),
-        )
+        corrected_subtotal = sum_exact(tuple(value.amount for value in charge_values))
         root_ids = set().union(*(value.root_ids for value in charge_values))
         provable = all(value.provable for value in charge_values)
         subtotal_line = legacy_lines[subtotal_id]
@@ -450,10 +448,7 @@ def _root_causes(
             )
         )
 
-    corrected_current = sum(
-        (value.amount for value in section_values),
-        Decimal("0"),
-    )
+    corrected_current = sum_exact(tuple(value.amount for value in section_values))
     current_root_ids = set().union(
         *(value.root_ids for value in section_values)
     )
@@ -478,7 +473,7 @@ def _root_causes(
     )
 
     amount_due_line = legacy_lines["amount_due"]
-    corrected_due = current_value.amount + bill.outstanding_balance.value
+    corrected_due = add_exact(current_value.amount, bill.outstanding_balance.value)
     if (
         amount_due_line.status == "discrepancy"
         and current_value.provable
@@ -491,7 +486,7 @@ def _root_causes(
 
 def _currency(value: Decimal) -> str:
     sign = "-" if value < 0 else ""
-    return f"{sign}${abs(value):.2f}"
+    return f"{sign}${abs_exact(value):.2f}"
 
 
 def _issue_detail(line: AuditLine) -> str:
@@ -503,7 +498,7 @@ def _issue_detail(line: AuditLine) -> str:
         detail = (
             f"- {line.label}: the statement shows {_currency(line.billed_amount)}; "
             f"the recomputed value is {_currency(line.expected_amount)}; "
-            f"the difference is {_currency(abs(line.delta))}.\n"
+            f"the difference is {_currency(abs_exact(line.delta))}.\n"
             f"  Calculation: {line.formula}."
         )
     elif line.status == "needs_review":
@@ -786,16 +781,15 @@ def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult
     )
     review_requests = _provider_review_requests(bill, result, mapped_lines)
     discrepancy_total = round_money(
-        sum(
-            (
-                abs(line.delta)
+        sum_exact(
+            tuple(
+                abs_exact(line.delta)
                 for line in mapped_lines
                 if line.status == "discrepancy"
                 and line.unit == "USD"
                 and line.root_cause_id is None
                 and line.delta is not None
-            ),
-            Decimal("0"),
+            )
         )
     )
     headline = result.headline

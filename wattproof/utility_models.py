@@ -8,7 +8,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .models import Citation, PlanComparison, TariffVersion
-from .numeric import UtilityDecimal
+from .numeric import UtilityDecimal, UtilityInteger
 
 FactStatus = Literal["printed", "inferred", "user_corrected"]
 ServiceType = Literal[
@@ -63,7 +63,7 @@ class DateFactV2(FactBaseV2):
 
 
 class IntegerFactV2(FactBaseV2):
-    value: int
+    value: UtilityInteger
     unit: str | None = None
 
 

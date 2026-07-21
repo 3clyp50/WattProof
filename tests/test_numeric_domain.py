@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from decimal import Decimal
-from typing import Any
+from decimal import ROUND_DOWN, Decimal, localcontext
+from typing import Any, Literal
 
 import pytest
 from pydantic import ValidationError
@@ -11,10 +11,17 @@ from wattproof.audit import round_money as round_legacy_money
 from wattproof.audit_service import audit_extraction
 from wattproof.cli import main
 from wattproof.fixtures import load_sample
-from wattproof.models import BillExtraction, DecimalFact
+from wattproof.legacy import translate_legacy_bill
+from wattproof.models import BillExtraction, DecimalFact, IntegerFact
 from wattproof.reconcile import reconcile_document
 from wattproof.utility_fixtures import load_utility_sample
-from wattproof.utility_models import DecimalFactV2, EvidenceRef, MoneyFactV2, UtilityDocument
+from wattproof.utility_models import (
+    DecimalFactV2,
+    EvidenceRef,
+    IntegerFactV2,
+    MoneyFactV2,
+    UtilityDocument,
+)
 
 
 def _legacy_decimal_payload(value: str) -> dict[str, Any]:
@@ -33,6 +40,21 @@ def _v2_decimal_payload(value: str) -> dict[str, Any]:
 
 def _v2_money_payload(value: str) -> dict[str, Any]:
     payload = load_utility_sample("duke").current_charges.model_dump(mode="json")
+    payload["value"] = value
+    return payload
+
+
+def _legacy_integer_payload(value: object) -> dict[str, Any]:
+    payload = load_sample("authentic").billing_days.model_dump(mode="json")
+    payload["value"] = value
+    return payload
+
+
+def _v2_integer_payload(value: object) -> dict[str, Any]:
+    translated = translate_legacy_bill(load_sample("authentic"))
+    fact = translated.sections[0].supplemental_facts[0].fact
+    assert isinstance(fact, IntegerFactV2)
+    payload = fact.model_dump(mode="json")
     payload["value"] = value
     return payload
 
@@ -99,6 +121,98 @@ def test_evidence_confidence_cannot_bypass_numeric_domain() -> None:
     assert caught.value.errors(include_url=False)[0]["loc"] == ("confidence",)
 
 
+def test_schema_one_confidence_preserves_exact_decimal_through_translation() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload["total_usage"]["confidence"] = "0.123456789012345678"
+
+    bill = BillExtraction.model_validate(payload)
+    translated = translate_legacy_bill(bill)
+
+    assert bill.total_usage.confidence == Decimal("0.123456789012345678")
+    assert bill.model_dump(mode="json")["total_usage"]["confidence"] == (
+        "0.123456789012345678"
+    )
+    assert translated.sections[0].usage is not None
+    assert translated.sections[0].usage.evidence.confidence == Decimal(
+        "0.123456789012345678"
+    )
+
+
+def test_schema_one_confidence_rejects_pathological_exponent() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload["total_usage"]["confidence"] = "1e-1000"
+
+    with pytest.raises(ValidationError, match="utility-bill decimal") as caught:
+        BillExtraction.model_validate(payload)
+
+    assert caught.value.errors(include_url=False)[0]["loc"] == (
+        "total_usage",
+        "confidence",
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("999999999999", 999999999999),
+        (b"-999999999999", -999999999999),
+        (999999999999, 999999999999),
+        (999999999999.0, 999999999999),
+        ("31.0", 31),
+        ("3.1e1", 31),
+        (Decimal("31.000"), 31),
+    ],
+)
+@pytest.mark.parametrize("model", [IntegerFact, IntegerFactV2])
+def test_integer_fact_accepts_only_exact_integers_within_boundary(
+    model: type[IntegerFact] | type[IntegerFactV2],
+    value: object,
+    expected: int,
+) -> None:
+    payload = (
+        _legacy_integer_payload(value)
+        if model is IntegerFact
+        else _v2_integer_payload(value)
+    )
+
+    assert model.model_validate(payload).value == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        False,
+        31.5,
+        float("nan"),
+        float("inf"),
+        "31.5",
+        "3.15e1",
+        b"31.5",
+        "9" * 10_000,
+        b"9" * 10_000,
+        10**12,
+        -(10**12),
+        10**100,
+    ],
+)
+@pytest.mark.parametrize("model", [IntegerFact, IntegerFactV2])
+def test_integer_fact_rejects_non_exact_or_out_of_domain_values(
+    model: type[IntegerFact] | type[IntegerFactV2],
+    value: object,
+) -> None:
+    payload = (
+        _legacy_integer_payload(value)
+        if model is IntegerFact
+        else _v2_integer_payload(value)
+    )
+
+    with pytest.raises(ValidationError, match="utility-bill integer") as caught:
+        model.model_validate(payload)
+
+    assert caught.value.errors(include_url=False)[0]["loc"] == ("value",)
+
+
 @pytest.mark.parametrize(
     ("path", "expected_location"),
     [
@@ -163,6 +277,47 @@ def test_schema_one_api_rejects_pathological_numbers_before_legacy_translation(
     assert response.is_json
     assert expected_location in response.get_json()["error"]
     assert "utility-bill decimal" in response.get_json()["error"]
+
+
+def test_schema_one_api_rejects_pathological_confidence_with_field_error() -> None:
+    client = create_app().test_client()
+    payload = client.get("/api/sample/authentic").get_json()["extraction"]
+    payload["total_usage"]["confidence"] = "1e-1000"
+
+    response = client.post("/api/audit", json=payload)
+
+    assert response.status_code == 422
+    assert response.is_json
+    assert "total_usage.confidence" in response.get_json()["error"]
+    assert "utility-bill decimal" in response.get_json()["error"]
+
+
+def test_schema_one_api_rejects_out_of_domain_integer_with_field_error() -> None:
+    client = create_app().test_client()
+    payload = client.get("/api/sample/authentic").get_json()["extraction"]
+    payload["billing_days"]["value"] = 10**12
+
+    response = client.post("/api/audit", json=payload)
+
+    assert response.status_code == 422
+    assert response.is_json
+    assert "billing_days.value" in response.get_json()["error"]
+    assert "utility-bill integer" in response.get_json()["error"]
+
+
+def test_schema_two_api_rejects_out_of_domain_supplemental_integer() -> None:
+    client = create_app().test_client()
+    payload = translate_legacy_bill(load_sample("authentic")).model_dump(mode="json")
+    payload["sections"][0]["supplemental_facts"][0]["fact"]["value"] = 10**100
+
+    response = client.post("/api/audit", json=payload)
+
+    assert response.status_code == 422
+    assert response.is_json
+    error = response.get_json()["error"]
+    assert "sections.0.supplemental_facts.0.fact" in error
+    assert "utility-bill" in error
+    assert "Traceback" not in response.get_data(as_text=True)
 
 
 def test_schema_one_model_rejects_excessive_significant_digits() -> None:
@@ -257,6 +412,38 @@ def test_cli_reports_numeric_validation_location_without_traceback(
     assert captured.out == ""
 
 
+@pytest.mark.parametrize(
+    ("field", "expected_location", "expected_contract"),
+    [
+        ("confidence", "total_usage.confidence", "utility-bill decimal"),
+        ("integer", "billing_days.value", "utility-bill integer"),
+    ],
+)
+def test_cli_reports_schema_one_boundary_validation(
+    field: str,
+    expected_location: str,
+    expected_contract: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def invalid_extraction(_path: object) -> BillExtraction:
+        payload = load_sample("authentic").model_dump(mode="json")
+        if field == "confidence":
+            payload["total_usage"]["confidence"] = "1e-1000"
+        else:
+            payload["billing_days"]["value"] = 10**12
+        return BillExtraction.model_validate(payload)
+
+    monkeypatch.setattr("wattproof.cli.extract_pdf", invalid_extraction)
+
+    assert main(["--file", "pathological.pdf"]) == 2
+    captured = capsys.readouterr()
+    assert expected_location in captured.err
+    assert expected_contract in captured.err
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
+
+
 def test_cli_formats_discrepancies_with_their_actual_units(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -292,3 +479,63 @@ def test_cli_formats_discrepancies_with_their_actual_units(
     assert "expected $132.19" in output
     assert "delta $1.00" in output
     assert "$113.28" not in output
+
+
+def test_schema_one_validation_is_invariant_to_ambient_decimal_context() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+
+    with localcontext() as context:
+        context.prec = 4
+        context.rounding = ROUND_DOWN
+        bill = BillExtraction.model_validate(payload)
+
+    assert bill.total_usage.value == Decimal("327.119")
+
+
+def test_all_audit_outputs_are_invariant_to_ambient_decimal_context() -> None:
+    schema_one_kinds: tuple[Literal["authentic", "synthetic"], ...] = (
+        "authentic",
+        "synthetic",
+    )
+    utility_kinds: tuple[Literal["duke", "centerpoint", "bloomington"], ...] = (
+        "duke",
+        "centerpoint",
+        "bloomington",
+    )
+    schema_one_baseline = {
+        kind: audit_extraction(load_sample(kind)).model_dump(mode="json")
+        for kind in schema_one_kinds
+    }
+    utility_baseline = {
+        kind: audit_extraction(load_utility_sample(kind)).model_dump(mode="json")
+        for kind in utility_kinds
+    }
+
+    with localcontext() as context:
+        context.prec = 4
+        context.rounding = ROUND_DOWN
+        schema_one_hostile = {
+            kind: audit_extraction(load_sample(kind)).model_dump(mode="json")
+            for kind in schema_one_kinds
+        }
+        utility_hostile = {
+            kind: audit_extraction(load_utility_sample(kind)).model_dump(mode="json")
+            for kind in utility_kinds
+        }
+
+    assert schema_one_hostile == schema_one_baseline
+    assert utility_hostile == utility_baseline
+
+    synthetic = schema_one_hostile["synthetic"]
+    assert synthetic["verdict"] == "possible_discrepancy"
+    assert synthetic["discrepancy_total"] == "5.00"
+    roots = {line["id"]: line["root_cause_id"] for line in synthetic["lines"]}
+    assert roots["delivery_subtotal"] == "pge_peak_energy"
+    percentage_formulas = [
+        line["formula"] for line in schema_one_hostile["authentic"]["lines"]
+        if "%" in line["formula"]
+    ]
+    assert percentage_formulas == [
+        "$25.50 taxable generation × 1.00000%",
+        "$8.40 taxable generation × 1.00000%",
+    ]

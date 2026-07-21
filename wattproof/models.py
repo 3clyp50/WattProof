@@ -7,7 +7,13 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .numeric import UtilityDecimal
+from .numeric import (
+    UtilityDecimal,
+    UtilityInteger,
+    abs_exact,
+    add_exact,
+    subtract_exact,
+)
 
 EvidenceStatus = Literal["printed", "inferred", "user_corrected"]
 AuditStatus = Literal[
@@ -20,7 +26,7 @@ class EvidenceBase(BaseModel):
 
     source_page: int = Field(ge=1)
     source_text: str = Field(min_length=1)
-    confidence: float = Field(ge=0, le=1)
+    confidence: UtilityDecimal = Field(ge=0, le=1)
     status: EvidenceStatus
     original_value: str | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -44,7 +50,7 @@ class DateFact(EvidenceBase):
 
 
 class IntegerFact(EvidenceBase):
-    value: int
+    value: UtilityInteger
     unit: str | None = None
 
 
@@ -136,11 +142,10 @@ class BillExtraction(BaseModel):
         if self.billing_days.value not in {day_span, day_span + 1}:
             raise ValueError("billing_days does not match the printed service period")
 
-        if abs(
-            self.peak_usage.value
-            + self.off_peak_usage.value
-            - self.total_usage.value
-        ) > Decimal("0.001"):
+        usage_sum = add_exact(self.peak_usage.value, self.off_peak_usage.value)
+        if abs_exact(subtract_exact(usage_sum, self.total_usage.value)) > Decimal(
+            "0.001"
+        ):
             raise ValueError("peak and off-peak quantities do not equal total usage")
 
         charge_ids = [line.id for line in self.charges]

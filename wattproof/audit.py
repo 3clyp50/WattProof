@@ -13,7 +13,14 @@ from .models import (
     PlanComparison,
     ReviewRequest,
 )
-from .numeric import add_exact, multiply_exact, quantize_exact, subtract_exact, sum_exact
+from .numeric import (
+    abs_exact,
+    add_exact,
+    multiply_exact,
+    quantize_exact,
+    subtract_exact,
+    sum_exact,
+)
 from .tariffs import RateRule, TariffBundle, load_tariff_bundle
 
 CENT = Decimal("0.01")
@@ -29,17 +36,17 @@ def round_money(value: Decimal) -> Decimal:
 
 
 def _status(delta: Decimal) -> AuditStatus:
-    return "verified" if abs(delta) <= TOLERANCE else "discrepancy"
+    return "verified" if abs_exact(delta) <= TOLERANCE else "discrepancy"
 
 
 def _currency(value: Decimal) -> str:
     sign = "-" if value < 0 else ""
-    return f"{sign}${abs(value):.2f}"
+    return f"{sign}${abs_exact(value):.2f}"
 
 
 def _rate(value: Decimal) -> str:
     sign = "-" if value < 0 else ""
-    return f"{sign}${abs(value)}/kWh"
+    return f"{sign}${abs_exact(value)}/kWh"
 
 
 def _citation(bundle: TariffBundle, rule: RateRule) -> tuple[Citation, ...]:
@@ -165,7 +172,10 @@ def _percentage_rule(
         billed_amount=billed,
         expected_amount=expected,
         delta=delta,
-        formula=f"{_currency(base)} taxable generation × {rule.rate * 100}%",
+        formula=(
+            f"{_currency(base)} taxable generation × "
+            f"{multiply_exact(rule.rate, Decimal('100'))}%"
+        ),
         inputs={
             "taxable_generation_usd": str(base),
             "printed_tax_rate": str(rule.rate),
@@ -382,7 +392,8 @@ def _review_request(
             f"the statement dated {bill.statement_date.value.isoformat()}. The statement "
             f"shows {_currency(line.billed_amount)}. Applying the published rate to the "
             f"printed usage gives {_currency(line.expected_amount or Decimal('0'))}, a "
-            f"difference of {_currency(abs(line.delta or Decimal('0')))}.\n\n"
+            f"difference of "
+            f"{_currency(abs_exact(line.delta or Decimal('0')))}.\n\n"
             f"Calculation: {line.formula}.\n"
             f"Rate sources:\n{source_list}\n\n"
             "Please confirm the quantity and rate used and explain or correct the charge "
@@ -437,7 +448,7 @@ def audit_bill_with_bundle(
         line for line in reconciliation_lines if line.status == "discrepancy"
     ]
     discrepancy_total = round_money(
-        sum_exact(tuple(abs(delta) for delta in tariff_discrepancies))
+        sum_exact(tuple(abs_exact(delta) for delta in tariff_discrepancies))
     )
     has_discrepancy = bool(tariff_discrepancies or reconciliation_discrepancies)
     verdict = "possible_discrepancy" if has_discrepancy else "reconciled"

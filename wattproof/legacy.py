@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import cast
 
 from .models import (
@@ -42,7 +41,7 @@ def _evidence(fact: EvidenceBase) -> EvidenceRef:
     return EvidenceRef(
         page=fact.source_page,
         text=fact.source_text,
-        confidence=Decimal(str(fact.confidence)),
+        confidence=fact.confidence,
         provenance="rendered_page",
     )
 

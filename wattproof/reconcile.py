@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from .numeric import (
+    abs_exact,
     add_exact,
     multiply_exact,
     quantize_exact,
@@ -76,7 +77,7 @@ def _with_billed_provenance(
 
 
 def _money_status(delta: Decimal) -> AuditStatusV2:
-    return "verified" if abs(delta) <= MONEY_TOLERANCE else "discrepancy"
+    return "verified" if abs_exact(delta) <= MONEY_TOLERANCE else "discrepancy"
 
 
 def _money_result(billed: Decimal, expected: Decimal) -> tuple[Decimal, AuditStatusV2]:
@@ -1015,7 +1016,7 @@ class _ReconciledValue:
 
 
 def _money_reconciles(billed: Decimal, expected: Decimal) -> bool:
-    return abs(subtract_exact(billed, expected)) <= MONEY_TOLERANCE
+    return abs_exact(subtract_exact(billed, expected)) <= MONEY_TOLERANCE
 
 
 def _corrected_charge_value(
@@ -1190,7 +1191,7 @@ def _reconcile_amount_due_root(
 def _display_amount(value: Decimal, unit: str, currency: str) -> str:
     if unit == currency and currency == "USD":
         sign = "-" if value < 0 else ""
-        return f"{sign}${abs(value):.2f}"
+        return f"{sign}${abs_exact(value):.2f}"
     return f"{value} {unit}"
 
 
@@ -1247,7 +1248,7 @@ def _discrepancy_detail(line: UtilityAuditLine, currency: str) -> str:
     detail = (
         f"- {line.label}: {_billed_phrase(line, currency)}, "
         f"recomputed {_display_amount(line.expected_amount, line.unit, currency)}, "
-        f"difference {_display_amount(abs(line.delta), line.unit, currency)}."
+        f"difference {_display_amount(abs_exact(line.delta), line.unit, currency)}."
     )
     operand_detail = _expected_operand_detail(line)
     if operand_detail is not None:
@@ -1448,7 +1449,7 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
     line_tuple = tuple(lines)
     discrepancy_total = sum_exact(
         tuple(
-            abs(line.delta)
+            abs_exact(line.delta)
             for line in line_tuple
             if line.status == "discrepancy"
             and line.root_cause_id is None

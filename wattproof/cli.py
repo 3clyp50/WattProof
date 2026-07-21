@@ -17,6 +17,7 @@ from .extract import (
 )
 from .fixtures import load_sample
 from .models import BillExtraction
+from .numeric import abs_exact
 from .tariffs import SourceIntegrityError
 from .utility_fixtures import load_utility_sample
 from .utility_models import VerificationLevel
@@ -55,7 +56,7 @@ def _display_value(value: Decimal | None, unit: str, currency: str) -> str:
     if unit == currency:
         if currency == "USD":
             sign = "-" if value < 0 else ""
-            return f"{sign}${abs(value):.2f}"
+            return f"{sign}${abs_exact(value):.2f}"
         return f"{value:.2f} {currency}"
     return f"{value} {unit}"
 
