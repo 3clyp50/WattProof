@@ -229,11 +229,162 @@ function statusLabel(status) {
   return String(status || "printed").replaceAll("_", " ");
 }
 
+const decimalSpelling = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?)(\d+))?$/;
+const maxDecimalCharacters = 64;
+const maxDecimalDigits = 28;
+const maxExactInteger = 999999999999;
+const minDecimalExponent = -18;
+const maxDecimalExponent = 11;
+const maxDecimalAdjustedExponent = 11;
+const maxDecimalPower = 64;
+
+function parseBoundedDecimalString(value) {
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < -maxExactInteger || value > maxExactInteger) {
+      return null;
+    }
+    value = String(value);
+  }
+  if (typeof value !== "string" || value.length > maxDecimalCharacters) return null;
+  const match = decimalSpelling.exec(value);
+  if (!match) return null;
+
+  const integerDigits = match[2] || "";
+  const fractionalDigits = match[3] ?? match[4] ?? "";
+  const coefficientSpelling = `${integerDigits}${fractionalDigits}`;
+  const significantDigits = coefficientSpelling.replace(/^0+/, "") || "0";
+  if (significantDigits.length > maxDecimalDigits) return null;
+
+  const exponentDigits = (match[6] || "0").replace(/^0+/, "") || "0";
+  if (exponentDigits.length > 2) return null;
+  const exponentMagnitude = exponentDigits.length === 2
+    ? (exponentDigits.charCodeAt(0) - 48) * 10 + exponentDigits.charCodeAt(1) - 48
+    : exponentDigits.charCodeAt(0) - 48;
+  const explicitExponent = match[5] === "-" ? -exponentMagnitude : exponentMagnitude;
+  const exponent = explicitExponent - fractionalDigits.length;
+  if (exponent < minDecimalExponent || exponent > maxDecimalExponent) return null;
+  const isZero = significantDigits === "0";
+  const adjustedExponent = exponent + significantDigits.length - 1;
+  if (!isZero && adjustedExponent > maxDecimalAdjustedExponent) return null;
+
+  const coefficient = BigInt(significantDigits);
+  return {
+    coefficient,
+    exponent,
+    negative: match[1] === "-" && coefficient !== 0n,
+    spelling: value,
+  };
+}
+
+function powerOfTen(exponent) {
+  if (!Number.isInteger(exponent) || exponent < 0 || exponent > maxDecimalPower) {
+    return null;
+  }
+  return 10n ** BigInt(exponent);
+}
+
+function decimalPlainText(decimal, groupThousands = true) {
+  if (!decimal) return "—";
+  if (decimal.coefficient === 0n) {
+    return decimal.exponent < 0
+      ? `0.${"0".repeat(-decimal.exponent)}`
+      : "0";
+  }
+
+  const digits = decimal.coefficient.toString();
+  const point = digits.length + decimal.exponent;
+  let integer;
+  let fraction = "";
+  if (point <= 0) {
+    integer = "0";
+    fraction = `${"0".repeat(-point)}${digits}`;
+  } else if (point >= digits.length) {
+    integer = `${digits}${"0".repeat(point - digits.length)}`;
+  } else {
+    integer = digits.slice(0, point);
+    fraction = digits.slice(point);
+  }
+  if (groupThousands) integer = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${decimal.negative ? "−" : ""}${integer}${fraction ? `.${fraction}` : ""}`;
+}
+
+function roundScaledMagnitude(decimal, decimalPlaces) {
+  if (!decimal || !Number.isInteger(decimalPlaces) || decimalPlaces < 0 || decimalPlaces > 18) {
+    return null;
+  }
+  const shift = decimal.exponent + decimalPlaces;
+  let magnitude;
+  if (shift >= 0) {
+    const multiplier = powerOfTen(shift);
+    if (multiplier === null) return null;
+    magnitude = decimal.coefficient * multiplier;
+  } else {
+    const divisor = powerOfTen(-shift);
+    if (divisor === null) return null;
+    magnitude = decimal.coefficient / divisor;
+    const remainder = decimal.coefficient % divisor;
+    if (remainder * 2n >= divisor) magnitude += 1n;
+  }
+  return {
+    magnitude,
+    negative: decimal.negative && magnitude !== 0n,
+  };
+}
+
+function formatMoneyDecimal(decimal, currency = "USD") {
+  const rounded = roundScaledMagnitude(decimal, 2);
+  if (!rounded) return "—";
+  const cents = rounded.magnitude.toString().padStart(3, "0");
+  const whole = cents.slice(0, -2) || "0";
+  const fraction = cents.slice(-2);
+  const sign = rounded.negative ? "−" : "";
+  const prefix = currency === "USD" ? "$" : `${String(currency)} `;
+  return `${sign}${prefix}${whole}.${fraction}`;
+}
+
+function confidencePercentage(value) {
+  const decimal = parseBoundedDecimalString(value);
+  if (!decimal || decimal.negative) return null;
+  if (decimal.coefficient !== 0n) {
+    const upperBound = decimal.exponent >= 0
+      ? 1n
+      : powerOfTen(-decimal.exponent);
+    const multiplier = decimal.exponent >= 0 ? powerOfTen(decimal.exponent) : 1n;
+    if (upperBound === null || multiplier === null) return null;
+    const scaledCoefficient = decimal.coefficient * multiplier;
+    if (scaledCoefficient > upperBound) return null;
+  }
+  const rounded = roundScaledMagnitude(decimal, 2);
+  return rounded ? rounded.magnitude.toString() : null;
+}
+
+function exactDecimalSum(values) {
+  if (!values.length) return null;
+  const decimals = values.map(parseBoundedDecimalString);
+  if (decimals.some((decimal) => decimal === null)) return null;
+  let commonExponent = decimals[0].exponent;
+  decimals.forEach((decimal) => {
+    if (decimal.exponent < commonExponent) commonExponent = decimal.exponent;
+  });
+  let total = 0n;
+  for (const decimal of decimals) {
+    const multiplier = powerOfTen(decimal.exponent - commonExponent);
+    if (multiplier === null) return null;
+    const scaled = decimal.coefficient * multiplier;
+    total += decimal.negative ? -scaled : scaled;
+  }
+  return {
+    coefficient: total < 0n ? -total : total,
+    exponent: commonExponent,
+    negative: total < 0n,
+  };
+}
+
 function evidenceMarkup(fact) {
   const evidence = evidenceFor(fact);
-  const confidence = Number(evidence.confidence);
-  const percentage = Number.isFinite(confidence)
-    ? `${Math.round(confidence * 100)}% confidence`
+  const confidence = confidencePercentage(evidence.confidence);
+  const percentage = confidence !== null
+    ? `${confidence}% confidence`
     : "confidence unavailable";
   return `<details class="fact-evidence"><summary>Page ${escapeHtml(evidence.page)} · ${percentage}</summary><blockquote>${escapeHtml(evidence.text)}</blockquote></details>`;
 }
@@ -242,8 +393,17 @@ function factEditor(fact, label, path, type = "text") {
   if (!fact) return "";
   const id = `fact-${path.replaceAll(/[^a-zA-Z0-9_-]/g, "-")}`;
   const unit = fact.unit || fact.currency || "";
+  const numericDecimal = type === "number" ? parseBoundedDecimalString(fact.value) : null;
+  const numericUnavailable = type === "number" && numericDecimal === null;
+  const inputType = type === "number" ? "text" : type;
+  const inputValue = type === "number"
+    ? (numericDecimal ? numericDecimal.spelling : "")
+    : fact.value;
   const corrected = fact.status === "user_corrected"
     ? `<small class="correction-note">Originally ${escapeHtml(fact.original_value)}</small>`
+    : "";
+  const unavailable = numericUnavailable
+    ? `<small class="correction-note">Exact numeric spelling unavailable; enter a reviewed value to replace it.</small>`
     : "";
   return `
     <div class="fact-field">
@@ -252,10 +412,11 @@ function factEditor(fact, label, path, type = "text") {
         <span class="evidence-type ${escapeHtml(fact.status)}">${escapeHtml(statusLabel(fact.status))}</span>
       </label>
       <div class="typed-input">
-        <input id="${escapeHtml(id)}" data-fact-path="${escapeHtml(path)}" type="${escapeHtml(type)}" step="any" value="${escapeHtml(fact.value)}">
+        <input id="${escapeHtml(id)}" data-fact-path="${escapeHtml(path)}"${type === "number" ? ` data-exact-number="${numericUnavailable ? "false" : "true"}" inputmode="decimal"` : ""} type="${escapeHtml(inputType)}" value="${escapeHtml(inputValue)}"${numericUnavailable ? ' placeholder="Exact value unavailable"' : ""}>
         ${unit ? `<span>${escapeHtml(unit)}</span>` : ""}
       </div>
       ${corrected}
+      ${unavailable}
       ${evidenceMarkup(fact)}
     </div>`;
 }
@@ -294,7 +455,7 @@ function renderLegacyReview() {
     <article class="service-review-card">
       <header class="service-review-header">
         <div><span class="service-type">Electricity</span><h3>${escapeHtml(extraction.delivery_provider.value)} + ${escapeHtml(extraction.generation_provider.value)}</h3></div>
-        <div class="service-chips"><span>${escapeHtml(extraction.total_usage.value)} ${escapeHtml(extraction.total_usage.unit)}</span><span>${escapeHtml(periodText(extraction.service_start, extraction.service_end))}</span></div>
+        <div class="service-chips"><span>${escapeHtml(measurementFactText(extraction.total_usage))}</span><span>${escapeHtml(periodText(extraction.service_start, extraction.service_end))}</span></div>
       </header>
       <div class="fact-fields">${fields.join("")}</div>
       <section class="charge-group"><h4>Printed charge lines</h4>${charges}</section>
@@ -327,7 +488,8 @@ function utilitySectionFacts(section, sectionIndex) {
     );
   });
   section.supplemental_facts.forEach((namedFact, factIndex) => {
-    fields.push(factEditor(namedFact.fact, namedFact.id.replaceAll("_", " "), `${base}.supplemental_facts.${factIndex}.fact`));
+    const type = Object.hasOwn(namedFact.fact, "unit") ? "number" : "text";
+    fields.push(factEditor(namedFact.fact, namedFact.id.replaceAll("_", " "), `${base}.supplemental_facts.${factIndex}.fact`, type));
   });
   return fields.filter(Boolean);
 }
@@ -355,11 +517,7 @@ function renderUtilityReview() {
     }).join("");
     factCount += 1;
     const period = periodText(section.service_start, section.service_end);
-    const usage = section.usage
-      ? `${section.usage.value} ${section.usage.unit}`
-      : section.meter?.usage
-        ? `${section.meter.usage.value} ${section.meter.usage.unit}`
-        : "";
+    const usage = measurementFactText(section.usage || section.meter?.usage);
     return `
       <article class="service-review-card">
         <header class="service-review-header">
@@ -487,6 +645,7 @@ function applyReviewEdits() {
   let changed = false;
   document.querySelectorAll("[data-fact-path]").forEach((input) => {
     const fact = valueAt(state.extraction, input.dataset.factPath);
+    if (input.dataset.exactNumber === "false" && input.value === "") return;
     if (fact && String(fact.value) !== input.value) {
       markCorrected(fact, input.value);
       changed = true;
@@ -496,18 +655,16 @@ function applyReviewEdits() {
 }
 
 function money(value, currency = "USD") {
-  if (value === null || value === undefined) return "—";
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "—";
-  const sign = number < 0 ? "−" : "";
-  const prefix = currency === "USD" ? "$" : `${currency} `;
-  return `${sign}${prefix}${Math.abs(number).toFixed(2)}`;
+  return formatMoneyDecimal(parseBoundedDecimalString(value), currency);
 }
 
 function decimalValue(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return String(value);
-  return number.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  return decimalPlainText(parseBoundedDecimalString(value));
+}
+
+function measurementFactText(fact) {
+  if (!fact) return "";
+  return `${decimalValue(fact.value)} ${String(fact.unit || "")}`.trim();
 }
 
 function auditValue(value, unit, currency) {
@@ -518,11 +675,8 @@ function auditValue(value, unit, currency) {
   return escapeHtml(formatted);
 }
 
-function summaryNumber(value) {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "string" && value.trim() === "") return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+function summaryDecimalString(value) {
+  return parseBoundedDecimalString(value)?.spelling ?? null;
 }
 
 function serviceBounds(sections) {
@@ -580,13 +734,13 @@ function summarizeCurrentBill() {
       .filter((section) => section.usage)
       .map((section) => ({
         serviceType: String(section.service_type || "other"),
-        value: summaryNumber(section.usage.value),
+        value: summaryDecimalString(section.usage.value),
         unit: String(section.usage.unit || ""),
       }))
       .filter((usage) => usage.value !== null)
     : [{
       serviceType: "electricity",
-      value: summaryNumber(extraction.total_usage?.value),
+      value: summaryDecimalString(extraction.total_usage?.value),
       unit: String(extraction.total_usage?.unit || "kWh"),
     }].filter((usage) => usage.value !== null);
   const periodStart = bounds.start ? String(bounds.start) : null;
@@ -604,10 +758,10 @@ function summarizeCurrentBill() {
       ? `${periodStart} – ${periodEnd}`
       : "Period not printed",
     usageSummaries,
-    amountDue: summaryNumber(extraction.amount_due?.value),
+    amountDue: summaryDecimalString(extraction.amount_due?.value),
     currency: String((utility ? extraction.currency : result.currency || "USD") || ""),
     verificationLevel: String(result.verification_level || "evidence_extracted"),
-    discrepancyTotal: summaryNumber(result.discrepancy_total) ?? 0,
+    discrepancyTotal: summaryDecimalString(result.discrepancy_total) ?? "0",
     issueCount: rootIssueCount(Array.isArray(result.lines) ? result.lines : []),
     reviewRequests: reviewRequestDrafts(result),
   };
@@ -661,13 +815,13 @@ function combinedBundleAmount() {
     typeof currency !== "string" || currency.trim() === ""
   ))) return null;
   const currencies = new Set(currencyValues);
-  const amounts = state.bundle.map((summary) => summaryNumber(summary.amountDue));
-  if (currencies.size !== 1 || amounts.some((amount) => amount === null)) {
+  const amount = exactDecimalSum(state.bundle.map((summary) => summary.amountDue));
+  if (currencies.size !== 1 || amount === null) {
     return null;
   }
   return {
     currency: state.bundle[0].currency,
-    amount: amounts.reduce((total, amount) => total + amount, 0),
+    amount,
   };
 }
 
@@ -696,7 +850,7 @@ function renderHousehold() {
     </div>
     <div class="combined-amount ${combined ? "available" : "separate"}">
       ${combined
-    ? `<span>Combined amount shown</span><strong>${escapeHtml(money(combined.amount, combined.currency))}</strong><small>Printed amounts share one currency and a common service-period overlap.</small>`
+    ? `<span>Combined amount shown</span><strong>${escapeHtml(formatMoneyDecimal(combined.amount, combined.currency))}</strong><small>Printed amounts share one currency and a common service-period overlap.</small>`
     : `<span>Printed amounts remain separate</span><strong>Not combined</strong><small>Every bill needs one currency and a complete, mutually overlapping service period.</small>`}
     </div>`;
 
@@ -795,7 +949,7 @@ function serviceResultCards(extraction) {
           <dl>
             ${section.schedule ? `<div><dt>Schedule</dt><dd>${escapeHtml(section.schedule.value)}</dd></div>` : ""}
             ${period ? `<div><dt>Service period</dt><dd>${escapeHtml(period)}</dd></div>` : ""}
-            ${usage ? `<div><dt>Usage</dt><dd>${escapeHtml(usage.value)} ${escapeHtml(usage.unit)}</dd></div>` : ""}
+            ${usage ? `<div><dt>Usage</dt><dd>${escapeHtml(measurementFactText(usage))}</dd></div>` : ""}
             <div><dt>Printed subtotal</dt><dd>${escapeHtml(money(section.subtotal.value, section.subtotal.currency))}</dd></div>
           </dl>
         </article>`;
@@ -812,7 +966,7 @@ function serviceResultCards(extraction) {
       <dl>
         <div><dt>Schedule</dt><dd>${escapeHtml(schedule.value)}</dd></div>
         <div><dt>Service period</dt><dd>${escapeHtml(period)}</dd></div>
-        <div><dt>Usage</dt><dd>${escapeHtml(extraction.total_usage.value)} ${escapeHtml(extraction.total_usage.unit)}</dd></div>
+        <div><dt>Usage</dt><dd>${escapeHtml(measurementFactText(extraction.total_usage))}</dd></div>
         <div><dt>Printed subtotal</dt><dd>${escapeHtml(money(subtotal.value, subtotal.unit))}</dd></div>
       </dl>
     </article>`);

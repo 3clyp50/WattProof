@@ -340,6 +340,7 @@ async function main() {
       const review = await evaluate(`(() => {
         const panel = document.querySelector('[data-step="2"]');
         const rect = panel.getBoundingClientRect();
+        const billingDays = document.getElementById("fact-billing_days");
         return {
           visible: !panel.hidden
             && getComputedStyle(panel).display !== "none"
@@ -351,6 +352,12 @@ async function main() {
           warningText: document.getElementById("review-warnings").innerText,
           warningInjectedElements: document.querySelectorAll("#warning-real").length,
           warningEventCount: window.__wattproofWarningEvent || 0,
+          billingDays: billingDays ? {
+            value: billingDays.value,
+            exactNumber: billingDays.dataset.exactNumber,
+            unavailable: billingDays.closest(".fact-field")
+              .innerText.includes("Exact numeric spelling unavailable"),
+          } : null,
           message: document.getElementById("global-message").innerText,
         };
       })()`);
@@ -558,26 +565,58 @@ async function main() {
     await clickById("bloomington-sample");
     await waitFor(`!document.querySelector('[data-step="2"]').hidden
       && document.activeElement?.id === "review-title"`);
-    await evaluate(`(() => {
+    const reauditEdited = await evaluate(`(() => {
+      state.extraction.sections[0].usage.evidence.confidence = "0.145";
+      renderReview("bloomington");
       const usage = document.getElementById("fact-sections-0-usage");
       const amount = document.getElementById("fact-amount_due");
-      usage.value = "5.75";
-      amount.value = "999.91";
+      usage.value = "5.750000123456789012";
+      amount.value = "100.005";
       usage.dispatchEvent(new Event("input", { bubbles: true }));
       amount.dispatchEvent(new Event("input", { bubbles: true }));
-      return true;
+      return {
+        usage: usage.value,
+        amount: amount.value,
+        confidence: usage.closest(".fact-field")
+          .querySelector(".fact-evidence summary").textContent.trim(),
+      };
     })()`);
     await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
     await waitFor(`!document.querySelector('[data-step="3"]').hidden
       && document.activeElement?.id === "verify-title"`);
-    const reauditExpected = await evaluate(`({
-      verification: state.audit.verification_level,
-      discrepancy: Number(state.audit.discrepancy_total),
-      issues: new Set(state.audit.lines
-        .filter((line) => ["discrepancy", "needs_review"].includes(line.status))
-        .map((line, index) => String(line.root_cause_id || line.id || "issue-" + index)))
-        .size,
-    })`);
+    const reauditExpected = await evaluate(`(() => {
+      const amountLine = state.audit.lines.find((line) => line.id === "statement::amount_due");
+      return {
+        verification: state.audit.verification_level,
+        discrepancy: state.audit.discrepancy_total,
+        discrepancyType: typeof state.audit.discrepancy_total,
+        amountBilled: amountLine?.billed_amount,
+        amountExpected: amountLine?.expected_amount,
+        amountDelta: amountLine?.delta,
+        ledgerText: document.getElementById("audit-lines").textContent,
+        serviceText: document.getElementById("service-results").innerText,
+        issues: new Set(state.audit.lines
+          .filter((line) => ["discrepancy", "needs_review"].includes(line.status))
+          .map((line, index) => String(line.root_cause_id || line.id || "issue-" + index)))
+          .size,
+      };
+    })()`);
+    await evaluate(`document.querySelector('[data-step="3"] [data-back="2"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-step="2"]').hidden
+      && document.activeElement?.id === "review-title"`);
+    const reauditRerendered = await evaluate(`(() => {
+      const usage = document.getElementById("fact-sections-0-usage");
+      const amount = document.getElementById("fact-amount_due");
+      return {
+        usage: usage.value,
+        amount: amount.value,
+        confidence: usage.closest(".fact-field")
+          .querySelector(".fact-evidence summary").textContent.trim(),
+      };
+    })()`);
+    await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-step="3"]').hidden
+      && document.activeElement?.id === "verify-title"`);
     await clickById("finish-household");
     await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
     const reauditReplacement = await evaluate(`(() => {
@@ -599,6 +638,9 @@ async function main() {
       expectedVerification: reauditExpected.verification,
       expectedDiscrepancy: reauditExpected.discrepancy,
       expectedIssues: reauditExpected.issues,
+      expectedAmountBilled: reauditExpected.amountBilled,
+      expectedAmountExpected: reauditExpected.amountExpected,
+      expectedAmountDelta: reauditExpected.amountDelta,
     });
     await clickById("review-next-steps");
     await waitFor(`!document.querySelector('[data-step="5"]').hidden`);
@@ -774,6 +816,52 @@ async function main() {
     })`);
     previewFinish.uploadedPreviewUrl = finishPreviewUrl;
 
+    await navigateHome();
+    const exactBundleRendering = await evaluate(`(() => {
+      const summary = (id, amountDue) => ({
+        id,
+        providers: ["Exact Decimal Utility"],
+        serviceTypes: ["electricity"],
+        periodStart: "2024-01-01",
+        periodEnd: "2024-01-31",
+        period: "2024-01-01 – 2024-01-31",
+        usageSummaries: [{
+          serviceType: "electricity",
+          value: "1002.123456789012345678",
+          unit: "kWh",
+        }],
+        amountDue,
+        currency: "USD",
+        verificationLevel: "evidence_extracted",
+        discrepancyTotal: "0",
+        issueCount: 0,
+        reviewRequests: [],
+      });
+      state.bundle = [summary("exact-a", "0.1"), summary("exact-b", "0.2")];
+      renderHousehold();
+      showStep(4);
+      const exactAddition = {
+        summaryText: document.getElementById("household-summary").innerText,
+        billsText: document.getElementById("household-bills").innerText,
+        amountTypes: state.bundle.map((entry) => typeof entry.amountDue),
+      };
+      state.bundle = [summary("round-a", "0.005"), summary("round-b", "0.005")];
+      renderHousehold();
+      const noEarlyRounding = document.getElementById("household-summary").innerText;
+      state.bundle[0].amountDue = 0.1 + 0.2;
+      renderHousehold();
+      const numberFallback = {
+        summaryText: document.getElementById("household-summary").innerText,
+        billsText: document.getElementById("household-bills").innerText,
+      };
+      return {
+        exactAddition,
+        noEarlyRounding,
+        numberFallback,
+        pageErrors: [...window.__wattproofBrowserErrors],
+      };
+    })()`);
+
     await command("Emulation.setDeviceMetricsOverride", {
       width: 390,
       height: 844,
@@ -866,6 +954,9 @@ async function main() {
       flows,
       sequentialDesktop,
       bundleIdsBeforeReaudit,
+      reauditEdited,
+      reauditRerendered,
+      reauditExpected,
       reauditReplacement,
       repeatedFinish,
       mobileHousehold,
@@ -875,6 +966,7 @@ async function main() {
       refreshClears,
       previewDiscard,
       previewFinish,
+      exactBundleRendering,
       mobileReview,
       mobileResult,
       hostileDom,
@@ -1564,10 +1656,28 @@ invoke(`state.bundle = state.bundle.map((summary, index) => ({
   periodStart: ["2024-01-01", "2024-01-15", "2024-01-20"][index],
   periodEnd: ["2024-01-31", "2024-02-15", "2024-01-25"][index],
   period: "Compatible test period",
-  amountDue: [10.01, 20.02, 30.03][index],
+  amountDue: ["10.01", "20.02", "30.03"][index],
   currency: "USD",
 })); renderHousehold()`);
 const compatibleSummaryHtml = element("household-summary").innerHTML;
+
+invoke(`state.bundle = state.bundle.map((summary, index) => ({
+  ...summary,
+  amountDue: ["0.1", "0.2", "0"][index],
+})); renderHousehold()`);
+const exactAdditionSummaryHtml = element("household-summary").innerHTML;
+invoke(`state.bundle = state.bundle.map((summary, index) => ({
+  ...summary,
+  amountDue: ["0.005", "0.005", "0"][index],
+})); renderHousehold()`);
+const noEarlyRoundingSummaryHtml = element("household-summary").innerHTML;
+invoke(`state.bundle[0].amountDue = 0.1 + 0.2; renderHousehold()`);
+const numberAmountSummaryHtml = element("household-summary").innerHTML;
+const numberAmountBillsHtml = element("household-bills").innerHTML;
+invoke(`state.bundle = state.bundle.map((summary, index) => ({
+  ...summary,
+  amountDue: ["10.01", "20.02", "30.03"][index],
+})); renderHousehold()`);
 
 invoke(`state.bundle[2].currency = "CAD"; renderHousehold()`);
 const mixedCurrencySummaryHtml = element("household-summary").innerHTML;
@@ -1584,7 +1694,7 @@ invoke(`state.bundle = state.bundle.map((summary, index) => ({
   currency: "USD",
 })); state.bundle[2].amountDue = null; renderHousehold()`);
 const missingAmountSummaryHtml = element("household-summary").innerHTML;
-invoke(`state.bundle[2].amountDue = 30.03;
+invoke(`state.bundle[2].amountDue = "30.03";
   state.bundle = state.bundle.map((summary) => ({ ...summary, currency: null }));
   renderHousehold()`);
 const missingCurrencySummaryHtml = element("household-summary").innerHTML;
@@ -1616,6 +1726,10 @@ process.stdout.write(JSON.stringify({
   editedRequestBody,
   editedRequestsHtml,
   compatibleSummaryHtml,
+  exactAdditionSummaryHtml,
+  noEarlyRoundingSummaryHtml,
+  numberAmountSummaryHtml,
+  numberAmountBillsHtml,
   mixedCurrencySummaryHtml,
   missingPeriodSummaryHtml,
   nonoverlapSummaryHtml,
@@ -1739,6 +1853,36 @@ const output = vm.runInContext(`(() => {
     comparisonHidden: byId("optional-comparison").hidden,
     requestsHtml: byId("provider-review-requests").innerHTML,
     summaryIssueCount: summarizeCurrentBill()?.issueCount,
+    numericFormatting: {
+      moneyHalfUp: money("100.005", "USD"),
+      moneyNegativeHalfUp: money("-100.005", "USD"),
+      moneyNegativeZero: money("-0.004", "USD"),
+      moneyPositiveZero: money("+0.000", "USD"),
+      measurement: decimalValue("1234567.123456789012345678"),
+      scientificMeasurement: decimalValue("1.23456789e-10"),
+      scientificTrailingZeros: decimalValue("1.2300e2"),
+      minimumExponent: decimalValue("1e-18"),
+      leadingZeroExponent: decimalValue("1e-000000000000000018"),
+      maximumMagnitude: decimalValue("999999999999"),
+      signedMeasurementZero: decimalValue("-0.000"),
+      safeIntegerMoney: money(31, "USD"),
+      safeIntegerMeasurement: decimalValue(31),
+      numberMoney: money(100.005, "USD"),
+      numberMeasurement: decimalValue(0.1 + 0.2),
+      outOfRangeInteger: decimalValue(1000000000000),
+      confidenceHtml: evidenceMarkup({
+        evidence: { page: 1, text: "Exact confidence", confidence: "0.145" },
+      }),
+      numberConfidenceHtml: evidenceMarkup({
+        evidence: { page: 1, text: "Binary confidence", confidence: 0.145 },
+      }),
+      oversizedMeasurement: decimalValue("1".repeat(65)),
+      outOfRangeExponent: decimalValue("1e1000000"),
+      exponentBelowDomain: decimalValue("1e-19"),
+      magnitudeAboveDomain: decimalValue("1e12"),
+      tooManyDigits: decimalValue("12345678901234567890123456789e-18"),
+      surroundingWhitespace: decimalValue(" 1.2"),
+    },
     corrected,
     legacyEvidence,
   };
@@ -2472,7 +2616,7 @@ def test_bundle_uses_page_memory_only() -> None:
         assert persistent_api not in source
 
 
-def test_bundle_summary_has_a_strict_privacy_allowlist_and_numeric_usage() -> None:
+def test_bundle_summary_has_a_strict_privacy_allowlist_and_exact_decimal_strings() -> None:
     client = create_app().test_client()
     documents = [
         _sample_document(client, kind)
@@ -2519,12 +2663,11 @@ def test_bundle_summary_has_a_strict_privacy_allowlist_and_numeric_usage() -> No
     assert result["summarySourceIsolated"] is True
     for summary in result["summaries"]:
         assert set(summary) == summary_keys
-        assert isinstance(summary["amountDue"], int | float)
-        assert isinstance(summary["discrepancyTotal"], int | float)
+        assert isinstance(summary["amountDue"], str)
+        assert isinstance(summary["discrepancyTotal"], str)
         assert all(set(usage) == usage_keys for usage in summary["usageSummaries"])
         assert all(
-            isinstance(usage["value"], int | float)
-            and not isinstance(usage["value"], bool)
+            isinstance(usage["value"], str)
             for usage in summary["usageSummaries"]
         )
         assert all(set(request) == request_keys for request in summary["reviewRequests"])
@@ -2532,7 +2675,7 @@ def test_bundle_summary_has_a_strict_privacy_allowlist_and_numeric_usage() -> No
     synthetic, centerpoint_summary, _bloomington = result["summaries"]
     assert synthetic["issueCount"] == 1
     assert centerpoint_summary["usageSummaries"] == [
-        {"serviceType": "natural_gas", "value": 112.277, "unit": "therm"}
+        {"serviceType": "natural_gas", "value": "112.277", "unit": "therm"}
     ]
     serialized = json.dumps(centerpoint_summary, sort_keys=True)
     for forbidden in (
@@ -2610,6 +2753,11 @@ def test_household_sequence_deduplicates_combines_safely_and_clears() -> None:
 
     assert "Combined amount shown" in result["compatibleSummaryHtml"]
     assert "$60.06" in result["compatibleSummaryHtml"]
+    assert "$0.30" in result["exactAdditionSummaryHtml"]
+    assert "$0.01" in result["noEarlyRoundingSummaryHtml"]
+    assert "Combined amount shown" not in result["numberAmountSummaryHtml"]
+    assert "Not combined" in result["numberAmountSummaryHtml"]
+    assert "—" in result["numberAmountBillsHtml"]
     for incompatible in (
         result["mixedCurrencySummaryHtml"],
         result["missingPeriodSummaryHtml"],
@@ -2650,7 +2798,7 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
             "verification_level": "evidence_extracted",
             "verdict": "possible_discrepancy",
             "headline": "Corrected facts require provider review",
-            "discrepancy_total": 7.25,
+            "discrepancy_total": "7.250000000000000001",
             "review_requests": [
                 {
                     "provider": "Corrected Duke review desk",
@@ -2666,7 +2814,7 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
             "id": "corrected-root-line",
             "root_cause_id": "corrected-root",
             "status": "discrepancy",
-            "delta": 7.25,
+            "delta": "7.250000000000000001",
             "label": "Corrected amount review",
         }
     )
@@ -2679,8 +2827,8 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
         audit_a=first_audit,
         auditB=second_audit,
         mode="duke",
-        nextUsage="1234.5",
-        nextAmount="222.22",
+        nextUsage="1234.500000000000000001",
+        nextAmount="100.005",
         abortAware=False,
     )
 
@@ -2717,11 +2865,15 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
     assert result["afterExplicitReload"]["replacementArmed"] is True
     assert result["replaced"] == result["repeated"]
     assert result["replaced"]["usageSummaries"] == [
-        {"serviceType": "electricity", "value": 1234.5, "unit": "kWh"}
+        {
+            "serviceType": "electricity",
+            "value": "1234.500000000000000001",
+            "unit": "kWh",
+        }
     ]
-    assert result["replaced"]["amountDue"] == 222.22
+    assert result["replaced"]["amountDue"] == "100.005"
     assert result["replaced"]["verificationLevel"] == "evidence_extracted"
-    assert result["replaced"]["discrepancyTotal"] == 7.25
+    assert result["replaced"]["discrepancyTotal"] == "7.250000000000000001"
     assert result["replaced"]["issueCount"] == 1
     assert result["replaced"]["reviewRequests"] == [
         {
@@ -2744,7 +2896,8 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
     assert result["afterReplacementAddAnother"]["extraction"] is None
     assert result["afterReplacementAddAnother"]["audit"] is None
     assert result["revokedUrls"] == ["blob:completed-upload"]
-    assert "$222.22" in result["householdHtml"]
+    assert "$100.01" in result["householdHtml"]
+    assert "1,234.500000000000000001 kWh" in result["householdHtml"]
     assert "Newly sanitized corrected request" in result["requestsHtml"]
     assert "Page-memory draft" not in result["requestsHtml"]
 
@@ -2915,6 +3068,122 @@ def test_javascript_renders_both_schemas_and_unified_results_without_crashing(
     }
 
 
+def test_browser_exact_decimal_formatting_never_uses_binary_numbers() -> None:
+    client = create_app().test_client()
+    extraction = client.get("/api/sample/duke").get_json()["extraction"]
+    audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+
+    rendered = _exercise_javascript_contract(extraction, audit, mode="duke")
+    numeric = rendered["numericFormatting"]
+
+    assert numeric["moneyHalfUp"] == "$100.01"
+    assert numeric["moneyNegativeHalfUp"] == "−$100.01"
+    assert numeric["moneyNegativeZero"] == "$0.00"
+    assert numeric["moneyPositiveZero"] == "$0.00"
+    assert numeric["measurement"] == "1,234,567.123456789012345678"
+    assert numeric["scientificMeasurement"] == "0.000000000123456789"
+    assert numeric["scientificTrailingZeros"] == "123.00"
+    assert numeric["minimumExponent"] == "0.000000000000000001"
+    assert numeric["leadingZeroExponent"] == "0.000000000000000001"
+    assert numeric["maximumMagnitude"] == "999,999,999,999"
+    assert numeric["signedMeasurementZero"] == "0.000"
+    assert numeric["safeIntegerMoney"] == "$31.00"
+    assert numeric["safeIntegerMeasurement"] == "31"
+    assert "<summary>Page 1 · 15% confidence</summary>" in numeric[
+        "confidenceHtml"
+    ]
+    for unavailable in (
+        "numberMoney",
+        "numberMeasurement",
+        "outOfRangeInteger",
+        "oversizedMeasurement",
+        "outOfRangeExponent",
+        "exponentBelowDomain",
+        "magnitudeAboveDomain",
+        "tooManyDigits",
+        "surroundingWhitespace",
+    ):
+        assert numeric[unavailable] == "—"
+    assert "confidence unavailable" in numeric["numberConfidenceHtml"]
+
+
+def test_high_precision_review_and_audit_values_render_exactly() -> None:
+    client = create_app().test_client()
+    extraction = client.get("/api/sample/duke").get_json()["extraction"]
+    extraction["sections"][0]["usage"]["value"] = "1002.123456789012345678"
+    extraction["sections"][0]["usage"]["evidence"]["confidence"] = "0.145"
+    extraction["amount_due"]["value"] = "100.005"
+    response = client.post("/api/audit", json=extraction)
+    assert response.status_code == 200
+    audit = response.get_json()["audit"]
+
+    rendered = _exercise_javascript_contract(extraction, audit, mode="duke")
+
+    assert 'value="1002.123456789012345678"' in rendered["reviewHtml"]
+    assert 'inputmode="decimal" type="text"' in rendered["reviewHtml"]
+    assert "15% confidence" in rendered["reviewHtml"]
+    assert "1,002.123456789012345678 kWh" in rendered["servicesHtml"]
+    assert "1,002.123456789012345678 kWh" in rendered["auditHtml"]
+    assert "$100.01" in rendered["auditHtml"]
+    assert "−$79.40" in rendered["auditHtml"]
+
+
+def test_safe_integer_bill_facts_render_as_exact_editable_values() -> None:
+    client = create_app().test_client()
+    legacy = client.get("/api/sample/authentic").get_json()["extraction"]
+    legacy_audit = client.post("/api/audit", json=legacy).get_json()["audit"]
+    legacy_rendered = _exercise_javascript_contract(
+        legacy,
+        legacy_audit,
+        mode="authentic",
+    )
+    legacy_marker = 'id="fact-billing_days"'
+    legacy_field = legacy_rendered["reviewHtml"][
+        legacy_rendered["reviewHtml"].index(legacy_marker) :
+    ][:420]
+    assert 'data-exact-number="true"' in legacy_field
+    assert 'inputmode="decimal"' in legacy_field
+    assert 'type="text"' in legacy_field
+    assert 'value="31"' in legacy_field
+    assert "Exact numeric spelling unavailable" not in legacy_field
+
+    utility = client.get("/api/sample/duke").get_json()["extraction"]
+    utility["sections"][0]["supplemental_facts"] = [
+        {
+            "id": "billing_days",
+            "fact": {
+                "value": 31,
+                "unit": "days",
+                "status": "printed",
+                "evidence": {
+                    "page": 1,
+                    "text": "Billing period 31 days",
+                    "confidence": "1",
+                    "provenance": "rendered_page",
+                },
+            },
+        }
+    ]
+    utility_audit = client.post(
+        "/api/audit",
+        json=client.get("/api/sample/duke").get_json()["extraction"],
+    ).get_json()["audit"]
+    utility_rendered = _exercise_javascript_contract(
+        utility,
+        utility_audit,
+        mode="duke",
+    )
+    utility_marker = 'id="fact-sections-0-supplemental_facts-0-fact"'
+    utility_field = utility_rendered["reviewHtml"][
+        utility_rendered["reviewHtml"].index(utility_marker) :
+    ][:420]
+    assert 'data-exact-number="true"' in utility_field
+    assert 'inputmode="decimal"' in utility_field
+    assert 'type="text"' in utility_field
+    assert 'value="31"' in utility_field
+    assert "Exact numeric spelling unavailable" not in utility_field
+
+
 def test_internal_reconciliation_copy_keeps_unverified_categories_explicit() -> None:
     client = create_app().test_client()
     extraction = client.get("/api/sample/bloomington").get_json()["extraction"]
@@ -2976,7 +3245,7 @@ def test_priority_findings_hide_dependent_symptom_when_root_is_present() -> None
             "id": "root-finding",
             "label": "Root printed mismatch",
             "status": "discrepancy",
-            "delta": 4.25,
+            "delta": "4.25",
         }
     )
     root.pop("root_cause_id", None)
@@ -3028,6 +3297,9 @@ def test_dynamic_review_and_audit_values_are_inert_markup() -> None:
     line["unit"] = hostile["unit"]
     line["formula"] = hostile["label"]
     line["limitation"] = hostile["headline"]
+    line["billed_amount"] = hostile["evidence"]
+    line["expected_amount"] = 0.1 + 0.2
+    line["delta"] = "1e1000000"
     line["evidence"] = [
         {
             "page": hostile["unit"],
@@ -3087,6 +3359,7 @@ def test_dynamic_review_and_audit_values_are_inert_markup() -> None:
         and value.lower().startswith(("javascript:", "data:"))
         for name, value in probe.attributes
     )
+    assert rendered["auditHtml"].count("—") >= 3
     rendered_text = "".join(probe.text)
     for marker in hostile.values():
         assert marker in rendered_text or marker in {
@@ -3590,6 +3863,14 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
             assert flow["review"]["warningEventCount"] == 0
         else:
             assert flow["review"]["warningHidden"] is True
+        if flow["sample"] in {"authentic", "synthetic"}:
+            assert flow["review"]["billingDays"] == {
+                "value": "31",
+                "exactNumber": "true",
+                "unavailable": False,
+            }
+        else:
+            assert flow["review"]["billingDays"] is None
 
         result = flow["result"]
         assert result["focus"] == "verify-title"
@@ -3653,6 +3934,22 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     assert "Combined amount shown" not in sequential["summaryText"]
 
     replacement = evidence["reauditReplacement"]
+    exact_edit = {
+        "usage": "5.750000123456789012",
+        "amount": "100.005",
+        "confidence": "Page 1 · 15% confidence",
+    }
+    assert evidence["reauditEdited"] == exact_edit
+    assert evidence["reauditRerendered"] == exact_edit
+    assert evidence["reauditExpected"]["discrepancyType"] == "string"
+    assert evidence["reauditExpected"]["amountBilled"] == "100.005"
+    assert evidence["reauditExpected"]["amountExpected"] == "51.92"
+    assert evidence["reauditExpected"]["amountDelta"] == "48.085"
+    assert "$100.01" in evidence["reauditExpected"]["ledgerText"]
+    assert "$48.09" in evidence["reauditExpected"]["ledgerText"]
+    assert "5.750000123456789012 kgal" in evidence["reauditExpected"][
+        "serviceText"
+    ]
     assert replacement["bundleLength"] == 3
     assert replacement["ids"] == evidence["bundleIdsBeforeReaudit"]
     assert replacement["summary"]["id"] == evidence["bundleIdsBeforeReaudit"][-1]
@@ -3663,10 +3960,14 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     assert replacement["auditCleared"] is True
     assert replacement["previewCleared"] is True
     assert replacement["summary"]["usageSummaries"] == [
-        {"serviceType": "water", "value": 5.75, "unit": "kgal"},
-        {"serviceType": "wastewater", "value": 2, "unit": "kgal"},
+        {
+            "serviceType": "water",
+            "value": "5.750000123456789012",
+            "unit": "kgal",
+        },
+        {"serviceType": "wastewater", "value": "2", "unit": "kgal"},
     ]
-    assert replacement["summary"]["amountDue"] == 999.91
+    assert replacement["summary"]["amountDue"] == "100.005"
     assert replacement["summary"]["verificationLevel"] == replacement[
         "expectedVerification"
     ]
@@ -3678,8 +3979,8 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     assert replacement["summary"]["reviewRequests"][0]["body"] != (
         "Stale page-memory draft"
     )
-    assert "$999.91" in replacement["householdText"]
-    assert "5.75 kgal" in replacement["householdText"]
+    assert "$100.01" in replacement["householdText"]
+    assert "5.750000123456789012 kgal" in replacement["householdText"]
     assert "Stale page-memory draft" not in replacement["requestText"]
     assert evidence["repeatedFinish"] == {
         "count": 3,
@@ -3754,6 +4055,19 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     assert preview_finish["fileCount"] == 0
     assert preview_finish["focus"] == "household-title"
     assert preview_finish["pageErrors"] == []
+    exact_bundle = evidence["exactBundleRendering"]
+    assert exact_bundle["exactAddition"]["amountTypes"] == ["string", "string"]
+    assert "$0.30" in exact_bundle["exactAddition"]["summaryText"]
+    assert "1,002.123456789012345678 kWh" in exact_bundle["exactAddition"][
+        "billsText"
+    ]
+    assert "$0.01" in exact_bundle["noEarlyRounding"]
+    assert "Combined amount shown" not in exact_bundle["numberFallback"][
+        "summaryText"
+    ]
+    assert "Not combined" in exact_bundle["numberFallback"]["summaryText"]
+    assert "—" in exact_bundle["numberFallback"]["billsText"]
+    assert exact_bundle["pageErrors"] == []
     assert evidence["protocolErrors"] == []
     assert evidence["externalRequests"] == []
     assert evidence["hostileDom"] == {
