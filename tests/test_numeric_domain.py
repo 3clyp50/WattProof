@@ -157,7 +157,6 @@ def test_schema_one_confidence_rejects_pathological_exponent() -> None:
         ("999999999999", 999999999999),
         (b"-999999999999", -999999999999),
         (999999999999, 999999999999),
-        (999999999999.0, 999999999999),
         ("31.0", 31),
         ("3.1e1", 31),
         (Decimal("31.000"), 31),
@@ -183,6 +182,8 @@ def test_integer_fact_accepts_only_exact_integers_within_boundary(
     [
         True,
         False,
+        31.0,
+        999999999999.0,
         31.5,
         float("nan"),
         float("inf"),

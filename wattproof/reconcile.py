@@ -6,6 +6,8 @@ from decimal import Decimal
 from .numeric import (
     abs_exact,
     add_exact,
+    format_decimal_exact,
+    format_usd_exact,
     multiply_exact,
     quantize_exact,
     subtract_exact,
@@ -61,7 +63,7 @@ def _provenance_input_key(operand_key: str) -> str:
 
 def _annotated_value(value: Decimal, unit: str, fact: FactBaseV2) -> str:
     annotation = _provenance_annotation(fact)
-    return f"{value} {unit} [{annotation}]"
+    return f"{format_decimal_exact(value)} {unit} [{annotation}]"
 
 
 def _with_billed_provenance(
@@ -154,7 +156,7 @@ def _quantity_charge_line(
         formula=(
             f"{_annotated_value(quantity.value, quantity.unit, quantity)} × "
             f"{_annotated_value(rate.value, rate.unit, rate)} "
-            f"= {expected} {currency} [recomputed]"
+            f"= {format_decimal_exact(expected)} {currency} [recomputed]"
         ),
         inputs={
             "quantity": _annotated_value(quantity.value, quantity.unit, quantity),
@@ -364,7 +366,7 @@ def _percentage_charge_line(
         delta=delta,
         formula=(
             f"{_annotated_value(rate.value, rate.unit, rate)} × ({base_terms}) "
-            f"= {expected} {currency} [recomputed]"
+            f"= {format_decimal_exact(expected)} {currency} [recomputed]"
         ),
         inputs=inputs,
         evidence=(
@@ -487,7 +489,7 @@ def _meter_line(section: ServiceSection) -> UtilityAuditLine | None:
             formula=(
                 f"{_annotated_value(meter.current.value, meter.current.unit, meter.current)} "
                 f"− {_annotated_value(meter.previous.value, meter.previous.unit, meter.previous)} "
-                f"= {expected} {meter.usage.unit} [recomputed]"
+                f"= {format_decimal_exact(expected)} {meter.usage.unit} [recomputed]"
             ),
             inputs={
                 "current": _annotated_value(
@@ -499,7 +501,7 @@ def _meter_line(section: ServiceSection) -> UtilityAuditLine | None:
                 "reported_usage": _annotated_value(
                     meter.usage.value, meter.usage.unit, meter.usage
                 ),
-                "precision": str(quantum),
+                "precision": format_decimal_exact(quantum),
             },
             evidence=(
                 meter.current.evidence,
@@ -594,7 +596,8 @@ def _conversion_lines(section: ServiceSection) -> tuple[UtilityAuditLine, ...]:
                     delta=delta,
                     formula=(
                         f"{source_trace} × {factor_trace} "
-                        f"= {expected} {conversion.result.unit} [recomputed]"
+                        f"= {format_decimal_exact(expected)} "
+                        f"{conversion.result.unit} [recomputed]"
                     ),
                     inputs={
                         "source": _annotated_value(
@@ -612,7 +615,7 @@ def _conversion_lines(section: ServiceSection) -> tuple[UtilityAuditLine, ...]:
                             conversion.result.unit,
                             conversion.result,
                         ),
-                        "precision": str(quantum),
+                        "precision": format_decimal_exact(quantum),
                     },
                     evidence=(
                         conversion.source.evidence,
@@ -860,7 +863,8 @@ def _quantity_sum_lines(section: ServiceSection) -> tuple[UtilityAuditLine, ...]
                     expected_amount=expected,
                     delta=delta,
                     formula=(
-                        f"{component_trace} = {expected} {target.unit} [recomputed]"
+                        f"{component_trace} = {format_decimal_exact(expected)} "
+                        f"{target.unit} [recomputed]"
                     ),
                     inputs=inputs,
                     evidence=evidence,
@@ -894,7 +898,7 @@ def _subtotal_line(
                 _annotated_value(charge.amount.value, currency, charge.amount)
                 for charge in section.charges
             )
-            + f" = {expected} {currency} [recomputed]",
+            + f" = {format_decimal_exact(expected)} {currency} [recomputed]",
             inputs={
                 f"charge::{charge.id}": _annotated_value(
                     charge.amount.value,
@@ -936,7 +940,8 @@ def _current_charges_line(
                 )
                 for section in document.sections
             )
-            + f" = {expected} {document.currency} [recomputed]",
+            + f" = {format_decimal_exact(expected)} "
+            f"{document.currency} [recomputed]",
             inputs={
                 f"subtotal::{section.id}": _annotated_value(
                     section.subtotal.value,
@@ -961,7 +966,10 @@ def _amount_due_line(
     expected_unrounded = document.current_charges.value
     operands: list[EvidenceRef] = [document.current_charges.evidence]
     inputs = {
-        "current_charges": f"{document.current_charges.value} {document.currency}",
+        "current_charges": (
+            f"{format_decimal_exact(document.current_charges.value)} "
+            f"{document.currency}"
+        ),
         _provenance_input_key("current_charges"): _provenance_annotation(
             document.current_charges
         ),
@@ -977,7 +985,8 @@ def _amount_due_line(
         )
         operands.append(document.outstanding_balance.evidence)
         inputs["outstanding_balance"] = (
-            f"{document.outstanding_balance.value} {document.currency}"
+            f"{format_decimal_exact(document.outstanding_balance.value)} "
+            f"{document.currency}"
         )
         inputs[_provenance_input_key("outstanding_balance")] = _provenance_annotation(
             document.outstanding_balance
@@ -999,7 +1008,11 @@ def _amount_due_line(
             billed_amount=document.amount_due.value,
             expected_amount=expected,
             delta=delta,
-            formula=formula + f" = {expected} {document.currency} [recomputed]",
+            formula=(
+                formula
+                + f" = {format_decimal_exact(expected)} "
+                f"{document.currency} [recomputed]"
+            ),
             inputs=inputs,
             evidence=(*operands, document.amount_due.evidence),
             status=status,
@@ -1190,9 +1203,8 @@ def _reconcile_amount_due_root(
 
 def _display_amount(value: Decimal, unit: str, currency: str) -> str:
     if unit == currency and currency == "USD":
-        sign = "-" if value < 0 else ""
-        return f"{sign}${abs_exact(value):.2f}"
-    return f"{value} {unit}"
+        return format_usd_exact(value)
+    return f"{format_decimal_exact(value)} {unit}"
 
 
 def _billed_phrase(line: UtilityAuditLine, currency: str) -> str:

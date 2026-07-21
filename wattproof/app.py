@@ -64,7 +64,13 @@ def _exact_audit_payload() -> dict[str, Any] | None:
             parse_int=_parse_json_integer,
             parse_constant=_reject_json_constant,
         )
-    except (JSONDecodeError, UnicodeDecodeError, ValueError):
+    except (
+        JSONDecodeError,
+        OverflowError,
+        RecursionError,
+        UnicodeDecodeError,
+        ValueError,
+    ):
         return None
     return payload if isinstance(payload, dict) else None
 

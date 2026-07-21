@@ -22,7 +22,13 @@ from .models import (
     EvidenceBase,
     TariffVersion,
 )
-from .numeric import abs_exact, add_exact, subtract_exact, sum_exact
+from .numeric import (
+    abs_exact,
+    add_exact,
+    format_usd_exact,
+    subtract_exact,
+    sum_exact,
+)
 from .tariffs import RateRule, TariffBundle, load_tariff_bundle
 from .utility_models import (
     AuditScope,
@@ -485,8 +491,7 @@ def _root_causes(
 
 
 def _currency(value: Decimal) -> str:
-    sign = "-" if value < 0 else ""
-    return f"{sign}${abs_exact(value):.2f}"
+    return format_usd_exact(value)
 
 
 def _issue_detail(line: AuditLine) -> str:

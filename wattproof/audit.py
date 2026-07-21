@@ -16,6 +16,8 @@ from .models import (
 from .numeric import (
     abs_exact,
     add_exact,
+    format_decimal_exact,
+    format_usd_exact,
     multiply_exact,
     quantize_exact,
     subtract_exact,
@@ -40,13 +42,12 @@ def _status(delta: Decimal) -> AuditStatus:
 
 
 def _currency(value: Decimal) -> str:
-    sign = "-" if value < 0 else ""
-    return f"{sign}${abs_exact(value):.2f}"
+    return format_usd_exact(value)
 
 
 def _rate(value: Decimal) -> str:
     sign = "-" if value < 0 else ""
-    return f"{sign}${abs_exact(value)}/kWh"
+    return f"{sign}${format_decimal_exact(abs_exact(value))}/kWh"
 
 
 def _citation(bundle: TariffBundle, rule: RateRule) -> tuple[Citation, ...]:
@@ -141,10 +142,10 @@ def _quantity_rule(
         billed_amount=billed,
         expected_amount=expected,
         delta=delta,
-        formula=f"{quantity} kWh × {_rate(rule.rate)}",
+        formula=f"{format_decimal_exact(quantity)} kWh × {_rate(rule.rate)}",
         inputs={
-            "quantity_kwh": str(quantity),
-            "official_rate_usd_per_kwh": str(rule.rate),
+            "quantity_kwh": format_decimal_exact(quantity),
+            "official_rate_usd_per_kwh": format_decimal_exact(rule.rate),
             "rounding": "nearest cent, decimal half-up",
         },
         source_page=billed_line.billed_amount.source_page,
@@ -174,11 +175,11 @@ def _percentage_rule(
         delta=delta,
         formula=(
             f"{_currency(base)} taxable generation × "
-            f"{multiply_exact(rule.rate, Decimal('100'))}%"
+            f"{format_decimal_exact(multiply_exact(rule.rate, Decimal('100')))}%"
         ),
         inputs={
-            "taxable_generation_usd": str(base),
-            "printed_tax_rate": str(rule.rate),
+            "taxable_generation_usd": format_decimal_exact(base),
+            "printed_tax_rate": format_decimal_exact(rule.rate),
             "rounding": "nearest cent, decimal half-up",
         },
         source_page=billed_line.billed_amount.source_page,
@@ -206,7 +207,11 @@ def _tariff_lines(
                     expected_amount=None,
                     delta=None,
                     formula="Not recomputed",
-                    inputs={"printed_amount_usd": str(billed_line.billed_amount.value)},
+                    inputs={
+                        "printed_amount_usd": format_decimal_exact(
+                            billed_line.billed_amount.value
+                        )
+                    },
                     source_page=billed_line.billed_amount.source_page,
                     source_text=billed_line.billed_amount.source_text,
                     citations=(),
@@ -290,7 +295,7 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             source_page=bill.delivery_subtotal.source_page,
             source_text=bill.delivery_subtotal.source_text,
             formula="sum of printed PG&E delivery lines",
-            inputs={"line_sum_usd": str(delivery_sum)},
+            inputs={"line_sum_usd": format_decimal_exact(delivery_sum)},
         ),
         _reconciliation_line(
             line_id="generation_subtotal",
@@ -300,7 +305,7 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             source_page=bill.generation_subtotal.source_page,
             source_text=bill.generation_subtotal.source_text,
             formula="sum of printed 3CE generation lines",
-            inputs={"line_sum_usd": str(generation_sum)},
+            inputs={"line_sum_usd": format_decimal_exact(generation_sum)},
         ),
         _reconciliation_line(
             line_id="current_charges",
@@ -311,8 +316,12 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             source_text=bill.current_charges.source_text,
             formula="PG&E subtotal + 3CE subtotal",
             inputs={
-                "pge_subtotal_usd": str(bill.delivery_subtotal.value),
-                "3ce_subtotal_usd": str(bill.generation_subtotal.value),
+                "pge_subtotal_usd": format_decimal_exact(
+                    bill.delivery_subtotal.value
+                ),
+                "3ce_subtotal_usd": format_decimal_exact(
+                    bill.generation_subtotal.value
+                ),
             },
         ),
         _reconciliation_line(
@@ -324,8 +333,12 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             source_text=bill.amount_due.source_text,
             formula="current charges + outstanding balance",
             inputs={
-                "current_charges_usd": str(bill.current_charges.value),
-                "outstanding_balance_usd": str(bill.outstanding_balance.value),
+                "current_charges_usd": format_decimal_exact(
+                    bill.current_charges.value
+                ),
+                "outstanding_balance_usd": format_decimal_exact(
+                    bill.outstanding_balance.value
+                ),
             },
         ),
     ]
@@ -339,7 +352,9 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             expected_amount=None,
             delta=None,
             formula="current meter read − prior meter read",
-            inputs={"printed_usage_kwh": str(bill.total_usage.value)},
+            inputs={
+                "printed_usage_kwh": format_decimal_exact(bill.total_usage.value)
+            },
             source_page=bill.total_usage.source_page,
             source_text=bill.total_usage.source_text,
             status="cannot_verify",

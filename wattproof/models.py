@@ -25,7 +25,7 @@ AuditStatus = Literal[
 class EvidenceBase(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    source_page: int = Field(ge=1)
+    source_page: UtilityInteger = Field(ge=1, le=20)
     source_text: str = Field(min_length=1)
     confidence: ConfidenceDecimal
     status: EvidenceStatus
@@ -110,7 +110,7 @@ class BillExtraction(BaseModel):
     fixture_kind: Literal["authentic", "synthetic", "uploaded"]
     synthetic_notice: str | None = None
     document_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    page_count: int | None = Field(default=None, ge=1, le=20)
+    page_count: UtilityInteger | None = Field(default=None, ge=1, le=20)
     delivery_provider: TextFact
     generation_provider: TextFact
     delivery_schedule: TextFact

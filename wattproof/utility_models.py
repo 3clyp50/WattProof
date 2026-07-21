@@ -32,7 +32,7 @@ VerificationLevel = Literal[
 class EvidenceRef(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    page: int = Field(ge=1)
+    page: UtilityInteger = Field(ge=1, le=20)
     text: str = Field(min_length=1)
     confidence: ConfidenceDecimal
     provenance: Literal["rendered_page"] = "rendered_page"
@@ -241,7 +241,7 @@ class UtilityDocument(BaseModel):
         "uploaded",
     ]
     document_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    page_count: int = Field(ge=1, le=20)
+    page_count: UtilityInteger = Field(ge=1, le=20)
     source_url: str | None = None
     statement_date: DateFactV2 | None = None
     currency: str = Field(pattern=r"^[A-Z]{3}$")

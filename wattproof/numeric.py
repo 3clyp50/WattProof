@@ -13,7 +13,6 @@ from decimal import (
     Overflow,
     localcontext,
 )
-from math import isfinite
 from typing import Annotated
 
 from pydantic import AfterValidator, BeforeValidator
@@ -25,6 +24,7 @@ MAX_UTILITY_DECIMAL_EXPONENT = 11
 MAX_UTILITY_DECIMAL_ADJUSTED_EXPONENT = 11
 MAX_UTILITY_INTEGER_ABS = 999_999_999_999
 MAX_UTILITY_INTEGER_CHARACTERS = 64
+MONEY_QUANTUM = Decimal("0.01")
 
 _DECIMAL_SPELLING = re.compile(
     r"[+-]?(?:(?:[0-9]+(?:\.[0-9]*)?)|(?:\.[0-9]+))(?:[eE][+-]?[0-9]+)?"
@@ -162,16 +162,10 @@ def _validate_integer_input(value: object) -> int:
     if isinstance(value, int):
         return value
     if isinstance(value, float):
-        if not isfinite(value):
-            raise ValueError("utility-bill integer must be finite")
-        if not value.is_integer():
-            raise ValueError("utility-bill integer must not contain a fractional value")
-        if abs(value) > MAX_UTILITY_INTEGER_ABS:
-            raise ValueError(
-                "utility-bill integer magnitude must be at most "
-                f"{MAX_UTILITY_INTEGER_ABS}"
-            )
-        return int(value)
+        raise ValueError(
+            "utility-bill integer cannot accept a binary float; use an exact "
+            "integer, Decimal, or numeric spelling"
+        )
     if isinstance(value, Decimal):
         return _exact_integer(value)
     if isinstance(value, (str, bytes, bytearray)):
@@ -287,3 +281,26 @@ def quantize_exact(value: Decimal, quantum: Decimal) -> Decimal:
     with localcontext(_arithmetic_context(precision)) as context:
         result = value.quantize(quantum, rounding=ROUND_HALF_UP, context=context)
     return _canonical_zero(result)
+
+
+def format_decimal_exact(value: Decimal) -> str:
+    """Render every stored digit without consulting the ambient Decimal context."""
+
+    if not value.is_finite():
+        raise ValueError("utility-bill presentation requires a finite Decimal value")
+    return format(_canonical_zero(value), "f")
+
+
+def format_fixed_exact(value: Decimal, quantum: Decimal) -> str:
+    """Round half-up in a fresh context, then render without another rounding step."""
+
+    return format_decimal_exact(quantize_exact(value, quantum))
+
+
+def format_usd_exact(value: Decimal) -> str:
+    """Render a Decimal as signed US currency with deterministic cent rounding."""
+
+    rendered = format_fixed_exact(value, MONEY_QUANTUM)
+    if rendered.startswith("-"):
+        return f"-${rendered[1:]}"
+    return f"${rendered}"
