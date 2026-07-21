@@ -360,3 +360,35 @@ class UtilityAuditResult(BaseModel):
     tariff: TariffVersion | None = None
     comparison: PlanComparison | None = None
     review_requests: tuple[ProviderReviewRequest, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_published_tariff_evidence(self) -> Self:
+        published = tuple(
+            line for line in self.lines if line.scope == "published_tariff"
+        )
+        if not published:
+            return self
+        if self.tariff is None:
+            raise ValueError(
+                "published_tariff lines require attached tariff archive metadata"
+            )
+        archived = self.tariff.citations
+        for line in published:
+            if not line.citations:
+                raise ValueError(
+                    "published_tariff lines require archived citations"
+                )
+            for citation in line.citations:
+                if citation not in archived:
+                    raise ValueError(
+                        "published_tariff citations must be attached to the tariff archive"
+                    )
+                if not (
+                    citation.label.strip()
+                    and citation.source_url.strip()
+                    and citation.local_path.strip()
+                ):
+                    raise ValueError(
+                        "published_tariff citations require complete archive metadata"
+                    )
+        return self

@@ -14,7 +14,9 @@ RATE_DATA_PATH = Path(__file__).with_name("data") / "rates.json"
 
 
 class SourceIntegrityError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, public_message: str) -> None:
+        super().__init__(message)
+        self.public_message = public_message
 
 
 @dataclass(frozen=True)
@@ -52,11 +54,23 @@ def load_tariff_bundle(*, verify_sources: bool = True) -> TariffBundle:
         for citation in citation_map.values():
             source_path = PROJECT_ROOT / citation.local_path
             if not source_path.is_file():
-                raise SourceIntegrityError(f"Missing tariff snapshot: {source_path}")
+                raise SourceIntegrityError(
+                    f"Missing tariff snapshot: {source_path}",
+                    public_message=(
+                        f"Missing tariff snapshot for {citation.label} "
+                        f"({Path(citation.local_path).name}); expected SHA-256 "
+                        f"{citation.sha256}."
+                    ),
+                )
             actual_hash = _sha256(source_path)
             if actual_hash != citation.sha256:
                 raise SourceIntegrityError(
-                    f"Tariff snapshot hash mismatch: {citation.local_path}"
+                    f"Tariff snapshot hash mismatch: {source_path}",
+                    public_message=(
+                        f"Tariff snapshot hash mismatch for {citation.label} "
+                        f"({Path(citation.local_path).name}); expected SHA-256 "
+                        f"{citation.sha256}, actual SHA-256 {actual_hash}."
+                    ),
                 )
 
     version = TariffVersion.model_validate(

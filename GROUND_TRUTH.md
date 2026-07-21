@@ -114,7 +114,7 @@ The authentic fixture reconciles internally:
 | 3CE peak/off-peak generation | `calculable` | Exact period quantities and effective official rates are available. |
 | Franchise fee surcharge | `calculable` | Exact total usage and the published 2020-vintage rate are available. |
 | Section subtotals and amount due | `reconcilable_only` | Printed arithmetic can be checked independently of tariff eligibility. |
-| 3CE utility users' tax | `calculable` | The bill prints the 1.000% rate and the taxable period charges. |
+| 3CE utility users' tax | `printed_math_only` | The bill prints the 1.000% rate and taxable period charges, so their arithmetic can be checked. No independently archived source establishes that percentage as the governing tariff. |
 | Generation credit | `unsupported` | The matching PG&E generation-credit component source is not archived. |
 | PCIA | `unsupported` | The 3CE sheet's 2020-vintage rate calculates `$4.50`, not the printed `$4.53`; WattProof must not force a match. |
 | Energy Commission tax | `unsupported` | The exact effective tax source has not been archived. |

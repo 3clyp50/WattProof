@@ -4,8 +4,10 @@ from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 import pytest
+from pydantic import ValidationError
 
 import wattproof.adapters as adapters
 import wattproof.tariffs as tariffs
@@ -16,6 +18,7 @@ from wattproof.fixtures import load_sample
 from wattproof.models import BillExtraction, TextFact
 from wattproof.tariffs import SourceIntegrityError, TariffBundle, load_tariff_bundle
 from wattproof.utility_fixtures import load_utility_sample
+from wattproof.utility_models import UtilityAuditResult
 
 
 def _changed_text(
@@ -153,6 +156,83 @@ def test_exact_pg_and_e_bill_keeps_tariff_verified_result() -> None:
         for request in result.review_requests
         for line_id in request.grounded_audit_line_ids
     } == set(legacy.review_request.grounded_audit_line_ids)
+
+
+@pytest.mark.parametrize("fixture_kind", ["authentic", "synthetic"])
+@pytest.mark.parametrize("line_id", ["cca_nov_uut", "cca_dec_uut"])
+def test_uncited_uut_is_printed_math_not_published_tariff(
+    fixture_kind: Literal["authentic", "synthetic"],
+    line_id: str,
+) -> None:
+    result = audit_extraction(load_sample(fixture_kind))
+    line = next(line for line in result.lines if line.id == line_id)
+
+    assert result.verification_level == "tariff_verified"
+    assert line.scope == "printed_math"
+    assert line.status == "verified"
+    assert line.citations == ()
+    assert line.expected_amount is not None
+    assert line.delta == Decimal("0.00")
+    assert len(line.evidence) == 4
+    assert line.limitation is not None
+    assert "printed" in line.limitation.lower()
+    assert "no independently archived source" in line.limitation.lower()
+    assert "governing tariff" in line.limitation.lower()
+
+
+def test_every_published_tariff_line_has_attached_archive_metadata() -> None:
+    result = audit_extraction(load_sample("authentic"))
+    assert result.tariff is not None
+    archived = set(result.tariff.citations)
+    published = tuple(
+        line for line in result.lines if line.scope == "published_tariff"
+    )
+
+    assert published
+    assert all(line.citations for line in published)
+    assert all(
+        citation in archived
+        for line in published
+        for citation in line.citations
+    )
+
+    payload = result.model_dump(mode="json")
+    first_published = next(
+        line for line in payload["lines"] if line["scope"] == "published_tariff"
+    )
+    first_published["citations"] = []
+    with pytest.raises(
+        ValidationError,
+        match="published_tariff lines require archived citations",
+    ):
+        UtilityAuditResult.model_validate(payload)
+
+
+def test_uncited_uut_uses_printed_rate_without_disabling_cited_tariff_adapter() -> None:
+    bill = _changed_charge_rate(
+        load_sample("authentic"),
+        "cca_nov_uut",
+        Decimal("0.02000"),
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+    uut = lines["cca_nov_uut"]
+
+    assert result.verification_level == "tariff_verified"
+    assert result.tariff is not None
+    assert uut.scope == "printed_math"
+    assert uut.status == "discrepancy"
+    assert uut.expected_amount == Decimal("0.51")
+    assert uut.delta == Decimal("-0.25")
+    assert uut.inputs["printed_tax_rate"] == "0.02000"
+    assert uut.citations == ()
+    assert result.discrepancy_total == Decimal("0.25")
+    assert tuple(
+        request.grounded_audit_line_ids for request in result.review_requests
+    ) == (("cca_nov_uut",),)
+    assert "printed" in result.review_requests[0].body.lower()
+    assert "published rate" not in result.review_requests[0].body.lower()
 
 
 def test_synthetic_error_remains_exactly_five_dollars() -> None:
@@ -295,18 +375,17 @@ def test_unsupported_tariff_operand_unit_fails_closed() -> None:
     _assert_internal_fallback(bill.model_copy(update={"charges": charges}))
 
 
-@pytest.mark.parametrize("charge_id", ["pge_peak_energy", "cca_nov_uut"])
-def test_printed_rate_must_match_archived_rule_rate(charge_id: str) -> None:
+def test_cited_printed_rate_must_match_archived_rule_rate() -> None:
     bill = _changed_charge_rate(
         load_sample("authentic"),
-        charge_id,
+        "pge_peak_energy",
         Decimal("999"),
     )
 
     _assert_internal_fallback(bill)
     result = audit_extraction(bill)
     line = next(
-        line for line in result.lines if line.id == f"charge::{charge_id}"
+        line for line in result.lines if line.id == "charge::pge_peak_energy"
     )
     assert line.status == "discrepancy"
 
@@ -519,8 +598,12 @@ def test_archived_source_integrity_errors_propagate(
 ) -> None:
     monkeypatch.setattr(tariffs, "PROJECT_ROOT", tmp_path)
 
-    with pytest.raises(SourceIntegrityError, match="Missing tariff snapshot"):
+    with pytest.raises(SourceIntegrityError, match="Missing tariff snapshot") as raised:
         audit_extraction(load_sample("authentic"))
+
+    assert str(tmp_path) not in raised.value.public_message
+    assert "PG&E historic residential inclusive TOU rates" in raised.value.public_message
+    assert "expected SHA-256" in raised.value.public_message
 
 
 def test_unified_mapping_preserves_legacy_semantics_and_provenance() -> None:

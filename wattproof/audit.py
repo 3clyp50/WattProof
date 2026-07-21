@@ -159,10 +159,13 @@ def _percentage_rule(
     line_id: str,
     rule: RateRule,
     billed_line: ChargeLine,
-    expected_by_id: dict[str, Decimal],
+    billed_by_id: dict[str, Decimal],
 ) -> AuditLine:
-    base = sum_exact(tuple(expected_by_id[item] for item in rule.line_ids))
-    expected = round_money(multiply_exact(base, rule.rate))
+    if billed_line.rate is None:
+        raise ValueError(f"Missing printed rate for percentage line: {line_id}")
+    printed_rate = billed_line.rate.value
+    base = sum_exact(tuple(billed_by_id[item] for item in rule.line_ids))
+    expected = round_money(multiply_exact(base, printed_rate))
     billed = billed_line.billed_amount.value
     delta = round_money(subtract_exact(billed, expected))
     return AuditLine(
@@ -175,17 +178,22 @@ def _percentage_rule(
         delta=delta,
         formula=(
             f"{_currency(base)} taxable generation × "
-            f"{format_decimal_exact(multiply_exact(rule.rate, Decimal('100')))}%"
+            f"{format_decimal_exact(multiply_exact(printed_rate, Decimal('100')))}%"
         ),
         inputs={
             "taxable_generation_usd": format_decimal_exact(base),
-            "printed_tax_rate": format_decimal_exact(rule.rate),
+            "printed_tax_rate": format_decimal_exact(printed_rate),
             "rounding": "nearest cent, decimal half-up",
         },
         source_page=billed_line.billed_amount.source_page,
         source_text=billed_line.billed_amount.source_text,
         citations=(),
         status=_status(delta),
+        limitation=(
+            "WattProof checked arithmetic using the percentage rate and base "
+            "amounts printed on this statement; no independently archived source "
+            "establishes that rate as the governing tariff."
+        ),
     )
 
 
@@ -193,7 +201,10 @@ def _tariff_lines(
     bill: BillExtraction, bundle: TariffBundle
 ) -> tuple[AuditLine, ...]:
     results: list[AuditLine] = []
-    expected_by_id: dict[str, Decimal] = {}
+    billed_by_id = {
+        billed_line.id: billed_line.billed_amount.value
+        for billed_line in bill.charges
+    }
     for billed_line in bill.charges:
         rule = bundle.rules.get(billed_line.id)
         if rule is None:
@@ -230,13 +241,11 @@ def _tariff_lines(
             )
         elif rule.kind == "percent_of_lines":
             result = _percentage_rule(
-                billed_line.id, rule, billed_line, expected_by_id
+                billed_line.id, rule, billed_line, billed_by_id
             )
         else:
             raise ValueError(f"Unknown rate rule kind: {rule.kind}")
         results.append(result)
-        if result.expected_amount is not None:
-            expected_by_id[result.id] = result.expected_amount
     return tuple(results)
 
 
@@ -393,24 +402,35 @@ def _review_request(
     ]
     if discrepancies:
         line = discrepancies[0]
-        source_list = "\n".join(
-            f"- {citation.label}: {citation.source_url}"
-            for citation in line.citations
-        )
         synthetic_prefix = (
             "This is a synthetic demo request; no real customer bill contained this error.\n\n"
             if bill.fixture_kind == "synthetic"
             else ""
         )
+        if line.citations:
+            source_list = "\n".join(
+                f"- {citation.label}: {citation.source_url}"
+                for citation in line.citations
+            )
+            calculation_basis = (
+                "Applying the published rate to the printed usage gives "
+                f"{_currency(line.expected_amount or Decimal('0'))}, a difference of "
+                f"{_currency(abs_exact(line.delta or Decimal('0')))}.\n\n"
+                f"Calculation: {line.formula}.\n"
+                f"Rate sources:\n{source_list}\n\n"
+            )
+        else:
+            calculation_basis = (
+                "Recomputing the printed rate and printed base amounts gives "
+                f"{_currency(line.expected_amount or Decimal('0'))}, a difference of "
+                f"{_currency(abs_exact(line.delta or Decimal('0')))}.\n\n"
+                f"Calculation: {line.formula}.\n"
+                f"Limit: {line.limitation}\n\n"
+            )
         body = (
             f"Hello,\n\n{synthetic_prefix}Please review the {line.label} on "
             f"the statement dated {bill.statement_date.value.isoformat()}. The statement "
-            f"shows {_currency(line.billed_amount)}. Applying the published rate to the "
-            f"printed usage gives {_currency(line.expected_amount or Decimal('0'))}, a "
-            f"difference of "
-            f"{_currency(abs_exact(line.delta or Decimal('0')))}.\n\n"
-            f"Calculation: {line.formula}.\n"
-            f"Rate sources:\n{source_list}\n\n"
+            f"shows {_currency(line.billed_amount)}. {calculation_basis}"
             "Please confirm the quantity and rate used and explain or correct the charge "
             "if appropriate. I will verify my account details before sending. Thank you."
         )

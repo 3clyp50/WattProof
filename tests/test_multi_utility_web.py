@@ -20,6 +20,7 @@ from typing import Any, cast
 import pytest
 from werkzeug.serving import make_server
 
+import wattproof.tariffs as tariffs
 from wattproof.app import create_app
 from wattproof.audit_service import audit_extraction
 from wattproof.cli import main
@@ -2783,6 +2784,24 @@ def test_web_audits_legacy_authentic_payload() -> None:
     assert result["comparison"] is not None
 
 
+def test_web_redacts_local_paths_from_tariff_integrity_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(tariffs, "PROJECT_ROOT", tmp_path)
+    client = create_app().test_client()
+    extraction = client.get("/api/sample/authentic").get_json()["extraction"]
+
+    response = client.post("/api/audit", json=extraction)
+
+    assert response.status_code == 422
+    message = response.get_json()["error"]
+    assert str(tmp_path) not in message
+    assert str(PROJECT_ROOT) not in message
+    assert "PG&E historic residential inclusive TOU rates" in message
+    assert "expected SHA-256" in message
+
+
 @pytest.mark.parametrize("kind", ["duke", "centerpoint", "bloomington"])
 def test_web_audits_provider_neutral_payload_without_tariff_claim(kind: str) -> None:
     client = create_app().test_client()
@@ -3388,6 +3407,29 @@ def test_javascript_renders_both_schemas_and_unified_results_without_crashing(
         "text": "Legacy rendered evidence",
         "confidence": 0.75,
     }
+
+
+def test_javascript_labels_uncited_uut_as_printed_math_agreement() -> None:
+    client = create_app().test_client()
+    extraction = client.get("/api/sample/authentic").get_json()["extraction"]
+    audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+
+    rendered = _exercise_javascript_contract(
+        extraction,
+        audit,
+        mode="authentic",
+    )
+    before_uut, after_uut = rendered["auditHtml"].split(
+        "3CE November utility users&#039; tax",
+        maxsplit=1,
+    )
+    uut_row = "<tr" + before_uut.rsplit("<tr", maxsplit=1)[1]
+    uut_row += after_uut.split("</tr>", maxsplit=1)[0]
+
+    assert "Math agrees" in uut_row
+    assert "Printed math" in uut_row
+    assert "governing tariff" in uut_row
+    assert "Published tariff" not in uut_row
 
 
 def test_browser_exact_decimal_formatting_never_uses_binary_numbers() -> None:
@@ -4079,7 +4121,28 @@ def test_cli_exposes_all_samples_with_approved_verification_labels(
     assert ("Plan comparison:" in captured.out) is has_comparison
     if kind in {"duke", "centerpoint", "bloomington"}:
         assert "tariff verified" not in captured.out.lower()
+    else:
+        assert "Published tariff matches:" in captured.out
+        assert "Printed-math agreements:" in captured.out
+        assert "Verified checks:" not in captured.out
     assert captured.err == ""
+
+
+def test_cli_redacts_local_paths_from_tariff_integrity_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(tariffs, "PROJECT_ROOT", tmp_path)
+
+    assert main(["--sample", "authentic"]) == 2
+
+    captured = capsys.readouterr()
+    assert str(tmp_path) not in captured.err
+    assert str(PROJECT_ROOT) not in captured.err
+    assert "PG&E historic residential inclusive TOU rates" in captured.err
+    assert "expected SHA-256" in captured.err
+    assert captured.out == ""
 
 
 def test_cli_prints_evidence_extracted_label(

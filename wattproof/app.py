@@ -186,10 +186,13 @@ def create_app() -> Flask:
     def reviewable_error(error: Exception) -> tuple[Response, int]:
         return jsonify(error=str(error)), 422
 
+    @app.errorhandler(SourceIntegrityError)
+    def source_integrity_error(error: SourceIntegrityError) -> tuple[Response, int]:
+        return jsonify(error=error.public_message), 422
+
     for error_type in (
         ExtractionUnavailableError,
         InvalidDocumentError,
-        SourceIntegrityError,
         UnsupportedBillError,
         UnsupportedDocumentError,
     ):

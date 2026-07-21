@@ -63,6 +63,13 @@ const statusLabels = {
   needs_review: "Needs review",
 };
 
+function auditStatusLabel(line) {
+  if (line.status === "verified" && line.scope === "printed_math") {
+    return "Math agrees";
+  }
+  return statusLabels[line.status] || statusLabel(line.status);
+}
+
 const byId = (id) => document.getElementById(id);
 
 function escapeHtml(value) {
@@ -990,7 +997,7 @@ function renderPriorityFindings(result) {
   byId("priority-findings").innerHTML = rootFindings.length
     ? rootFindings.map((line) => `
       <article class="priority-finding ${escapeHtml(line.status)}">
-        <span class="status-pill ${escapeHtml(line.status)}">${escapeHtml(statusLabels[line.status])}</span>
+        <span class="status-pill ${escapeHtml(line.status)}">${escapeHtml(auditStatusLabel(line))}</span>
         <div><h3>${escapeHtml(line.label)}</h3><p>${escapeHtml(line.limitation || line.formula)}</p><small>${lineEvidence(line)}</small></div>
         <strong>${auditValue(line.delta, line.unit, result.currency)}</strong>
       </article>`).join("")
@@ -1008,7 +1015,7 @@ function renderAuditLedger(result) {
     }).join("");
     return `
       <tr class="${optional ? "optional-line" : ""}" ${optional && state.compactAudit ? "hidden" : ""}>
-        <td data-label="Status"><span class="status-pill ${escapeHtml(line.status)}">${escapeHtml(statusLabels[line.status] || statusLabel(line.status))}</span></td>
+        <td data-label="Status"><span class="status-pill ${escapeHtml(line.status)}">${escapeHtml(auditStatusLabel(line))}</span></td>
         <td data-label="Line" class="charge-label">${escapeHtml(line.label)}</td>
         <td data-label="Scope"><span class="scope-chip">${escapeHtml(scopeLabels[line.scope] || line.scope)}</span></td>
         <td data-label="Billed">${auditValue(line.billed_amount, line.unit, result.currency)}</td>

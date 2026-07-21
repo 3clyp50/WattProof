@@ -28,6 +28,12 @@ support a product check, but it is not an independent source for itself. Unsuppo
 tariff coverage is reported as a limitation and does not prevent useful internal
 checks.
 
+The top-level level is cumulative but does not claim that every charge is
+tariff-backed. Each ledger line carries its own scope. In the PG&E/3CE fixture, the
+two 3CE utility-users-tax lines are checked only as **Printed math** from the
+statement's rate and base amounts; no archived source establishes that 1% as the
+governing tariff.
+
 Only the exact PG&E delivery + Central Coast Community Energy (`3Cchoice`) E-TOU-C
 2022 fixture currently reaches **Tariff verified**. Adapter selection is fail-closed
 on provider identity, jurisdiction, schedule, service dates, required facts, and

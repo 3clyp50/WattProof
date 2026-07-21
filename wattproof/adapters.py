@@ -26,6 +26,7 @@ from .numeric import (
     abs_exact,
     add_exact,
     format_usd_exact,
+    multiply_exact,
     subtract_exact,
     sum_exact,
 )
@@ -78,9 +79,10 @@ _QUANTITY_RATE_CHARGE_IDS = frozenset(
 _PERCENT_RATE_CHARGE_IDS = frozenset(
     {"pge_uut", "cca_nov_uut", "cca_dec_uut"}
 )
-_ARCHIVED_PRINTED_RATE_CHARGE_IDS = _QUANTITY_RATE_CHARGE_IDS | frozenset(
+_UNCITED_PRINTED_MATH_CHARGE_IDS = frozenset(
     {"cca_nov_uut", "cca_dec_uut"}
 )
+_ARCHIVED_PRINTED_RATE_CHARGE_IDS = _QUANTITY_RATE_CHARGE_IDS
 _NO_PRINTED_OPERAND_CHARGE_IDS = frozenset(
     {
         "pge_generation_credit",
@@ -233,12 +235,25 @@ class TariffAdapter(Protocol):
 
 
 def _bundle_has_expected_structure(bundle: TariffBundle) -> bool:
-    return (
-        bundle.version == _EXPECTED_VERSION
-        and bundle.citation_map == _EXPECTED_CITATIONS
-        and bundle.rules == _EXPECTED_RULES
-        and bundle.limitations == _EXPECTED_LIMITATIONS
-    )
+    if (
+        bundle.version != _EXPECTED_VERSION
+        or bundle.citation_map != _EXPECTED_CITATIONS
+        or set(bundle.rules) != set(_EXPECTED_RULES)
+        or bundle.limitations != _EXPECTED_LIMITATIONS
+    ):
+        return False
+    for line_id, expected in _EXPECTED_RULES.items():
+        actual = bundle.rules[line_id]
+        if line_id in _UNCITED_PRINTED_MATH_CHARGE_IDS:
+            if (
+                actual.kind != expected.kind
+                or actual.line_ids != expected.line_ids
+                or actual.citations
+            ):
+                return False
+        elif actual != expected:
+            return False
+    return True
 
 
 def _charge_has_supported_operands(charge: ChargeLine) -> bool:
@@ -341,8 +356,10 @@ def _mapped_status(status: AuditStatus) -> AuditStatusV2:
 
 
 def _mapped_scope(line: AuditLine) -> AuditScope:
-    if line.category == "tariff":
+    if line.category == "tariff" and line.citations:
         return "published_tariff"
+    if line.category == "tariff":
+        return "printed_math"
     return "statement_reconciliation"
 
 
@@ -388,6 +405,35 @@ def _evidence(line: AuditLine, fact: EvidenceBase | None) -> EvidenceRef:
     )
 
 
+def _fact_evidence(fact: EvidenceBase) -> EvidenceRef:
+    return EvidenceRef(
+        page=fact.source_page,
+        text=fact.source_text,
+        confidence=fact.confidence,
+        provenance="rendered_page",
+    )
+
+
+def _mapped_evidence(
+    bill: BillExtraction,
+    line: AuditLine,
+    fact: EvidenceBase | None,
+) -> tuple[EvidenceRef, ...]:
+    evidence = [_evidence(line, fact)]
+    if line.id not in _UNCITED_PRINTED_MATH_CHARGE_IDS:
+        return tuple(evidence)
+
+    charges = {charge.id: charge for charge in bill.charges}
+    charge = charges[line.id]
+    if charge.rate is not None:
+        evidence.append(_fact_evidence(charge.rate))
+    evidence.extend(
+        _fact_evidence(charges[base_id].billed_amount)
+        for base_id in _EXPECTED_RULES[line.id].line_ids
+    )
+    return tuple(evidence)
+
+
 @dataclass(frozen=True, slots=True)
 class _ReconciledValue:
     amount: Decimal
@@ -412,26 +458,77 @@ def _root_causes(
     )
     for section_id, subtotal_id, billed_subtotal in section_subtotals:
         charge_values: list[_ReconciledValue] = []
+        corrected_by_id: dict[str, _ReconciledValue] = {}
         for charge in bill.charges:
             if charge.section != section_id:
                 continue
             line = legacy_lines[charge.id]
-            if line.status == "discrepancy" and line.expected_amount is not None:
-                charge_values.append(
-                    _ReconciledValue(
+            if charge.id in _UNCITED_PRINTED_MATH_CHARGE_IDS:
+                rule = _EXPECTED_RULES[charge.id]
+                dependencies = tuple(
+                    corrected_by_id.get(base_id) for base_id in rule.line_ids
+                )
+                provable = charge.rate is not None and all(
+                    dependency is not None and dependency.provable
+                    for dependency in dependencies
+                )
+                dependency_values = tuple(
+                    dependency
+                    for dependency in dependencies
+                    if dependency is not None
+                )
+                dependency_roots = set().union(
+                    *(value.root_ids for value in dependency_values)
+                )
+                if provable and dependency_roots and charge.rate is not None:
+                    corrected_base = sum_exact(
+                        tuple(value.amount for value in dependency_values)
+                    )
+                    corrected_amount = round_money(
+                        multiply_exact(corrected_base, charge.rate.value)
+                    )
+                    if line.status == "discrepancy":
+                        if (
+                            len(dependency_roots) == 1
+                            and _money_reconciles(
+                                charge.billed_amount.value,
+                                corrected_amount,
+                            )
+                        ):
+                            roots[line.id] = next(iter(dependency_roots))
+                        else:
+                            dependency_roots.add(line.id)
+                    value = _ReconciledValue(
+                        corrected_amount,
+                        frozenset(dependency_roots),
+                        True,
+                    )
+                elif line.status == "discrepancy" and line.expected_amount is not None:
+                    value = _ReconciledValue(
                         line.expected_amount,
                         frozenset((line.id,)),
                         True,
                     )
-                )
-            else:
-                charge_values.append(
-                    _ReconciledValue(
+                else:
+                    value = _ReconciledValue(
                         charge.billed_amount.value,
                         frozenset(),
-                        True,
+                        provable,
                     )
+            elif line.status == "discrepancy" and line.expected_amount is not None:
+                value = _ReconciledValue(
+                    line.expected_amount,
+                    frozenset((line.id,)),
+                    True,
                 )
+            else:
+                value = _ReconciledValue(
+                    charge.billed_amount.value,
+                    frozenset(),
+                    True,
+                )
+            charge_values.append(value)
+            corrected_by_id[charge.id] = value
 
         corrected_subtotal = sum_exact(tuple(value.amount for value in charge_values))
         root_ids = set().union(*(value.root_ids for value in charge_values))
@@ -520,6 +617,8 @@ def _issue_detail(line: AuditLine) -> str:
             for citation in line.citations
         )
         detail += f"\n  Archived sources: {sources}."
+    if line.limitation:
+        detail += f"\n  Limit: {line.limitation}"
     return detail
 
 
@@ -585,6 +684,8 @@ def _clean_provider_request(
                 for citation in line.citations
             )
             finding += f" Archived sources: {sources}."
+        if line.limitation:
+            finding += f" Limit: {line.limitation}"
         details.append(f"- {line.label}: {finding}")
     synthetic_notice = (
         "This is a synthetic demo request; no real customer bill contained "
@@ -776,7 +877,7 @@ def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult
             delta=line.delta,
             formula=line.formula,
             inputs=line.inputs,
-            evidence=(_evidence(line, facts.get(line.id)),),
+            evidence=_mapped_evidence(bill, line, facts.get(line.id)),
             citations=line.citations,
             status=_mapped_status(line.status),
             limitation=line.limitation,

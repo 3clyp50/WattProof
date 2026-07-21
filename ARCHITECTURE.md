@@ -108,6 +108,9 @@ discrepancies so amounts are not double-counted.
 The highest cumulative verification level is one of `evidence_extracted`,
 `internally_reconciled`, or `tariff_verified`. A printed rate can establish only
 internal reconciliation unless independent source coverage is available.
+The highest level does not override line-level scope: every `published_tariff` line
+must carry a citation present in the attached tariff archive metadata. An uncited line
+inside an otherwise exact adapter remains `printed_math` and states its limitation.
 
 ## Exact tariff adapters
 
@@ -120,6 +123,11 @@ Coast Community Energy E-TOU-C/MBRETCH1 bundle. `wattproof/adapters.py` fails cl
 the complete provider identity, California jurisdiction, schedule, service period,
 required printed operands, and immutable source structure. `wattproof/tariffs.py`
 refuses calculation if an archived source hash changes.
+
+The 3CE utility-users-tax relationships are intentionally not published-tariff rules.
+WattProof recomputes them from the printed percentage and printed base lines, labels
+them `printed_math`, and does not attach citations or call them published-tariff
+matches.
 
 There is no fuzzy provider matching, Duke adapter, or nationwide tariff table. The
 Duke guide is illustrative evidence for internal tier/rider arithmetic only.
