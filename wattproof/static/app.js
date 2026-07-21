@@ -7,10 +7,12 @@ const state = {
   compactAudit: true,
   reviewMode: null,
   extractionRevision: 0,
+  auditRevision: 0,
   operationToken: 0,
   activeOperation: null,
   bundle: [],
   currentBundleId: null,
+  currentBundleAuditRevision: null,
 };
 
 const legacyFactDefinitions = [
@@ -163,8 +165,10 @@ function replaceExtraction(extraction, mode) {
   state.extraction = extraction;
   state.audit = null;
   state.currentBundleId = null;
+  state.currentBundleAuditRevision = null;
   state.reviewMode = mode;
   state.extractionRevision += 1;
+  state.auditRevision = 0;
 }
 
 function showStep(step) {
@@ -440,6 +444,8 @@ function renderReview(mode) {
 }
 
 async function loadSample(kind, button) {
+  prepareForNewDocument();
+  showStep(1);
   const operation = beginOperation(() => setLoading(button, false, ""));
   setLoading(button, true, "Loading public fixture…");
   try {
@@ -590,12 +596,27 @@ function summarizeCurrentBill() {
 
 function appendCurrentBillOnce() {
   if (state.currentBundleId !== null) {
-    return state.bundle.find((summary) => summary.id === state.currentBundleId) || null;
+    const index = state.bundle.findIndex((summary) => (
+      summary.id === state.currentBundleId
+    ));
+    if (index >= 0 && state.currentBundleAuditRevision === state.auditRevision) {
+      return state.bundle[index];
+    }
+    const replacement = summarizeCurrentBill();
+    if (!replacement) return index >= 0 ? state.bundle[index] : null;
+    if (index >= 0) {
+      replacement.id = state.currentBundleId;
+      state.bundle.splice(index, 1, replacement);
+      state.currentBundleAuditRevision = state.auditRevision;
+      return replacement;
+    }
+    state.currentBundleId = null;
   }
   const summary = summarizeCurrentBill();
   if (!summary) return null;
   state.bundle.push(summary);
   state.currentBundleId = summary.id;
+  state.currentBundleAuditRevision = state.auditRevision;
   return summary;
 }
 
@@ -866,20 +887,27 @@ function renderAudit() {
   renderProviderReviewRequests(result);
 }
 
-function clearCurrentDocument() {
-  invalidatePendingOperation();
-  if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
-  state.extraction = null;
-  state.audit = null;
+function releasePreview() {
+  const previewUrl = state.previewUrl;
   state.previewUrl = null;
-  state.compactAudit = true;
-  state.reviewMode = null;
-  state.extractionRevision += 1;
-  byId("upload-form").reset();
-  byId("file-label").textContent = "Choose a utility bill";
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
   const preview = byId("pdf-preview");
   preview.removeAttribute("src");
   preview.hidden = true;
+}
+
+function clearCurrentDocument() {
+  invalidatePendingOperation();
+  releasePreview();
+  state.extraction = null;
+  state.audit = null;
+  state.compactAudit = true;
+  state.reviewMode = null;
+  state.extractionRevision += 1;
+  state.auditRevision = 0;
+  state.currentBundleAuditRevision = null;
+  byId("upload-form").reset();
+  byId("file-label").textContent = "Choose a utility bill";
   byId("synthetic-preview").hidden = true;
   for (const id of (
     [
@@ -897,6 +925,25 @@ function clearCurrentDocument() {
   byId("calculation-ledger").open = false;
 }
 
+function resetCurrentBundleIdentity() {
+  state.currentBundleId = null;
+  state.currentBundleAuditRevision = null;
+}
+
+function prepareForNewDocument() {
+  clearCurrentDocument();
+  resetCurrentBundleIdentity();
+}
+
+function discardCurrentDocument() {
+  prepareForNewDocument();
+  showStep(1);
+  const retained = state.bundle.length;
+  if (retained) {
+    announceBundle(`${retained} completed ${retained === 1 ? "bill" : "bills"} retained in this page.`);
+  }
+}
+
 function addAnotherBill() {
   const summary = appendCurrentBillOnce();
   if (!summary) return;
@@ -904,7 +951,7 @@ function addAnotherBill() {
   renderProviderReviewRequests();
   const count = state.bundle.length;
   clearCurrentDocument();
-  state.currentBundleId = null;
+  resetCurrentBundleIdentity();
   showStep(1);
   announceBundle(`${count} completed ${count === 1 ? "bill" : "bills"} retained in this page.`);
 }
@@ -926,7 +973,7 @@ function showProviderReviewRequests() {
 
 function clearHousehold() {
   state.bundle = [];
-  state.currentBundleId = null;
+  resetCurrentBundleIdentity();
   clearCurrentDocument();
   byId("household-bills").innerHTML = "";
   byId("household-summary").innerHTML = "";
@@ -961,7 +1008,7 @@ byId("upload-form").addEventListener("submit", async (event) => {
     return;
   }
   const operation = beginOperation(() => setLoading(button, false, ""));
-  if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+  releasePreview();
   state.previewUrl = URL.createObjectURL(file);
   setLoading(button, true, "Reading rendered pages…");
   try {
@@ -978,7 +1025,11 @@ byId("upload-form").addEventListener("submit", async (event) => {
     showStep(2);
   } catch (error) {
     if (!isCurrentOperation(operation) || isAbortError(error)) return;
-    showError(error);
+    const message = safeErrorMessage(error);
+    finishOperation(operation);
+    prepareForNewDocument();
+    showStep(1);
+    showMessage(message, byId("bill-file"));
   } finally {
     finishOperation(operation);
   }
@@ -1011,6 +1062,7 @@ byId("review-form").addEventListener("submit", async (event) => {
         || state.extraction !== extractionAtStart
         || state.extractionRevision !== revisionAtStart) return;
     state.audit = payload.audit;
+    state.auditRevision += 1;
     state.compactAudit = true;
     renderAudit();
     showStep(3);
@@ -1029,6 +1081,8 @@ document.querySelectorAll("[data-back]").forEach((button) => {
     showStep(Number(button.dataset.back));
   });
 });
+
+byId("discard-current-document").addEventListener("click", discardCurrentDocument);
 
 document.querySelectorAll("[data-next]").forEach((button) => {
   button.addEventListener("click", () => showStep(Number(button.dataset.next)));

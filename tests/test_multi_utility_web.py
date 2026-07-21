@@ -421,15 +421,64 @@ async function main() {
       };
     })()`);
 
+    await clickById("review-next-steps");
+    await waitFor(`!document.querySelector('[data-step="5"]').hidden
+      && document.activeElement?.id === "next-steps-title"`);
+    await evaluate(`(() => {
+      const drafts = [...document.querySelectorAll('[data-request-field="body"]')];
+      const draft = drafts.at(-1);
+      draft.value = "Stale page-memory draft";
+      draft.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    await evaluate(`document.querySelector('[data-step="5"] [data-back="4"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
+    const bundleIdsBeforeReaudit = await evaluate(
+      `state.bundle.map((summary) => summary.id)`,
+    );
     await evaluate(`document.querySelector('[data-step="4"] [data-back="3"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-step="3"]').hidden
+      && document.activeElement?.id === "verify-title"`);
+    await evaluate(`document.querySelector('[data-step="3"] [data-back="2"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-step="2"]').hidden
+      && document.activeElement?.id === "review-title"`);
+    await evaluate(`(() => {
+      const usage = document.getElementById("fact-sections-0-usage");
+      const amount = document.getElementById("fact-amount_due");
+      usage.value = "5.75";
+      amount.value = "999.91";
+      usage.dispatchEvent(new Event("input", { bubbles: true }));
+      amount.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
     await waitFor(`!document.querySelector('[data-step="3"]').hidden
       && document.activeElement?.id === "verify-title"`);
     await clickById("finish-household");
     await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
+    const reauditReplacement = await evaluate(`(() => {
+      const summary = structuredClone(state.bundle.at(-1));
+      return {
+        bundleLength: state.bundle.length,
+        ids: state.bundle.map((candidate) => candidate.id),
+        summary,
+        expectedVerification: state.audit.verification_level,
+        expectedDiscrepancy: Number(state.audit.discrepancy_total),
+        expectedIssues: new Set(state.audit.lines
+          .filter((line) => ["discrepancy", "needs_review"].includes(line.status))
+          .map((line, index) => String(line.root_cause_id || line.id || "issue-" + index)))
+          .size,
+        householdText: document.getElementById("household-bills").innerText,
+        requestText: document.getElementById("provider-review-requests").innerText,
+      };
+    })()`);
     await evaluate(`document.querySelector('[data-step="4"] [data-back="3"]').click(); true`);
     await clickById("finish-household");
     await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
-    const repeatedFinishCount = await evaluate(`state.bundle.length`);
+    const repeatedFinish = await evaluate(`({
+      count: state.bundle.length,
+      summary: structuredClone(state.bundle.at(-1)),
+    })`);
 
     await command("Emulation.setDeviceMetricsOverride", {
       width: 390,
@@ -508,6 +557,43 @@ async function main() {
       requestsCount: document.querySelectorAll(".provider-request-card").length,
       pageErrors: [...window.__wattproofBrowserErrors],
     })`);
+
+    const previewBeforeDiscard = await evaluate(`(async () => {
+      window.__wattproofRevokedPreviews = [];
+      const nativeRevoke = URL.revokeObjectURL.bind(URL);
+      URL.revokeObjectURL = (url) => {
+        window.__wattproofRevokedPreviews.push(String(url));
+        return nativeRevoke(url);
+      };
+      const response = await fetch("/sample.pdf");
+      const source = await response.blob();
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([source], "discard-me.pdf", { type: "application/pdf" }));
+      const input = document.getElementById("bill-file");
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector('#upload-form button[type="submit"]').click();
+      return true;
+    })()`);
+    if (!previewBeforeDiscard) throw new Error("Could not stage uploaded preview");
+    await waitFor(`!document.querySelector('[data-step="2"]').hidden
+      && document.activeElement?.id === "review-title"
+      && state.previewUrl?.startsWith("blob:")`, 30000);
+    const uploadedPreviewUrl = await evaluate(`state.previewUrl`);
+    await clickById("discard-current-document");
+    await waitFor(`!document.querySelector('[data-step="1"]').hidden
+      && document.activeElement?.id === "upload-title"`);
+    const previewDiscard = await evaluate(`({
+      previewUrl: state.previewUrl,
+      extractionCleared: state.extraction === null,
+      auditCleared: state.audit === null,
+      iframeHasSource: document.getElementById("pdf-preview").hasAttribute("src"),
+      revokedUrls: [...window.__wattproofRevokedPreviews],
+      fileCount: document.getElementById("bill-file").files.length,
+      focus: document.activeElement?.id,
+      pageErrors: [...window.__wattproofBrowserErrors],
+    })`);
+    previewDiscard.uploadedPreviewUrl = uploadedPreviewUrl;
 
     await command("Emulation.setDeviceMetricsOverride", {
       width: 390,
@@ -595,12 +681,15 @@ async function main() {
     return {
       flows,
       sequentialDesktop,
-      repeatedFinishCount,
+      bundleIdsBeforeReaudit,
+      reauditReplacement,
+      repeatedFinish,
       mobileHousehold,
       mobileRequests,
       editedDraft,
       laterFailure,
       refreshClears,
+      previewDiscard,
       mobileReview,
       mobileResult,
       hostileDom,
@@ -641,6 +730,7 @@ class FakeElement {
     this.src = "";
     this.listeners = {};
     this.attributes = {};
+    this.resetCount = 0;
     this.classList = { toggle() {}, add() {}, remove() {} };
   }
   addEventListener(name, handler) { this.listeners[name] = handler; }
@@ -662,7 +752,10 @@ class FakeElement {
   getAttribute(name) { return this.attributes[name] ?? null; }
   scrollIntoView() {}
   focus() { document.activeElement = this; }
-  reset() {}
+  reset() {
+    this.resetCount += 1;
+    if (this.id === "upload-form") element("bill-file").files = [];
+  }
   select() {}
   click() { return this.listeners.click?.({ currentTarget: this, target: this }); }
 }
@@ -682,7 +775,7 @@ const stepPanels = [1, 2, 3, 4, 5].map((step) => {
 });
 const stepHeadings = new Map(stepPanels.map((panel) => {
   const heading = element(`heading-${panel.dataset.step}`);
-  heading.id = ({ 2: "review-title", 3: "verify-title" })[panel.dataset.step]
+  heading.id = ({ 1: "upload-title", 2: "review-title", 3: "verify-title" })[panel.dataset.step]
     || `heading-${panel.dataset.step}`;
   return [panel.dataset.step, heading];
 }));
@@ -691,11 +784,11 @@ const indicators = [1, 2, 3, 4, 5].map((step) => {
   indicator.dataset.stepIndicator = String(step);
   return indicator;
 });
-const backToUpload = element("back-to-upload");
-backToUpload.dataset.back = "1";
 const backToReview = element("back-to-review");
 backToReview.dataset.back = "2";
-const backButtons = [backToUpload, backToReview];
+const backToVerify = element("back-to-verify");
+backToVerify.dataset.back = "3";
+const backButtons = [backToReview, backToVerify];
 
 const document = {
   activeElement: null,
@@ -721,6 +814,10 @@ const document = {
 };
 
 const requests = [];
+const createdUrls = [];
+const revokedUrls = [];
+let nextBundleId = 0;
+let nextPreviewId = 0;
 function deferredFetch(url, options = {}) {
   return new Promise((resolve, reject) => {
     const request = { url: String(url), options, resolve, reject, settled: false };
@@ -748,7 +845,7 @@ const context = {
   AbortController,
   Blob,
   console,
-  crypto: { randomUUID: () => "bundle-id" },
+  crypto: { randomUUID: () => `bundle-id-${++nextBundleId}` },
   document,
   elements,
   fetch: deferredFetch,
@@ -756,7 +853,14 @@ const context = {
   navigator: { clipboard: { writeText: async () => {} } },
   structuredClone,
   payload,
-  URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} },
+  URL: {
+    createObjectURL: () => {
+      const url = `blob:test-${++nextPreviewId}`;
+      createdUrls.push(url);
+      return url;
+    },
+    revokeObjectURL: (url) => revokedUrls.push(url),
+  },
   window: {
     location: { reload() { reloadCount += 1; } },
     scrollTo() {},
@@ -783,6 +887,9 @@ function currentState() {
     audit: state.audit,
     bundle: state.bundle,
     currentBundleId: state.currentBundleId,
+    currentBundleAuditRevision: state.currentBundleAuditRevision,
+    auditRevision: state.auditRevision,
+    previewUrl: state.previewUrl,
     operationToken: state.operationToken,
   })`);
 }
@@ -832,6 +939,84 @@ async function run() {
       message: element("global-message").textContent,
       uploadDisabled: element("upload-form-submit").disabled,
       sampleDisabled: element("duke-sample").disabled,
+      createdUrls,
+      revokedUrls,
+    };
+  }
+
+  if (payload.scenario === "upload_failure") {
+    element("bill-file").files = [new Blob(["%PDF"], { type: "application/pdf" })];
+    const form = element("upload-form");
+    const upload = form.listeners.submit({ preventDefault() {}, currentTarget: form });
+    settle("/api/extract", { error: "Rendered page reader failed" }, false);
+    await upload;
+    const beforeSecondClear = {
+      state: currentState(),
+      revokedUrls: [...revokedUrls],
+      fileCount: element("bill-file").files.length,
+      uploadResetCount: form.resetCount,
+      reviewHtml: element("service-review-sections").innerHTML,
+      auditHtml: element("audit-lines").innerHTML,
+      previewSrc: element("pdf-preview").src,
+      previewHidden: element("pdf-preview").hidden,
+      uploadHidden: element("step-1").hidden,
+      message: element("global-message").textContent,
+      activeElement: document.activeElement?.id || null,
+      fileInvalid: element("bill-file").attributes["aria-invalid"] || null,
+    };
+    invoke("clearCurrentDocument()");
+    return {
+      beforeSecondClear,
+      createdUrls,
+      revokedUrls,
+      resetAfterSecondClear: form.resetCount,
+    };
+  }
+
+  if (payload.scenario === "uploaded_review_discard") {
+    element("bill-file").files = [new Blob(["%PDF"], { type: "application/pdf" })];
+    const form = element("upload-form");
+    const upload = form.listeners.submit({ preventDefault() {}, currentTarget: form });
+    settle("/api/extract", { extraction: payload.extractionA });
+    await upload;
+    const previewBeforeDiscard = currentState().previewUrl;
+    element("discard-current-document").listeners.click({
+      currentTarget: element("discard-current-document"),
+      target: element("discard-current-document"),
+    });
+    return {
+      ...currentState(),
+      previewBeforeDiscard,
+      createdUrls,
+      revokedUrls,
+      fileCount: element("bill-file").files.length,
+      uploadResetCount: form.resetCount,
+      reviewHtml: element("service-review-sections").innerHTML,
+      previewSrc: element("pdf-preview").src,
+      previewHidden: element("pdf-preview").hidden,
+      uploadHidden: element("step-1").hidden,
+      activeElement: document.activeElement?.id || null,
+    };
+  }
+
+  if (payload.scenario === "uploaded_review_then_sample") {
+    element("bill-file").files = [new Blob(["%PDF"], { type: "application/pdf" })];
+    const form = element("upload-form");
+    const upload = form.listeners.submit({ preventDefault() {}, currentTarget: form });
+    settle("/api/extract", { extraction: payload.extractionA });
+    await upload;
+    const uploadedPreview = currentState().previewUrl;
+    const sample = invoke(`loadSample("duke", byId("duke-sample"))`);
+    settle("/api/sample/duke", { extraction: payload.extractionB });
+    await sample;
+    return {
+      ...currentState(),
+      uploadedPreview,
+      createdUrls,
+      revokedUrls,
+      fileCount: element("bill-file").files.length,
+      uploadResetCount: form.resetCount,
+      reviewHtml: element("service-review-sections").innerHTML,
     };
   }
 
@@ -855,7 +1040,7 @@ async function run() {
   if (payload.scenario === "audit_then_navigation") {
     const audit = submitReview();
     if (payload.navigation === "restart") element("restart").listeners.click();
-    else backToUpload.listeners.click();
+    else element("discard-current-document").listeners.click();
     settle("/api/audit", { audit: payload.auditA });
     await audit;
     return {
@@ -893,6 +1078,43 @@ async function run() {
     };
   }
 
+  if (payload.scenario === "finish_reaudit_refinish") {
+    const firstAudit = submitReview();
+    settle("/api/audit", { audit: payload.auditA });
+    await firstAudit;
+    invoke("finishHouseholdReview()");
+    const first = invoke("structuredClone(state.bundle[0])");
+    invoke(`state.bundle[0].reviewRequests[0].body = "Page-memory draft"`);
+    invoke("finishHouseholdReview()");
+    const idempotent = invoke("structuredClone(state.bundle[0])");
+
+    backToVerify.listeners.click();
+    backToReview.listeners.click();
+    const usage = element("corrected-usage");
+    usage.dataset.factPath = "sections.0.usage";
+    usage.value = payload.nextUsage;
+    const amount = element("corrected-amount");
+    amount.dataset.factPath = "amount_due";
+    amount.value = payload.nextAmount;
+    factInputs = [usage, amount];
+    const secondAudit = submitReview();
+    settle("/api/audit", { audit: payload.auditB });
+    await secondAudit;
+    invoke("finishHouseholdReview()");
+    const replaced = invoke("structuredClone(state.bundle[0])");
+    invoke("finishHouseholdReview()");
+    const repeated = invoke("structuredClone(state.bundle[0])");
+    return {
+      ...currentState(),
+      first,
+      idempotent,
+      replaced,
+      repeated,
+      householdHtml: element("household-bills").innerHTML,
+      requestsHtml: element("provider-review-requests").innerHTML,
+    };
+  }
+
   if (payload.scenario === "bundle_then_sample_error") {
     invoke(`state.audit = payload.auditA; addAnotherBill(); renderHousehold()`);
     const request = invoke(`loadSample("duke", byId("duke-sample"))`);
@@ -901,6 +1123,25 @@ async function run() {
     return {
       ...currentState(),
       householdHtml: element("household-bills").innerHTML,
+      message: element("global-message").textContent,
+      activeElement: document.activeElement?.id || null,
+      uploadHidden: element("step-1").hidden,
+    };
+  }
+
+  if (payload.scenario === "bundle_then_upload_error") {
+    invoke(`state.audit = payload.auditA; addAnotherBill(); renderHousehold()`);
+    element("bill-file").files = [new Blob(["%PDF"], { type: "application/pdf" })];
+    const form = element("upload-form");
+    const upload = form.listeners.submit({ preventDefault() {}, currentTarget: form });
+    settle("/api/extract", { error: "Later rendered page reader failed" }, false);
+    await upload;
+    return {
+      ...currentState(),
+      householdHtml: element("household-bills").innerHTML,
+      createdUrls,
+      revokedUrls,
+      fileCount: element("bill-file").files.length,
       message: element("global-message").textContent,
       activeElement: document.activeElement?.id || null,
       uploadHidden: element("step-1").hidden,
@@ -1490,6 +1731,7 @@ def test_result_markup_exposes_neutral_contract() -> None:
         "provider-review-requests",
         "add-another-bill",
         "finish-household",
+        "discard-current-document",
     ):
         assert f'id="{element_id}"' in page
     assert 'id="optional-comparison"' in page
@@ -1686,6 +1928,76 @@ def test_household_sequence_deduplicates_combines_safely_and_clears() -> None:
     assert set(result["clearedMarkup"].values()) == {""}
 
 
+def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> None:
+    client = create_app().test_client()
+    extraction = client.get("/api/sample/duke").get_json()["extraction"]
+    first_audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+    second_audit = json.loads(json.dumps(first_audit))
+    second_audit.update(
+        {
+            "verification_level": "evidence_extracted",
+            "verdict": "possible_discrepancy",
+            "headline": "Corrected facts require provider review",
+            "discrepancy_total": 7.25,
+            "review_requests": [
+                {
+                    "provider": "Corrected Duke review desk",
+                    "subject": "Corrected bill evidence",
+                    "body": "Newly sanitized corrected request",
+                }
+            ],
+        }
+    )
+    corrected_line = json.loads(json.dumps(first_audit["lines"][0]))
+    corrected_line.update(
+        {
+            "id": "corrected-root-line",
+            "root_cause_id": "corrected-root",
+            "status": "discrepancy",
+            "delta": 7.25,
+            "label": "Corrected amount review",
+        }
+    )
+    second_audit["lines"] = [corrected_line]
+
+    result = _exercise_async_state_contract(
+        "finish_reaudit_refinish",
+        extraction_a=extraction,
+        audit_a=first_audit,
+        auditB=second_audit,
+        mode="duke",
+        nextUsage="1234.5",
+        nextAmount="222.22",
+        abortAware=False,
+    )
+
+    assert len(result["bundle"]) == 1
+    assert result["first"]["id"] == result["replaced"]["id"]
+    assert result["currentBundleId"] == result["first"]["id"]
+    assert result["idempotent"]["reviewRequests"][0]["body"] == (
+        "Page-memory draft"
+    )
+    assert result["replaced"] == result["repeated"]
+    assert result["replaced"]["usageSummaries"] == [
+        {"serviceType": "electricity", "value": 1234.5, "unit": "kWh"}
+    ]
+    assert result["replaced"]["amountDue"] == 222.22
+    assert result["replaced"]["verificationLevel"] == "evidence_extracted"
+    assert result["replaced"]["discrepancyTotal"] == 7.25
+    assert result["replaced"]["issueCount"] == 1
+    assert result["replaced"]["reviewRequests"] == [
+        {
+            "provider": "Corrected Duke review desk",
+            "subject": "Corrected bill evidence",
+            "body": "Newly sanitized corrected request",
+        }
+    ]
+    assert result["currentBundleAuditRevision"] == result["auditRevision"]
+    assert "$222.22" in result["householdHtml"]
+    assert "Newly sanitized corrected request" in result["requestsHtml"]
+    assert "Page-memory draft" not in result["requestsHtml"]
+
+
 def test_household_and_request_values_are_inert_markup() -> None:
     client = create_app().test_client()
     documents = [
@@ -1731,6 +2043,32 @@ def test_later_bill_failure_keeps_completed_household_cards() -> None:
     assert result["audit"] is None
     assert result["message"] == "Fixture temporarily unavailable"
     assert result["activeElement"] == "global-message"
+    assert result["uploadHidden"] is False
+
+
+def test_later_upload_failure_revokes_preview_and_keeps_completed_bundle() -> None:
+    client = create_app().test_client()
+    duke = _sample_document(client, "duke")
+
+    result = _exercise_async_state_contract(
+        "bundle_then_upload_error",
+        extraction_a=duke["extraction"],
+        audit_a=duke["audit"],
+        mode="duke",
+        abortAware=False,
+    )
+
+    assert len(result["bundle"]) == 1
+    assert "Duke Energy" in result["householdHtml"]
+    assert result["createdUrls"] == ["blob:test-1"]
+    assert result["revokedUrls"] == ["blob:test-1"]
+    assert result["previewUrl"] is None
+    assert result["currentBundleId"] is None
+    assert result["extraction"] is None
+    assert result["audit"] is None
+    assert result["fileCount"] == 0
+    assert result["message"] == "Later rendered page reader failed"
+    assert result["activeElement"] == "bill-file"
     assert result["uploadHidden"] is False
 
 
@@ -1959,6 +2297,86 @@ def test_slow_upload_cannot_overwrite_a_later_sample() -> None:
     assert result["message"] == ""
     assert result["uploadDisabled"] is False
     assert result["sampleDisabled"] is False
+    assert result["createdUrls"] == ["blob:test-1"]
+    assert result["revokedUrls"] == ["blob:test-1"]
+
+
+def test_failed_upload_revokes_preview_and_resets_actionable_document_state() -> None:
+    result = _exercise_async_state_contract(
+        "upload_failure",
+        abortAware=False,
+    )
+
+    before = result["beforeSecondClear"]
+    assert result["createdUrls"] == ["blob:test-1"]
+    assert before["revokedUrls"] == ["blob:test-1"]
+    assert result["revokedUrls"] == ["blob:test-1"]
+    assert before["state"]["previewUrl"] is None
+    assert before["state"]["extraction"] is None
+    assert before["state"]["audit"] is None
+    assert before["state"]["bundle"] == []
+    assert before["state"]["currentBundleId"] is None
+    assert before["fileCount"] == 0
+    assert before["uploadResetCount"] == 1
+    assert result["resetAfterSecondClear"] == 2
+    assert before["reviewHtml"] == ""
+    assert before["auditHtml"] == ""
+    assert before["previewSrc"] == ""
+    assert before["previewHidden"] is True
+    assert before["uploadHidden"] is False
+    assert before["message"] == "Rendered page reader failed"
+    assert before["activeElement"] == "bill-file"
+    assert before["fileInvalid"] == "true"
+
+
+def test_review_start_over_discards_upload_and_revokes_preview_once() -> None:
+    client = create_app().test_client()
+    duke = client.get("/api/sample/duke").get_json()["extraction"]
+
+    result = _exercise_async_state_contract(
+        "uploaded_review_discard",
+        extraction_a=duke,
+        abortAware=False,
+    )
+
+    assert result["previewBeforeDiscard"] == "blob:test-1"
+    assert result["createdUrls"] == ["blob:test-1"]
+    assert result["revokedUrls"] == ["blob:test-1"]
+    assert result["previewUrl"] is None
+    assert result["extraction"] is None
+    assert result["audit"] is None
+    assert result["currentBundleId"] is None
+    assert result["fileCount"] == 0
+    assert result["uploadResetCount"] == 1
+    assert result["reviewHtml"] == ""
+    assert result["previewSrc"] == ""
+    assert result["previewHidden"] is True
+    assert result["uploadHidden"] is False
+    assert result["activeElement"] == "upload-title"
+
+
+def test_public_sample_replaces_uploaded_preview_without_retaining_blob() -> None:
+    client = create_app().test_client()
+    authentic = client.get("/api/sample/authentic").get_json()["extraction"]
+    duke = client.get("/api/sample/duke").get_json()["extraction"]
+
+    result = _exercise_async_state_contract(
+        "uploaded_review_then_sample",
+        extraction_a=authentic,
+        extraction_b=duke,
+        abortAware=False,
+    )
+
+    assert result["uploadedPreview"] == "blob:test-1"
+    assert result["createdUrls"] == ["blob:test-1"]
+    assert result["revokedUrls"] == ["blob:test-1"]
+    assert result["previewUrl"] is None
+    assert result["extraction"]["schema_version"] == "2.0"
+    assert result["audit"] is None
+    assert result["currentBundleId"] is None
+    assert result["fileCount"] == 0
+    assert result["uploadResetCount"] == 1
+    assert "Duke Energy" in result["reviewHtml"]
 
 
 def test_pending_audit_cannot_render_beside_a_new_bill() -> None:
@@ -2359,7 +2777,34 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     ):
         assert visible_value in sequential["text"]
     assert "Combined amount shown" not in sequential["summaryText"]
-    assert evidence["repeatedFinishCount"] == 3
+
+    replacement = evidence["reauditReplacement"]
+    assert replacement["bundleLength"] == 3
+    assert replacement["ids"] == evidence["bundleIdsBeforeReaudit"]
+    assert replacement["summary"]["id"] == evidence["bundleIdsBeforeReaudit"][-1]
+    assert replacement["summary"]["usageSummaries"] == [
+        {"serviceType": "water", "value": 5.75, "unit": "kgal"},
+        {"serviceType": "wastewater", "value": 2, "unit": "kgal"},
+    ]
+    assert replacement["summary"]["amountDue"] == 999.91
+    assert replacement["summary"]["verificationLevel"] == replacement[
+        "expectedVerification"
+    ]
+    assert replacement["summary"]["discrepancyTotal"] == replacement[
+        "expectedDiscrepancy"
+    ]
+    assert replacement["summary"]["issueCount"] == replacement["expectedIssues"]
+    assert replacement["summary"]["issueCount"] == 1
+    assert replacement["summary"]["reviewRequests"][0]["body"] != (
+        "Stale page-memory draft"
+    )
+    assert "$999.91" in replacement["householdText"]
+    assert "5.75 kgal" in replacement["householdText"]
+    assert "Stale page-memory draft" not in replacement["requestText"]
+    assert evidence["repeatedFinish"] == {
+        "count": 3,
+        "summary": replacement["summary"],
+    }
 
     mobile_household = evidence["mobileHousehold"]
     assert mobile_household["width"] == 390
@@ -2399,6 +2844,18 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         "requestsCount": 0,
         "pageErrors": [],
     }
+    preview_discard = evidence["previewDiscard"]
+    assert preview_discard["uploadedPreviewUrl"].startswith("blob:")
+    assert preview_discard["previewUrl"] is None
+    assert preview_discard["extractionCleared"] is True
+    assert preview_discard["auditCleared"] is True
+    assert preview_discard["iframeHasSource"] is False
+    assert preview_discard["revokedUrls"] == [
+        preview_discard["uploadedPreviewUrl"]
+    ]
+    assert preview_discard["fileCount"] == 0
+    assert preview_discard["focus"] == "upload-title"
+    assert preview_discard["pageErrors"] == []
     assert evidence["protocolErrors"] == []
     assert evidence["externalRequests"] == []
     assert evidence["hostileDom"] == {
