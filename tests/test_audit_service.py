@@ -88,14 +88,28 @@ def test_exact_pg_and_e_bill_keeps_tariff_verified_result() -> None:
         expected_sections,
         strict=True,
     ):
-        assert request.subject == legacy.review_request.subject
-        assert request.body == legacy.review_request.body
+        assert request.provider in request.subject
+        assert request.provider in request.body
         assert request.requires_user_review is True
         assert request.grounded_audit_line_ids
         assert all(
             sections[line_id] == expected_section
             for line_id in request.grounded_audit_line_ids
         )
+        own_labels = {
+            line.label
+            for line in result.lines
+            if line.id in request.grounded_audit_line_ids
+        }
+        other_labels = {
+            line.label
+            for line in result.lines
+            if line.section_id in set(expected_sections) - {expected_section}
+        }
+        assert all(label in request.body for label in own_labels)
+        assert all(label not in request.body for label in other_labels)
+    assert result.review_requests[0].subject != result.review_requests[1].subject
+    assert result.review_requests[0].body != result.review_requests[1].body
     assert {
         line_id
         for request in result.review_requests

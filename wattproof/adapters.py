@@ -387,6 +387,52 @@ def _validated_grounding(
     return grounded_ids
 
 
+def _clean_provider_request(
+    bill: BillExtraction,
+    provider: str,
+    lines: tuple[AuditLine, ...],
+) -> ProviderReviewRequest:
+    details: list[str] = []
+    for line in lines:
+        if line.status == "verified":
+            finding = (
+                "WattProof recomputed this line and it agreed with the printed "
+                f"amount. Calculation: {line.formula}."
+            )
+        elif line.status == "cannot_verify":
+            finding = (
+                "WattProof could not independently recompute this line from the "
+                "currently archived sources."
+            )
+        else:
+            finding = (
+                "WattProof recorded this line as "
+                f"{line.status.replace('_', ' ')} and needs calculation detail."
+            )
+        if line.citations:
+            sources = "; ".join(
+                f"{citation.label}: {citation.source_url}"
+                for citation in line.citations
+            )
+            finding += f" Archived sources: {sources}."
+        details.append(f"- {line.label}: {finding}")
+    body = (
+        f"Hello,\n\nPlease confirm these {provider} charge calculations on my "
+        f"statement dated {bill.statement_date.value.isoformat()}. WattProof's "
+        "notes below are limited to lines attributed to your organization:\n"
+        + "\n".join(details)
+        + "\n\nPlease provide the applicable rates or calculation detail for the "
+        "listed lines. I will verify my account details before sending. Thank you."
+    )
+    return ProviderReviewRequest(
+        provider=provider,
+        subject=f"Request for {provider} charge calculation detail",
+        body=body,
+        grounded_audit_line_ids=tuple(line.id for line in lines),
+        requires_user_review=True,
+    )
+
+
 def _provider_review_requests(
     bill: BillExtraction,
     result: AuditResult,
@@ -408,17 +454,16 @@ def _provider_review_requests(
             review.grounded_audit_line_ids,
             line_ids,
         )
+        result_lines = {line.id: line for line in result.lines}
         clean_requests = tuple(
-            ProviderReviewRequest(
-                provider=provider,
-                subject=review.subject,
-                body=review.body,
-                grounded_audit_line_ids=tuple(
-                    line_id
+            _clean_provider_request(
+                bill,
+                provider,
+                tuple(
+                    result_lines[line_id]
                     for line_id in grounded
                     if section_by_id.get(line_id) == section_id
                 ),
-                requires_user_review=True,
             )
             for section_id, provider in provider_sections
             if any(section_by_id.get(line_id) == section_id for line_id in grounded)
