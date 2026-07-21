@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from decimal import ROUND_HALF_UP, Decimal
 
 from .models import (
@@ -44,26 +45,51 @@ def _citation(bundle: TariffBundle, rule: RateRule) -> tuple[Citation, ...]:
     return tuple(bundle.citation_map[key] for key in rule.citations)
 
 
-def _validate_supported_bill(bill: BillExtraction, bundle: TariffBundle) -> None:
-    provider = bill.delivery_provider.value.lower()
-    if "pacific gas" not in provider and "pg&e" not in provider:
+def _normalized_identity(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+_DELIVERY_PROVIDER_ALIASES = frozenset(
+    _normalized_identity(value)
+    for value in (
+        "Pacific Gas and Electric Company",
+        "Pacific Gas & Electric Company",
+        "PG&E",
+    )
+)
+_GENERATION_PROVIDER_ALIASES = frozenset(
+    _normalized_identity(value)
+    for value in (
+        "Central Coast Community Energy",
+        "3CE",
+    )
+)
+_DELIVERY_SCHEDULE_ALIASES = frozenset((_normalized_identity("E-TOU-C"),))
+_GENERATION_SCHEDULE_ALIASES = frozenset(
+    (_normalized_identity("MBRETCH1 3Cchoice"),)
+)
+
+
+def validate_pge_3ce_bill(bill: BillExtraction, bundle: TariffBundle) -> None:
+    """Require an exact supported PG&E/3CE identity and archived rate period."""
+
+    provider = _normalized_identity(bill.delivery_provider.value)
+    if provider not in _DELIVERY_PROVIDER_ALIASES:
         raise UnsupportedBillError(
             "The MVP supports PG&E residential delivery bills only."
         )
-    if bill.delivery_schedule.value != "E-TOU-C":
+    delivery_schedule = _normalized_identity(bill.delivery_schedule.value)
+    if delivery_schedule not in _DELIVERY_SCHEDULE_ALIASES:
         raise UnsupportedBillError(
             "The MVP supports only PG&E E-TOU-C for this verified rate period."
         )
-    generation_provider = bill.generation_provider.value.lower()
-    if (
-        "central coast community energy" not in generation_provider
-        and "3ce" not in generation_provider
-    ):
+    generation_provider = _normalized_identity(bill.generation_provider.value)
+    if generation_provider not in _GENERATION_PROVIDER_ALIASES:
         raise UnsupportedBillError(
             "The MVP supports Central Coast Community Energy generation only."
         )
-    generation_schedule = bill.generation_schedule.value.lower()
-    if "mbretch1" not in generation_schedule or "3cchoice" not in generation_schedule:
+    generation_schedule = _normalized_identity(bill.generation_schedule.value)
+    if generation_schedule not in _GENERATION_SCHEDULE_ALIASES:
         raise UnsupportedBillError(
             "The MVP supports only the 3CE MBRETCH1 3Cchoice schedule for this bill."
         )
@@ -386,7 +412,7 @@ def audit_bill(
     bill: BillExtraction, *, verify_sources: bool = True
 ) -> AuditResult:
     bundle = load_tariff_bundle(verify_sources=verify_sources)
-    _validate_supported_bill(bill, bundle)
+    validate_pge_3ce_bill(bill, bundle)
     tariff_lines = _tariff_lines(bill, bundle)
     reconciliation_lines = _reconciliation_lines(bill)
     lines = tariff_lines + reconciliation_lines
