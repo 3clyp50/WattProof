@@ -30,6 +30,8 @@ MAX_RENDERED_PAGE_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_RENDERED_BYTES = 64 * 1024 * 1024
 MAX_RENDER_DIMENSION = 2200
 MAX_CONCURRENT_EXTRACTIONS = 2
+MODEL_REQUEST_TIMEOUT_SECONDS = 60.0
+MODEL_MAX_RETRIES = 0
 NATIVE_TEXT_TIMEOUT_SECONDS = 20.0
 RENDER_TIMEOUT_SECONDS = 30.0
 PROCESS_POLL_SECONDS = 0.02
@@ -493,10 +495,15 @@ def _extract_with_gpt(
     try:
         from openai import OpenAI
 
-        response = OpenAI(api_key=api_key).responses.parse(
+        response = OpenAI(
+            api_key=api_key,
+            timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
+            max_retries=MODEL_MAX_RETRIES,
+        ).responses.parse(
             model=os.getenv("OPENAI_MODEL", "gpt-5.6"),
             store=False,
             text_format=UtilityDocument,
+            timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
             instructions=(
                 "Extract only facts visibly present on the rendered pages of this "
                 "provider-neutral utility statement into the schema 2.0 contract. "

@@ -21,6 +21,8 @@ from wattproof.extract import (
     MAX_FILE_BYTES,
     MAX_NATIVE_HINT_CHARS,
     MAX_RENDERED_PAGE_BYTES,
+    MODEL_MAX_RETRIES,
+    MODEL_REQUEST_TIMEOUT_SECONDS,
     ExtractionUnavailableError,
     InvalidDocumentError,
     RenderedPage,
@@ -141,8 +143,9 @@ def _install_fake_openai(
             return SimpleNamespace(output_parsed=parsed)
 
     class FakeOpenAI:
-        def __init__(self, api_key: str) -> None:
+        def __init__(self, api_key: str, **client_options: object) -> None:
             assert api_key == "test-key"
+            call["client_options"] = client_options
             self.responses = FakeResponses()
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
@@ -330,6 +333,87 @@ def test_unknown_pdf_releases_process_local_slot_after_failure(
         extract_pdf(candidate)
 
     assert released is True
+
+
+def test_model_timeout_releases_slot_and_next_extraction_proceeds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    candidate = tmp_path / "bill.pdf"
+    candidate.write_bytes(b"%PDF-placeholder")
+    slot_events: list[str] = []
+    client_options: list[dict[str, object]] = []
+    call_options: list[dict[str, object]] = []
+    model_calls = 0
+
+    class SingleSlot:
+        held = False
+
+        def acquire(self, *, blocking: bool) -> bool:
+            assert blocking is False
+            slot_events.append("acquire")
+            if self.held:
+                return False
+            self.held = True
+            return True
+
+        def release(self) -> None:
+            assert self.held is True
+            self.held = False
+            slot_events.append("release")
+
+    class FakeResponses:
+        def parse(self, **kwargs: object) -> SimpleNamespace:
+            nonlocal model_calls
+            model_calls += 1
+            call_options.append(kwargs)
+            if model_calls == 1:
+                raise TimeoutError("private SDK timeout details")
+            return SimpleNamespace(output_parsed=load_utility_sample("bloomington"))
+
+    class FakeOpenAI:
+        def __init__(self, api_key: str, **options: object) -> None:
+            assert api_key == "test-key"
+            client_options.append(options)
+            self.responses = FakeResponses()
+
+    slots = SingleSlot()
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("wattproof.extract._sha256_bytes", lambda _data: "1" * 64)
+    monkeypatch.setattr("wattproof.extract._EXTRACTION_SLOTS", slots)
+    monkeypatch.setattr("wattproof.extract._page_count", lambda _path: 1)
+    monkeypatch.setattr(
+        "wattproof.extract._render_pages",
+        lambda _path, _count: _valid_rendered_pages(1),
+    )
+    monkeypatch.setattr(
+        "wattproof.extract._native_text", lambda _path: "[PAGE 1]\nlocator"
+    )
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+
+    with pytest.raises(ExtractionUnavailableError, match="temporarily unavailable"):
+        extract_pdf(candidate)
+
+    assert model_calls == 1
+    assert slots.held is False
+    assert slot_events == ["acquire", "release"]
+
+    extracted = extract_pdf(candidate)
+
+    assert extracted.fixture_kind == "uploaded"
+    assert model_calls == 2
+    assert slots.held is False
+    assert slot_events == ["acquire", "release", "acquire", "release"]
+    assert client_options == [
+        {
+            "timeout": MODEL_REQUEST_TIMEOUT_SECONDS,
+            "max_retries": MODEL_MAX_RETRIES,
+        }
+    ] * 2
+    assert [options["timeout"] for options in call_options] == [
+        MODEL_REQUEST_TIMEOUT_SECONDS,
+        MODEL_REQUEST_TIMEOUT_SECONDS,
+    ]
 
 
 @pytest.mark.parametrize("stdout", ["small text\f", "\f", ""])
@@ -1044,6 +1128,12 @@ def test_gpt_receives_rendered_evidence_before_the_untrusted_native_hint(
     assert call["model"] == "gpt-5.6"
     assert call["store"] is False
     assert call["text_format"] is UtilityDocument
+    assert call["client_options"] == {
+        "timeout": MODEL_REQUEST_TIMEOUT_SECONDS,
+        "max_retries": MODEL_MAX_RETRIES,
+    }
+    assert call["timeout"] == MODEL_REQUEST_TIMEOUT_SECONDS
+    assert MODEL_MAX_RETRIES == 0
     messages = call["input"]
     assert isinstance(messages, list)
     assert len(messages) == 1
@@ -1223,8 +1313,16 @@ def test_gpt_hides_api_failure_details(
             raise RuntimeError("secret API token and private document text")
 
     class FakeOpenAI:
-        def __init__(self, api_key: str) -> None:
+        def __init__(
+            self,
+            api_key: str,
+            *,
+            timeout: float,
+            max_retries: int,
+        ) -> None:
             assert api_key == "test-key"
+            assert timeout == MODEL_REQUEST_TIMEOUT_SECONDS
+            assert max_retries == MODEL_MAX_RETRIES
             self.responses = FailingResponses()
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
