@@ -406,12 +406,14 @@ def _centerpoint_document() -> UtilityDocument:
         service_type="natural_gas",
         provider=_text_fact("CenterPoint Energy", 2, "CenterPoint Energy"),
         normalized_provider=(
-            "Indiana Gas Company, Inc. d/b/a CenterPoint Energy Indiana North"
+            "Southern Indiana Gas and Electric Company d/b/a "
+            "CenterPoint Energy Indiana South"
         ),
         jurisdiction=_text_fact(
             "Indiana",
             2,
-            "Indiana Gas Company d/b/a CenterPoint Energy Indiana North",
+            "Southern Indiana Gas and Electric Company d/b/a "
+            "CenterPoint Energy Indiana South",
         ),
         schedule=_text_fact(
             "RES 110_IN S 110 Residential Service",
