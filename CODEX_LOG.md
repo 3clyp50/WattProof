@@ -262,3 +262,21 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - Darkened only those numerals from `#eca72c` (1.85:1) to `#765414` (6.16:1 against the paper background), retaining the brighter amber for non-text brand accents. An independent read-only accessibility pass confirmed WCAG AA contrast with no layout, motion, focus, or responsive side effects.
 - GitHub Actions run [`29861714811`](https://github.com/3clyp50/WattProof/actions/runs/29861714811) passed both Python verification jobs and deployed exact commit `c51bf9d314e119c86930c80271499c4b29705af2`.
 - A fresh cache-busted WAVE evaluation of the deployed domain returned **0 errors, 0 contrast errors, 0 alerts, and an AIM score of 10/10**. WAVE correctly retains the intentionally empty alternative text on the decorative logo image as a feature inside the named `WattProof home` link, not an error.
+
+## 2026-07-21 - Origin-anchored error callouts
+
+### Notification inventory and interaction decision
+
+- A dedicated read-only subagent traced every user-visible notification and every backend string that can reach it. WattProof has exactly one toast-like renderer: the global error surface used by sample, upload, extraction, and audit failures. Synthetic provenance, loading labels, copied-state feedback, verdicts, line statuses, comparison limitations, and the user-review warning are contextual or inline and remain in place.
+- Replaced the detached page-wide error banner with one compact rounded callout that positions above or below the triggering control, clamps within the viewport, and points back with a centered caret. No toast dependency, severity framework, timer, or field-error parser was added.
+- Preserved `role="alert"`, associated the visible text with its trigger through `aria-describedby`, retained or restored trigger focus after synchronous and asynchronous failures, and cleared the relationship on retry, file selection, or step change. Errors remain visible until the user acts rather than disappearing on a timer.
+- Applied the existing corporate motion identity: a 120 ms decelerating position-and-scale entrance with no bounce. The global reduced-motion rule collapses it to `0.01 ms`.
+
+### Error quality and verification
+
+- Cleaned model-level Pydantic wording from `Review : Value error, …` to a direct `Review: …` message. Added a dedicated 503 response for tariff-source integrity failures so an internal filesystem path can never be exposed in the callout.
+- Browser checks covered the no-file error, a long rejected-document explanation, an audit validation failure, an intercepted async sample failure, both above/below caret orientations, scroll and resize tracking, file-selection clearing, keyboard Enter activation, async focus restoration, and a 390 px mobile viewport with no body overflow.
+- The authentic review-to-audit path remains console-clean. Intentional 422/503 test responses create only the browser's expected failed-resource network entry; no JavaScript exception or warning occurs.
+- `make verify` passes with 30 tests, Ruff clean, strict MyPy clean across 10 source files, successful compilation, clean JavaScript syntax, and no whitespace errors.
+- GitHub Actions run [`29867999090`](https://github.com/3clyp50/WattProof/actions/runs/29867999090) passed Python 3.12 and 3.13 verification and deployed exact commit `52dd69bfc42cdcfb580b0f4c5be8ba1c310971d0`.
+- A fresh production WAVE evaluation of `wattproof.tech/?wave=52dd69b` retained **0 errors, 0 contrast errors, 0 alerts, and an AIM score of 10/10**. The deployed missing-PDF interaction also retained button focus, its alert description, correct caret geometry, and zero console messages.
