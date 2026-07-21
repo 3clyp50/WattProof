@@ -437,3 +437,12 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - `PATH="$PWD/.venv/bin:$PATH" WATTPROOF_REAL_BROWSER=1 make verify` passes **575
   tests**, including all five sample flows in real Chromium; Ruff is clean; strict MyPy
   is clean across 28 source files; and bytecode compilation succeeds.
+- Commit `e0195c500b4a1234249cadc3f59a23d141c246f3` passed Python 3.12,
+  Python 3.13, and deployment in Actions run
+  [`29877145997`](https://github.com/3clyp50/WattProof/actions/runs/29877145997).
+  Production retained all 15 authentic-sample charge editors behind the initially
+  closed disclosure, measured 1,918 px tall at a 1440 px viewport, had no horizontal
+  overflow, and produced no browser console errors or warnings.
+- A cache-busted public WAVE evaluation of the deployed release reports **0 errors, 0
+  contrast errors, 0 alerts, and 10/10 AIM**. This remains automated evaluation
+  evidence rather than a substitute for manual accessibility testing.
