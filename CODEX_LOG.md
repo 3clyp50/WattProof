@@ -258,3 +258,7 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - `make verify` passes with 29 tests, zero Ruff findings, strict MyPy clean across 10 source files, and successful bytecode compilation.
 - The final production-equivalent Docker image builds successfully, JavaScript syntax and whitespace checks pass, and the existing-source secret-pattern scan is clean.
 - Regenerated all five tracked desktop/mobile Playwright artifacts from the real application after the layout and typography changes.
+- The first deployed WAVE re-analysis reduced the landing page from the 7.3/10 baseline to 0 errors, 3 contrast errors, 0 alerts, and 8.8/10. WAVE traced all three remaining findings to the amber `01`, `02`, and `03` proof-list numerals.
+- Darkened only those numerals from `#eca72c` (1.85:1) to `#765414` (6.16:1 against the paper background), retaining the brighter amber for non-text brand accents. An independent read-only accessibility pass confirmed WCAG AA contrast with no layout, motion, focus, or responsive side effects.
+- GitHub Actions run [`29861714811`](https://github.com/3clyp50/WattProof/actions/runs/29861714811) passed both Python verification jobs and deployed exact commit `c51bf9d314e119c86930c80271499c4b29705af2`.
+- A fresh cache-busted WAVE evaluation of the deployed domain returned **0 errors, 0 contrast errors, 0 alerts, and an AIM score of 10/10**. WAVE correctly retains the intentionally empty alternative text on the decorative logo image as a feature inside the named `WattProof home` link, not an error.
