@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 from typing import Protocol, runtime_checkable
 
 from .audit import UnsupportedBillError, audit_bill, validate_pge_3ce_bill
-from .models import AuditLine, AuditResult, AuditStatus, BillExtraction, EvidenceBase
-from .tariffs import load_tariff_bundle
+from .models import (
+    AuditLine,
+    AuditResult,
+    AuditStatus,
+    BillExtraction,
+    ChargeLine,
+    EvidenceBase,
+)
+from .tariffs import TariffBundle, load_tariff_bundle
 from .utility_models import (
     AuditScope,
     AuditStatusV2,
@@ -17,6 +25,91 @@ from .utility_models import (
 )
 
 _TOLERANCE = Decimal("0.01")
+_DELIVERY_CHARGE_IDS = frozenset(
+    {
+        "pge_peak_energy",
+        "pge_off_peak_energy",
+        "pge_baseline_credit",
+        "pge_generation_credit",
+        "pge_pcia",
+        "pge_franchise_fee",
+        "pge_uut",
+    }
+)
+_GENERATION_CHARGE_IDS = frozenset(
+    {
+        "cca_nov_peak",
+        "cca_nov_off_peak",
+        "cca_nov_energy_commission_tax",
+        "cca_nov_uut",
+        "cca_dec_peak",
+        "cca_dec_off_peak",
+        "cca_dec_energy_commission_tax",
+        "cca_dec_uut",
+    }
+)
+_EXPECTED_CHARGE_IDS = _DELIVERY_CHARGE_IDS | _GENERATION_CHARGE_IDS
+_QUANTITY_RATE_CHARGE_IDS = frozenset(
+    {
+        "pge_peak_energy",
+        "pge_off_peak_energy",
+        "pge_baseline_credit",
+        "cca_nov_peak",
+        "cca_nov_off_peak",
+        "cca_dec_peak",
+        "cca_dec_off_peak",
+    }
+)
+_PERCENT_RATE_CHARGE_IDS = frozenset(
+    {"pge_uut", "cca_nov_uut", "cca_dec_uut"}
+)
+_NO_PRINTED_OPERAND_CHARGE_IDS = frozenset(
+    {
+        "pge_generation_credit",
+        "pge_pcia",
+        "pge_franchise_fee",
+        "cca_nov_energy_commission_tax",
+        "cca_dec_energy_commission_tax",
+    }
+)
+_EXPECTED_RULE_STRUCTURE = {
+    "pge_peak_energy": (
+        "quantity_times_rate",
+        (),
+        ("pge_nov", "pge_dec"),
+    ),
+    "pge_off_peak_energy": (
+        "quantity_times_rate",
+        (),
+        ("pge_nov", "pge_dec"),
+    ),
+    "pge_baseline_credit": ("quantity_times_rate", (), ("baseline",)),
+    "pge_franchise_fee": ("quantity_times_rate", (), ("3ce",)),
+    "cca_nov_peak": ("quantity_times_rate", (), ("3ce",)),
+    "cca_nov_off_peak": ("quantity_times_rate", (), ("3ce",)),
+    "cca_dec_peak": ("quantity_times_rate", (), ("3ce",)),
+    "cca_dec_off_peak": ("quantity_times_rate", (), ("3ce",)),
+    "cca_nov_uut": (
+        "percent_of_lines",
+        ("cca_nov_peak", "cca_nov_off_peak"),
+        (),
+    ),
+    "cca_dec_uut": (
+        "percent_of_lines",
+        ("cca_dec_peak", "cca_dec_off_peak"),
+        (),
+    ),
+}
+_EXPECTED_LIMITATION_IDS = frozenset(
+    {
+        "pge_generation_credit",
+        "pge_pcia",
+        "pge_uut",
+        "cca_nov_energy_commission_tax",
+        "cca_dec_energy_commission_tax",
+    }
+)
+_EXPECTED_CITATION_IDS = frozenset({"pge_nov", "pge_dec", "baseline", "3ce"})
 
 
 @runtime_checkable
@@ -28,6 +121,107 @@ class TariffAdapter(Protocol):
 
     def audit(self, bill: BillExtraction) -> UtilityAuditResult:
         """Audit a bill already known to match this adapter."""
+
+
+def _bundle_has_expected_structure(bundle: TariffBundle) -> bool:
+    version = bundle.version
+    if (
+        version.id != "pge_3ce_e_tou_c_2022_h2"
+        or version.provider
+        != "Pacific Gas and Electric Company + Central Coast Community Energy"
+        or version.schedule != "E-TOU-C / MBRETCH1 3Cchoice"
+        or version.jurisdiction != "California"
+        or version.effective_start != date(2022, 6, 1)
+        or version.effective_end != date(2022, 12, 31)
+    ):
+        return False
+    if set(bundle.citation_map) != _EXPECTED_CITATION_IDS:
+        return False
+    if set(bundle.rules) != set(_EXPECTED_RULE_STRUCTURE):
+        return False
+    if set(bundle.limitations) != _EXPECTED_LIMITATION_IDS:
+        return False
+    if any(not limitation.strip() for limitation in bundle.limitations.values()):
+        return False
+    return all(
+        (rule.kind, rule.line_ids, rule.citations) == expected
+        for rule_id, expected in _EXPECTED_RULE_STRUCTURE.items()
+        for rule in (bundle.rules[rule_id],)
+    )
+
+
+def _charge_has_supported_operands(charge: ChargeLine) -> bool:
+    if charge.billed_amount.unit != "USD":
+        return False
+    if charge.id in _QUANTITY_RATE_CHARGE_IDS:
+        return (
+            charge.quantity is not None
+            and charge.quantity.unit == "kWh"
+            and charge.rate is not None
+            and charge.rate.unit == "USD/kWh"
+        )
+    if charge.id in _PERCENT_RATE_CHARGE_IDS:
+        return (
+            charge.quantity is None
+            and charge.rate is not None
+            and charge.rate.unit == "fraction"
+        )
+    if charge.id in _NO_PRINTED_OPERAND_CHARGE_IDS:
+        return charge.quantity is None and charge.rate is None
+    return False
+
+
+def _bill_has_expected_structure(bill: BillExtraction) -> bool:
+    charges_by_id = {charge.id: charge for charge in bill.charges}
+    if (
+        len(bill.charges) != len(_EXPECTED_CHARGE_IDS)
+        or set(charges_by_id) != _EXPECTED_CHARGE_IDS
+    ):
+        return False
+    if any(
+        charge.section
+        != ("pge_delivery" if charge.id in _DELIVERY_CHARGE_IDS else "cca_generation")
+        for charge in bill.charges
+    ):
+        return False
+    if any(not _charge_has_supported_operands(charge) for charge in bill.charges):
+        return False
+    seen_charge_ids: set[str] = set()
+    for charge in bill.charges:
+        rule_structure = _EXPECTED_RULE_STRUCTURE.get(charge.id)
+        if (
+            rule_structure is not None
+            and rule_structure[0] == "percent_of_lines"
+            and not set(rule_structure[1]) <= seen_charge_ids
+        ):
+            return False
+        seen_charge_ids.add(charge.id)
+    if any(
+        fact.unit != "USD"
+        for fact in (
+            bill.delivery_subtotal,
+            bill.generation_subtotal,
+            bill.current_charges,
+            bill.outstanding_balance,
+            bill.amount_due,
+        )
+    ):
+        return False
+    return (
+        bill.billing_days.unit == "days"
+        and bill.total_usage.unit == "kWh"
+        and bill.peak_usage.unit == "kWh"
+        and bill.off_peak_usage.unit == "kWh"
+        and bill.baseline_allowance.unit == "kWh"
+        and bill.daily_baseline_quantity.unit == "kWh/day"
+    )
+
+
+def _supports_tariff_application(
+    bill: BillExtraction,
+    bundle: TariffBundle,
+) -> bool:
+    return _bundle_has_expected_structure(bundle) and _bill_has_expected_structure(bill)
 
 
 def _mapped_status(status: AuditStatus) -> AuditStatusV2:
@@ -136,6 +330,132 @@ def _root_causes(
     return roots
 
 
+def _currency(value: Decimal) -> str:
+    sign = "-" if value < 0 else ""
+    return f"{sign}${abs(value):.2f}"
+
+
+def _generated_discrepancy_request_body(
+    bill: BillExtraction,
+    lines: tuple[AuditLine, ...],
+) -> str:
+    details: list[str] = []
+    for line in lines:
+        if line.expected_amount is None or line.delta is None:
+            raise ValueError(
+                f"Discrepant tariff line lacks complete operands: {line.id}"
+            )
+        detail = (
+            f"- {line.label}: the statement shows {_currency(line.billed_amount)}; "
+            f"the published calculation gives {_currency(line.expected_amount)}; "
+            f"the difference is {_currency(abs(line.delta))}.\n"
+            f"  Calculation: {line.formula}."
+        )
+        if line.citations:
+            sources = "; ".join(
+                f"{citation.label}: {citation.source_url}"
+                for citation in line.citations
+            )
+            detail += f"\n  Rate sources: {sources}."
+        details.append(detail)
+    synthetic_notice = (
+        "This is a synthetic demo request; no real customer bill contained "
+        "these errors.\n\n"
+        if bill.fixture_kind == "synthetic"
+        else ""
+    )
+    return (
+        f"Hello,\n\n{synthetic_notice}Please review these statement charges dated "
+        f"{bill.statement_date.value.isoformat()}:\n"
+        + "\n".join(details)
+        + "\n\nPlease confirm the quantities and rates used and explain or correct "
+        "the charges if appropriate. I will verify my account details before "
+        "sending. Thank you."
+    )
+
+
+def _validated_grounding(
+    grounded_ids: tuple[str, ...],
+    line_ids: set[str],
+) -> tuple[str, ...]:
+    missing = tuple(line_id for line_id in grounded_ids if line_id not in line_ids)
+    if missing:
+        raise ValueError(
+            "Provider review request references missing audit lines: "
+            + ", ".join(missing)
+        )
+    return grounded_ids
+
+
+def _provider_review_requests(
+    bill: BillExtraction,
+    result: AuditResult,
+) -> tuple[ProviderReviewRequest, ...]:
+    line_ids = {line.id for line in result.lines}
+    discrepancies = tuple(
+        line
+        for line in result.lines
+        if line.category == "tariff" and line.status == "discrepancy"
+    )
+    if not discrepancies:
+        review = result.review_request
+        grounded = _validated_grounding(
+            review.grounded_audit_line_ids,
+            line_ids,
+        )
+        return (
+            ProviderReviewRequest(
+                provider=bill.delivery_provider.value,
+                subject=review.subject,
+                body=review.body,
+                grounded_audit_line_ids=grounded,
+                requires_user_review=True,
+            ),
+        )
+
+    section_by_id = _section_by_line_id(bill)
+    provider_sections = (
+        ("pge_delivery", bill.delivery_provider.value),
+        ("cca_generation", bill.generation_provider.value),
+    )
+    requests: list[ProviderReviewRequest] = []
+    legacy_review = result.review_request
+    for section_id, provider in provider_sections:
+        provider_lines = tuple(
+            line
+            for line in discrepancies
+            if section_by_id.get(line.id) == section_id
+        )
+        if not provider_lines:
+            continue
+        grounded = _validated_grounding(
+            tuple(line.id for line in provider_lines),
+            line_ids,
+        )
+        if grounded == legacy_review.grounded_audit_line_ids:
+            subject = legacy_review.subject
+            body = legacy_review.body
+        else:
+            subject = (
+                f"Request to review {provider_lines[0].label}"
+                if len(provider_lines) == 1
+                else "Request to review electricity charges"
+            )
+            body = _generated_discrepancy_request_body(bill, provider_lines)
+        requests.append(
+            ProviderReviewRequest(
+                provider=provider,
+                subject=subject,
+                body=body,
+                grounded_audit_line_ids=grounded,
+                requires_user_review=True,
+            )
+        )
+    if not requests:
+        raise ValueError("Discrepant tariff lines have no supported provider section")
+    return tuple(requests)
+
+
 def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult:
     facts = _facts_by_line_id(bill)
     sections = _section_by_line_id(bill)
@@ -164,14 +484,7 @@ def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult
         )
         for line in result.lines
     )
-    review = result.review_request
-    review_request = ProviderReviewRequest(
-        provider=bill.delivery_provider.value,
-        subject=review.subject,
-        body=review.body,
-        grounded_audit_line_ids=review.grounded_audit_line_ids,
-        requires_user_review=review.requires_user_review,
-    )
+    review_requests = _provider_review_requests(bill, result)
     return UtilityAuditResult(
         schema_version="2.0",
         fixture_kind=result.fixture_kind,
@@ -183,7 +496,7 @@ def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult
         lines=mapped_lines,
         tariff=result.tariff,
         comparison=result.comparison,
-        review_requests=(review_request,),
+        review_requests=review_requests,
     )
 
 
@@ -197,10 +510,12 @@ class Pge3ceAdapter:
             validate_pge_3ce_bill(bill, unchecked_bundle)
         except UnsupportedBillError:
             return False
+        if not _supports_tariff_application(bill, unchecked_bundle):
+            return False
 
         verified_bundle = load_tariff_bundle(verify_sources=True)
         validate_pge_3ce_bill(bill, verified_bundle)
-        return True
+        return _supports_tariff_application(bill, verified_bundle)
 
     def audit(self, bill: BillExtraction) -> UtilityAuditResult:
         return _map_result(bill, audit_bill(bill))
