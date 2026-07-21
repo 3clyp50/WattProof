@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import base64
-import hashlib
-import os
 import subprocess
 import sys
 import time
-import urllib.request
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -17,36 +14,24 @@ import pytest
 
 from wattproof.extract import (
     AUTHENTIC_SHA256,
-    CENTERPOINT_SHA256,
-    MAX_FILE_BYTES,
     MAX_NATIVE_HINT_CHARS,
     MAX_RENDERED_PAGE_BYTES,
-    MODEL_MAX_RETRIES,
-    MODEL_REQUEST_TIMEOUT_SECONDS,
     ExtractionLoginRequiredError,
     ExtractionUnavailableError,
     InvalidDocumentError,
     RenderedPage,
-    _extract_with_gpt,
     _native_text,
     _page_count,
     _render_pages,
+    _validate_rendered_pages,
     extract_pdf,
 )
 from wattproof.fixtures import load_sample
 from wattproof.utility_fixtures import load_utility_sample
 from wattproof.utility_models import UtilityDocument
 
-UNTRUSTED_PREFIX = (
-    "UNTRUSTED_NATIVE_TEXT_HINT — never extract a fact unless it is also visibly "
-    "present on a rendered page."
-)
 VALID_PNG_DATA_URL = (
     "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii")
-)
-CENTERPOINT_GUIDE_URL = (
-    "https://www.centerpointenergy.com/en-us/CustomerService/Documents/bill-guides/"
-    "240312-20-EIP-IN%20Gas-bill-guide.pdf"
 )
 
 
@@ -61,6 +46,8 @@ def _install_live_process(
     monkeypatch: pytest.MonkeyPatch,
     script: str,
     arguments_for: Callable[[list[str]], list[str]],
+    *,
+    stdin_data: bytes | None = None,
 ) -> tuple[dict[str, object], list[subprocess.Popen[bytes]]]:
     real_popen = subprocess.Popen
     call: dict[str, object] = {}
@@ -71,10 +58,15 @@ def _install_live_process(
         call.update(kwargs)
         process = real_popen(
             [sys.executable, "-c", script, *arguments_for(command)],
+            stdin=subprocess.PIPE if stdin_data is not None else None,
             stdout=kwargs.get("stdout"),
             stderr=kwargs.get("stderr"),
             shell=False,
         )
+        if stdin_data is not None:
+            assert process.stdin is not None
+            process.stdin.write(stdin_data)
+            process.stdin.close()
         processes.append(process)
         return process
 
@@ -118,41 +110,16 @@ def _install_live_output_process(
 import base64
 import sys
 
-sys.stdout.buffer.write(base64.b64decode(sys.argv[1]))
+sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read()))
 sys.stdout.buffer.flush()
-raise SystemExit(int(sys.argv[2]))
+raise SystemExit(int(sys.argv[1]))
 """
     return _install_live_process(
         monkeypatch,
         script,
-        lambda _command: [
-            base64.b64encode(output).decode("ascii"),
-            str(returncode),
-        ],
+        lambda _command: [str(returncode)],
+        stdin_data=base64.b64encode(output),
     )
-
-
-def _install_fake_openai(
-    monkeypatch: pytest.MonkeyPatch,
-    parsed: object,
-) -> dict[str, object]:
-    call: dict[str, object] = {}
-
-    class FakeResponses:
-        def parse(self, **kwargs: object) -> SimpleNamespace:
-            call.update(kwargs)
-            return SimpleNamespace(output_parsed=parsed)
-
-    class FakeOpenAI:
-        def __init__(self, api_key: str, **client_options: object) -> None:
-            assert api_key == "test-key"
-            call["client_options"] = client_options
-            self.responses = FakeResponses()
-
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.delenv("OPENAI_MODEL", raising=False)
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
-    return call
 
 
 @pytest.mark.parametrize(
@@ -186,24 +153,22 @@ def test_known_utility_hash_uses_exact_local_fixture_before_external_tools(
         raise AssertionError("known documents must not invoke Poppler")
 
     monkeypatch.setattr("wattproof.extract.subprocess.run", unexpected_external_call)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     assert extract_pdf(candidate) == load_utility_sample(kind)  # type: ignore[arg-type]
 
 
-def test_unknown_pdf_without_api_key_stops_before_poppler(
+def test_unknown_pdf_without_connected_codex_stops_before_poppler(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     candidate = tmp_path / "bill.pdf"
     candidate.write_bytes(b"%PDF-placeholder")
     monkeypatch.setattr("wattproof.extract._sha256_bytes", lambda _data: "7" * 64)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     def unexpected_expensive_call(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("keyless unknown documents must stop before Poppler")
+        raise AssertionError("disconnected unknown documents must stop before Poppler")
 
-    for name in ("_page_count", "_render_pages", "_native_text", "_extract_with_gpt"):
+    for name in ("_page_count", "_render_pages", "_native_text"):
         monkeypatch.setattr(f"wattproof.extract.{name}", unexpected_expensive_call)
 
     with pytest.raises(ExtractionLoginRequiredError, match="Connect Codex"):
@@ -226,7 +191,6 @@ def test_unknown_pdf_holds_process_local_slot_for_the_expensive_path(
         def release(self) -> None:
             events.append("release")
 
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("wattproof.extract._sha256_bytes", lambda _data: "6" * 64)
     monkeypatch.setattr(
         "wattproof.extract._EXTRACTION_SLOTS",
@@ -240,7 +204,7 @@ def test_unknown_pdf_holds_process_local_slot_for_the_expensive_path(
 
     def render_pages(_path: Path, _count: int) -> tuple[RenderedPage, ...]:
         events.append("render")
-        return (RenderedPage(page=1, data_url="data:image/png;base64,AA=="),)
+        return _valid_rendered_pages(1)
 
     def native_text(_path: Path) -> str:
         events.append("native")
@@ -251,13 +215,16 @@ def test_unknown_pdf_holds_process_local_slot_for_the_expensive_path(
     monkeypatch.setattr("wattproof.extract._native_text", native_text)
     expected = load_utility_sample("duke")
 
-    def extract_with_gpt(*_args: object, **_kwargs: object) -> UtilityDocument:
+    def visual_extractor(
+        _pages: tuple[RenderedPage, ...],
+        _hint: str,
+        _digest: str,
+        _page_count: int,
+    ) -> UtilityDocument:
         events.append("model")
         return expected
 
-    monkeypatch.setattr("wattproof.extract._extract_with_gpt", extract_with_gpt)
-
-    assert extract_pdf(candidate) == expected
+    assert extract_pdf(candidate, visual_extractor) == expected
     assert events == [
         ("acquire", False),
         "page_count",
@@ -283,7 +250,6 @@ def test_unknown_pdf_returns_busy_error_without_starting_expensive_path(
         def release(self) -> None:
             raise AssertionError("an unacquired slot must not be released")
 
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("wattproof.extract._sha256_bytes", lambda _data: "5" * 64)
     monkeypatch.setattr(
         "wattproof.extract._EXTRACTION_SLOTS",
@@ -294,11 +260,11 @@ def test_unknown_pdf_returns_busy_error_without_starting_expensive_path(
     def unexpected_expensive_call(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("busy extraction must not start Poppler or the model")
 
-    for name in ("_page_count", "_render_pages", "_native_text", "_extract_with_gpt"):
+    for name in ("_page_count", "_render_pages", "_native_text"):
         monkeypatch.setattr(f"wattproof.extract.{name}", unexpected_expensive_call)
 
     with pytest.raises(ExtractionUnavailableError, match="busy"):
-        extract_pdf(candidate)
+        extract_pdf(candidate, lambda *_args: load_utility_sample("duke"))
 
 
 def test_unknown_pdf_releases_process_local_slot_after_failure(
@@ -318,7 +284,6 @@ def test_unknown_pdf_releases_process_local_slot_after_failure(
             nonlocal released
             released = True
 
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("wattproof.extract._sha256_bytes", lambda _data: "4" * 64)
     monkeypatch.setattr(
         "wattproof.extract._EXTRACTION_SLOTS",
@@ -331,20 +296,18 @@ def test_unknown_pdf_releases_process_local_slot_after_failure(
     )
 
     with pytest.raises(InvalidDocumentError, match="bad PDF"):
-        extract_pdf(candidate)
+        extract_pdf(candidate, lambda *_args: load_utility_sample("duke"))
 
     assert released is True
 
 
-def test_model_timeout_releases_slot_and_next_extraction_proceeds(
+def test_visual_extractor_failure_releases_slot_and_next_extraction_proceeds(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     candidate = tmp_path / "bill.pdf"
     candidate.write_bytes(b"%PDF-placeholder")
     slot_events: list[str] = []
-    client_options: list[dict[str, object]] = []
-    call_options: list[dict[str, object]] = []
     model_calls = 0
 
     class SingleSlot:
@@ -363,23 +326,14 @@ def test_model_timeout_releases_slot_and_next_extraction_proceeds(
             self.held = False
             slot_events.append("release")
 
-    class FakeResponses:
-        def parse(self, **kwargs: object) -> SimpleNamespace:
-            nonlocal model_calls
-            model_calls += 1
-            call_options.append(kwargs)
-            if model_calls == 1:
-                raise TimeoutError("private SDK timeout details")
-            return SimpleNamespace(output_parsed=load_utility_sample("bloomington"))
-
-    class FakeOpenAI:
-        def __init__(self, api_key: str, **options: object) -> None:
-            assert api_key == "test-key"
-            client_options.append(options)
-            self.responses = FakeResponses()
+    def visual_extractor(*_args: object) -> UtilityDocument:
+        nonlocal model_calls
+        model_calls += 1
+        if model_calls == 1:
+            raise ExtractionUnavailableError("Visual extraction failed.")
+        return load_utility_sample("bloomington")
 
     slots = SingleSlot()
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("wattproof.extract._sha256_bytes", lambda _data: "1" * 64)
     monkeypatch.setattr("wattproof.extract._EXTRACTION_SLOTS", slots)
     monkeypatch.setattr("wattproof.extract._page_count", lambda _path: 1)
@@ -390,31 +344,19 @@ def test_model_timeout_releases_slot_and_next_extraction_proceeds(
     monkeypatch.setattr(
         "wattproof.extract._native_text", lambda _path: "[PAGE 1]\nlocator"
     )
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
-
-    with pytest.raises(ExtractionUnavailableError, match="temporarily unavailable"):
-        extract_pdf(candidate)
+    with pytest.raises(ExtractionUnavailableError, match="Visual extraction failed"):
+        extract_pdf(candidate, visual_extractor)
 
     assert model_calls == 1
     assert slots.held is False
     assert slot_events == ["acquire", "release"]
 
-    extracted = extract_pdf(candidate)
+    extracted = extract_pdf(candidate, visual_extractor)
 
-    assert extracted.fixture_kind == "uploaded"
+    assert extracted == load_utility_sample("bloomington")
     assert model_calls == 2
     assert slots.held is False
     assert slot_events == ["acquire", "release", "acquire", "release"]
-    assert client_options == [
-        {
-            "timeout": MODEL_REQUEST_TIMEOUT_SECONDS,
-            "max_retries": MODEL_MAX_RETRIES,
-        }
-    ] * 2
-    assert [options["timeout"] for options in call_options] == [
-        MODEL_REQUEST_TIMEOUT_SECONDS,
-        MODEL_REQUEST_TIMEOUT_SECONDS,
-    ]
 
 
 @pytest.mark.parametrize("stdout", ["small text\f", "\f", ""])
@@ -1118,103 +1060,13 @@ def test_native_text_converts_unicode_decode_failure_to_safe_document_error(
     assert error.value.__suppress_context__ is True
 
 
-def test_gpt_receives_rendered_evidence_before_the_untrusted_native_hint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    parsed = load_utility_sample("duke").model_copy(update={"page_count": 9})
-    call = _install_fake_openai(monkeypatch, parsed)
-    digest = "f" * 64
-    native_only_value = "NATIVE ONLY CONFLICT $999.99"
-
-    extracted = _extract_with_gpt(
-        rendered_pages=_valid_rendered_pages(3),
-        native_hint=f"[PAGE 1]\n{native_only_value}",
-        document_sha256=digest,
+def test_rendered_page_validation_orders_complete_png_evidence() -> None:
+    ordered = _validate_rendered_pages(
+        tuple(reversed(_valid_rendered_pages(3))),
         page_count=3,
     )
 
-    assert call["model"] == "gpt-5.6"
-    assert call["store"] is False
-    assert call["text_format"] is UtilityDocument
-    assert call["client_options"] == {
-        "timeout": MODEL_REQUEST_TIMEOUT_SECONDS,
-        "max_retries": MODEL_MAX_RETRIES,
-    }
-    assert call["timeout"] == MODEL_REQUEST_TIMEOUT_SECONDS
-    assert MODEL_MAX_RETRIES == 0
-    messages = call["input"]
-    assert isinstance(messages, list)
-    assert len(messages) == 1
-    message = messages[0]
-    assert message["role"] == "user"
-    content = message["content"]
-    assert content[0] == {
-        "type": "input_image",
-        "image_url": VALID_PNG_DATA_URL,
-    }
-    assert [block["type"] for block in content[:-1]] == ["input_image"] * 3
-    assert content[-1]["type"] == "input_text"
-    assert content[-1]["text"].startswith(UNTRUSTED_PREFIX)
-    for page in range(1, 4):
-        assert f"image {page} is [PAGE {page}]" in content[-1]["text"]
-    assert native_only_value in content[-1]["text"]
-
-    instructions = str(call["instructions"]).lower()
-    assert "provider-neutral" in instructions
-    assert "schema 2.0" in instructions
-    assert "every material fact" in instructions
-    assert "rendered page" in instructions
-    assert "excerpt" in instructions
-    assert "locator-only" in instructions
-    assert "exclude native-only facts" in instructions
-    assert "native text conflicts" in instructions
-    assert "keep the rendered fact" in instructions
-    assert "add a warning" in instructions
-    assert "never calculate, repair, infer an absent operand, or invent" in instructions
-    assert "identities" in instructions
-    assert "account" in instructions
-    assert "address" in instructions
-    assert "meter identifiers" in instructions
-    assert "model-mediated" in instructions
-    assert "only structure and page bounds" in instructions
-    assert "not deterministic ocr" in instructions
-
-    assert extracted.fixture_kind == "uploaded"
-    assert extracted.document_sha256 == digest
-    assert extracted.page_count == 3
-    assert extracted.source_url is None
-    assert extracted.warnings == parsed.warnings
-    assert native_only_value not in extracted.model_dump_json()
-
-
-def test_gpt_places_multiple_rendered_pages_in_page_order_before_hint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    call = _install_fake_openai(monkeypatch, load_utility_sample("duke"))
-
-    _extract_with_gpt(
-        rendered_pages=(
-            RenderedPage(page=3, data_url=VALID_PNG_DATA_URL),
-            RenderedPage(page=2, data_url=VALID_PNG_DATA_URL),
-            RenderedPage(page=1, data_url=VALID_PNG_DATA_URL),
-        ),
-        native_hint="[PAGE 1]\none\n\n[PAGE 2]\ntwo",
-        document_sha256="e" * 64,
-        page_count=3,
-    )
-
-    messages = call["input"]
-    assert isinstance(messages, list)
-    content = messages[0]["content"]
-    assert [block["image_url"] for block in content[:-1]] == [
-        VALID_PNG_DATA_URL,
-        VALID_PNG_DATA_URL,
-        VALID_PNG_DATA_URL,
-    ]
-    assert content[-1]["type"] == "input_text"
-    assert "image 1 is [PAGE 1]" in content[-1]["text"]
-    assert "image 2 is [PAGE 2]" in content[-1]["text"]
-    assert "image 3 is [PAGE 3]" in content[-1]["text"]
+    assert tuple(page.page for page in ordered) == (1, 2, 3)
 
 
 @pytest.mark.parametrize(
@@ -1272,147 +1124,13 @@ def test_gpt_places_multiple_rendered_pages_in_page_order_before_hint(
         ),
     ],
 )
-def test_gpt_rejects_untrusted_rendered_page_sets_before_api_call(
+def test_rendered_page_validation_rejects_untrusted_evidence(
     rendered_pages: tuple[RenderedPage, ...],
     page_count: int,
     message: str,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    api_called = False
-
-    class UnexpectedOpenAI:
-        def __init__(self, **_kwargs: object) -> None:
-            nonlocal api_called
-            api_called = True
-
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=UnexpectedOpenAI))
-
     with pytest.raises(InvalidDocumentError, match=message):
-        _extract_with_gpt(
-            rendered_pages=rendered_pages,
-            native_hint="[PAGE 1]\nlocator",
-            document_sha256="3" * 64,
-            page_count=page_count,
-        )
-
-    assert api_called is False
-
-
-def test_gpt_requires_an_api_key_for_unknown_documents(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    with pytest.raises(ExtractionUnavailableError, match="OPENAI_API_KEY"):
-        _extract_with_gpt(
-            rendered_pages=_valid_rendered_pages(1),
-            native_hint="[PAGE 1]\ntext",
-            document_sha256="d" * 64,
-            page_count=1,
-        )
-
-
-def test_gpt_hides_api_failure_details(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class FailingResponses:
-        def parse(self, **_kwargs: object) -> None:
-            raise RuntimeError("secret API token and private document text")
-
-    class FakeOpenAI:
-        def __init__(
-            self,
-            api_key: str,
-            *,
-            timeout: float,
-            max_retries: int,
-        ) -> None:
-            assert api_key == "test-key"
-            assert timeout == MODEL_REQUEST_TIMEOUT_SECONDS
-            assert max_retries == MODEL_MAX_RETRIES
-            self.responses = FailingResponses()
-
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
-
-    with pytest.raises(ExtractionUnavailableError, match="temporarily unavailable") as error:
-        _extract_with_gpt(
-            rendered_pages=_valid_rendered_pages(1),
-            native_hint="[PAGE 1]\ntext",
-            document_sha256="c" * 64,
-            page_count=1,
-        )
-
-    assert "secret API" not in str(error.value)
-    assert "private document" not in str(error.value)
-
-
-def test_gpt_treats_missing_parsed_output_as_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_fake_openai(monkeypatch, None)
-
-    with pytest.raises(ExtractionUnavailableError, match="temporarily unavailable"):
-        _extract_with_gpt(
-            rendered_pages=_valid_rendered_pages(1),
-            native_hint="[PAGE 1]\ntext",
-            document_sha256="b" * 64,
-            page_count=1,
-        )
-
-
-def test_gpt_rejects_model_evidence_beyond_trusted_page_count(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_fake_openai(monkeypatch, load_utility_sample("duke"))
-
-    with pytest.raises(ExtractionUnavailableError, match="temporarily unavailable"):
-        _extract_with_gpt(
-            rendered_pages=_valid_rendered_pages(2),
-            native_hint="[PAGE 1]\ntext",
-            document_sha256="a" * 64,
-            page_count=2,
-        )
-
-
-@pytest.mark.skipif(
-    not (
-        os.getenv("OPENAI_API_KEY")
-        and os.getenv("WATTPROOF_RUN_MODEL_EVAL") == "1"
-    ),
-    reason=(
-        "real model evaluation requires OPENAI_API_KEY and "
-        "WATTPROOF_RUN_MODEL_EVAL=1"
-    ),
-)
-def test_centerpoint_model_eval_excludes_invisible_conflicting_statement(
-    tmp_path: Path,
-) -> None:
-    request = urllib.request.Request(
-        CENTERPOINT_GUIDE_URL,
-        headers={"User-Agent": "WattProof model evaluation"},
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        document_bytes = response.read(MAX_FILE_BYTES + 1)
-
-    assert len(document_bytes) <= MAX_FILE_BYTES
-    assert hashlib.sha256(document_bytes).hexdigest() == CENTERPOINT_SHA256
-    candidate = tmp_path / "centerpoint-gas.pdf"
-    candidate.write_bytes(document_bytes)
-
-    page_count = _page_count(candidate)
-    rendered_pages = _render_pages(candidate, page_count)
-    native_hint = _native_text(candidate)
-    extracted = _extract_with_gpt(
-        rendered_pages,
-        native_hint,
-        CENTERPOINT_SHA256,
-        page_count=page_count,
-    )
-
-    serialized = extracted.model_dump_json()
-    assert all(value not in serialized for value in ("534", "6.326", "134.69"))
+        _validate_rendered_pages(rendered_pages, page_count=page_count)
 
 
 def test_authentic_pg_and_e_hash_remains_exact_and_keyless(
@@ -1430,7 +1148,6 @@ def test_authentic_pg_and_e_hash_remains_exact_and_keyless(
         raise AssertionError("known documents must not invoke Poppler")
 
     monkeypatch.setattr("wattproof.extract.subprocess.run", unexpected_external_call)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     assert extract_pdf(candidate) == load_sample("authentic")
 
@@ -1450,14 +1167,10 @@ def test_unknown_pdf_renders_before_using_empty_or_short_native_hint(
     candidate = tmp_path / "bill.pdf"
     candidate.write_bytes(b"%PDF-placeholder")
     digest = "9" * 64
-    rendered = (
-        RenderedPage(page=1, data_url="data:image/png;base64,AQ=="),
-        RenderedPage(page=2, data_url="data:image/png;base64,Ag=="),
-    )
+    rendered = _valid_rendered_pages(2)
     extracted = load_utility_sample("centerpoint")
     events: list[str] = []
     monkeypatch.setattr("wattproof.extract._sha256_bytes", lambda _data: digest)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     def page_count(_path: Path) -> int:
         events.append("page_count")
@@ -1472,14 +1185,13 @@ def test_unknown_pdf_renders_before_using_empty_or_short_native_hint(
         events.append("native_text")
         return native_hint
 
-    def extract_with_gpt(
+    def visual_extractor(
         rendered_pages: tuple[RenderedPage, ...],
         received_hint: str,
         document_sha256: str,
-        *,
         page_count: int,
     ) -> UtilityDocument:
-        events.append("extract_with_gpt")
+        events.append("visual_extractor")
         assert rendered_pages == rendered
         assert received_hint == native_hint
         assert document_sha256 == digest
@@ -1489,14 +1201,13 @@ def test_unknown_pdf_renders_before_using_empty_or_short_native_hint(
     monkeypatch.setattr("wattproof.extract._page_count", page_count)
     monkeypatch.setattr("wattproof.extract._render_pages", render_pages)
     monkeypatch.setattr("wattproof.extract._native_text", native_text)
-    monkeypatch.setattr("wattproof.extract._extract_with_gpt", extract_with_gpt)
 
-    assert extract_pdf(candidate) == extracted
+    assert extract_pdf(candidate, visual_extractor) == extracted
     assert events == [
         "page_count",
         "render_pages",
         "native_text",
-        "extract_with_gpt",
+        "visual_extractor",
     ]
 
 
@@ -1507,7 +1218,6 @@ def test_unknown_pdf_does_not_fall_back_to_native_text_when_rendering_fails(
     candidate = tmp_path / "bill.pdf"
     candidate.write_bytes(b"%PDF-placeholder")
     monkeypatch.setattr("wattproof.extract._sha256_bytes", lambda _data: "8" * 64)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("wattproof.extract._page_count", lambda _path: 1)
 
     def rendering_failed(_path: Path, _page_count: int) -> tuple[RenderedPage, ...]:
@@ -1520,4 +1230,4 @@ def test_unknown_pdf_does_not_fall_back_to_native_text_when_rendering_fails(
     monkeypatch.setattr("wattproof.extract._native_text", native_text_must_not_run)
 
     with pytest.raises(InvalidDocumentError, match="Rendered evidence unavailable"):
-        extract_pdf(candidate)
+        extract_pdf(candidate, lambda *_args: load_utility_sample("duke"))

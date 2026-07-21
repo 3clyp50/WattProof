@@ -1,5 +1,11 @@
 # WattProof — Product and Build Plan
 
+> **Current implementation note (2026-07-22):** The shipped architecture is a
+> provider-neutral Flask/Pydantic service with rendered pages as authoritative
+> evidence and native text only as an untrusted locator hint. Personal PDFs use one
+> visitor-connected Codex App Server path; historical stack and fallback options below
+> are retained as the original decision trail, not current behavior.
+
 ## 1. Product thesis
 
 **WattProof checks the math on household electricity bills.** A user uploads a bill; WattProof extracts the billed usage and charges, identifies the applicable published tariff, deterministically recomputes the expected charges, explains any discrepancy, compares supported rate plans, and prepares an evidence-backed review request.
@@ -135,7 +141,8 @@ Choose the stack Codex can complete and verify fastest. A pragmatic default:
 - Front end: Next.js/React with a small component system.
 - API: Next.js server routes or a compact Python/FastAPI service if PDF and tariff tooling is materially easier in Python.
 - Data: local files/SQLite for the demo; no account system.
-- PDF extraction: native text extraction first, rendered-page vision fallback second.
+- PDF extraction: render every bounded page as authoritative evidence; use native text
+  only as an explicitly untrusted locator hint.
 - LLM: GPT-5.6 structured output for classification/extraction and review-letter wording.
 - Calculation: deterministic typed code, never LLM arithmetic.
 

@@ -8,6 +8,11 @@
 
 **Baseline:** `3438e946db28d27c5d3d19bbb4b7f8501c03d396`
 
+> **Integration note (2026-07-22):** The final product decision supersedes this
+> design's operator-key assumption. Personal PDFs now use only a visitor-connected
+> Codex App Server session through OpenAI's official device flow; public hash-known
+> fixtures remain local and keyless.
+
 ## Executive summary
 
 WattProof currently audits one PG&E/3CE electricity-bill shape against one archived
@@ -488,7 +493,7 @@ The contribution is ready for maintainer review when:
 
 - Exact published-tariff coverage remains limited to adapters with archived sources;
   the initial adapter remains PG&E/3CE.
-- Unknown-document extraction requires an operator-configured OpenAI key.
+- Unknown-document extraction requires a visitor-connected Codex session.
 - The public keyless demo recognizes only known deterministic fixtures.
 - The bundle is intentionally temporary and cannot be restored after page reload.
 - Plan comparison remains unavailable without appropriate interval or historical usage

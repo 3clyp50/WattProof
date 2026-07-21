@@ -1,12 +1,16 @@
 # Provider-Neutral Multi-Utility Implementation Plan
 
+> **Integration note (2026-07-22):** The implemented personal-PDF path uses the
+> official Codex App Server device flow, not an operator-managed Responses API key.
+> This plan remains as historical implementation evidence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Expand WattProof from one PG&E/3CE electricity shape into a provider-neutral utility-bill checker with rendered-page evidence, deterministic internal reconciliation, exact tariff adapters, a temporary multi-bill household flow, and review-ready screenshots.
 
 **Architecture:** Keep the existing PG&E audit intact behind a compatibility adapter. Add a versioned provider-neutral document model, deterministic reconciliation engine, rendered-document extraction boundary, and unified audit service. The framework-free Flask/HTML/CSS/JavaScript UI consumes the unified result contract and holds bundle summaries only in page memory.
 
-**Tech Stack:** Python 3.12, Flask, Pydantic 2, `Decimal`, Poppler (`pdfinfo`, `pdftotext`, `pdftoppm`), OpenAI Responses structured output, vanilla HTML/CSS/JavaScript, pytest, Ruff, strict mypy.
+**Tech Stack:** Python 3.12, Flask, Pydantic 2, `Decimal`, Poppler (`pdfinfo`, `pdftotext`, `pdftoppm`), Codex App Server strict structured output, vanilla HTML/CSS/JavaScript, pytest, Ruff, strict mypy.
 
 ---
 

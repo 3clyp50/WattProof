@@ -213,7 +213,6 @@ def test_unknown_pdf_can_use_a_connected_model_extractor(
     pdf.write_bytes(b"%PDF-unknown-native-bill")
     calls: list[tuple[tuple[int, ...], str, str, int]] = []
 
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr("wattproof.extract._page_count", lambda _path: 1)
     monkeypatch.setattr(
         "wattproof.extract._render_pages",
@@ -254,12 +253,10 @@ def test_unknown_pdf_can_use_a_connected_model_extractor(
 
 
 def test_unknown_pdf_requires_a_connected_codex_session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     pdf = tmp_path / "unknown.pdf"
     pdf.write_bytes(b"%PDF-unknown-native-bill")
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
     with pytest.raises(ExtractionLoginRequiredError, match="Connect Codex"):
         extract_pdf(pdf)
 
@@ -492,7 +489,7 @@ def test_oversized_pdf_is_rejected_before_read_render_or_model(
 
     monkeypatch.setattr(Path, "read_bytes", unexpected_work)
     monkeypatch.setattr("wattproof.extract.subprocess.run", unexpected_work)
-    for name in ("_page_count", "_render_pages", "_native_text", "_extract_with_gpt"):
+    for name in ("_page_count", "_render_pages", "_native_text"):
         monkeypatch.setattr(f"wattproof.extract.{name}", unexpected_work)
 
     with pytest.raises(InvalidDocumentError, match="10 MB"):
@@ -504,14 +501,13 @@ def test_excess_page_count_is_rejected(
 ) -> None:
     file = tmp_path / "too-many-pages.pdf"
     file.write_bytes(b"%PDF-placeholder")
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     def page_count(_path: Path) -> int:
         return MAX_PAGES + 1
 
     monkeypatch.setattr("wattproof.extract._page_count", page_count)
     with pytest.raises(InvalidDocumentError, match="20 pages"):
-        extract_pdf(file)
+        extract_pdf(file, lambda *_args: load_utility_sample("duke"))
 
 
 def test_cli_happy_path_and_error(capsys: pytest.CaptureFixture[str]) -> None:
@@ -744,10 +740,7 @@ def test_connected_codex_session_extracts_an_unknown_upload(
     ]
 
 
-def test_unknown_upload_without_connected_codex_returns_login_required(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+def test_unknown_upload_without_connected_codex_returns_login_required() -> None:
     response = create_app().test_client().post(
         "/api/extract",
         data={"bill": (BytesIO(b"%PDF-private"), "private.pdf")},

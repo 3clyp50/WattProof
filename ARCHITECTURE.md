@@ -19,7 +19,7 @@ PDF upload or deterministic public sample
           |                     render every PDF page
           |                                |
           |                     GPT-5.6 strict visual mapping
-          |              (connected Codex or operator Responses,
+          |              (visitor-connected Codex App Server,
           |               rendered images plus untrusted text hint,
           |                        no calculation)
           +---------------+----------------+
@@ -89,18 +89,9 @@ expires after 10 minutes; a connected idle session expires after 30 minutes. Log
 expiry closes the process and removes its temporary directory. Passwords and tokens
 never enter browser storage.
 
-### Operator-configured visual fallback
-
-When an operator provides `OPENAI_API_KEY`, GPT-5.6 receives rendered page images in
-page order, followed by the bounded and explicitly untrusted native-text hint. The
-Responses API uses strict `UtilityDocument` structured output and `store=False`.
-Instructions forbid calculation, repair, invention, and native-only facts. Trusted
-local code replaces model-returned fixture identity, digest, and page count before
-schema validation.
-
-Without a connected Codex session or configured operator reader, an unknown document
-fails with a controlled sign-in-required or extraction-unavailable response. There is
-no native-text-only downgrade.
+Without a connected Codex session, an unknown document fails before Poppler work with
+a controlled sign-in-required response. There is no shared operator key, alternate
+model transport, or native-text-only downgrade.
 
 ## Provider-neutral core
 

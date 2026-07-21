@@ -328,3 +328,56 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - The deployed read-only container reports Codex 0.145.0. HTTPS checks confirmed a secure, HTTP-only, SameSite=Lax session cookie; real device-code issuance on the official OpenAI URL; pending status; logout; and the unchanged local authentic fixture.
 - A fresh 390 px production browser pass confirmed the explicit `Continue with Codex — official OpenAI sign-in` accessible name, initial Close focus, Escape behavior, ten- and thirty-minute privacy copy, successful server cleanup, and zero console errors or warnings.
 - A cache-busted WAVE analysis of the deployed release retained **0 errors, 0 contrast errors, 0 alerts, and an AIM score of 10/10**. WAVE also recognizes the new control's explicit label and popup relationship.
+
+## 2026-07-22 - Provider-neutral PR integration
+
+### Chadwick's implementation contribution
+
+- Treated Chadwick Jones's actively updated PR #1 as the source of truth rather than
+  overwriting it with a parallel integration. At review snapshot `ab27371`, his branch
+  contains 56 commits across 56 changed files and implements the provider-neutral
+  schema and invariants, deterministic multi-utility reconciliation and fixtures,
+  exact tariff-adapter boundaries, household flow, resource and numeric hardening, and
+  eight reproducible real-browser evidence captures.
+- Updated the README and submission source to credit that implementation work directly,
+  in addition to his U.S. utility-billing research and domain specification.
+- Preserved the branch's stronger raw-JSON decimal spelling checks, rendered-page
+  validation, Codex schema 2.0 boundary, exact root-cause tracking, accessibility
+  contracts, and refreshed screenshot manifest.
+
+### Integration corrections
+
+- The provider-neutral merge had reintroduced an operator-managed Responses API path
+  beside the already shipped official Codex device flow. That contradicted the user's
+  explicit product decision and this log's earlier record. Removed the duplicate
+  transport, `OPENAI_API_KEY` and `OPENAI_MODEL` configuration, compose variables,
+  OpenAI Python SDK dependency, API-specific tests, and stale current documentation.
+  Unknown personal PDFs now have one clear model route: a temporary visitor-connected
+  Codex App Server session. Known public fixtures remain local and keyless.
+- Kept rendered pages authoritative and made the validated, numerically ordered page
+  tuple the exact input to the connected Codex extractor. Unknown documents without a
+  connected session still stop before Poppler work.
+- Reworked the large-output Poppler test harness to carry fixture bytes through stdin
+  instead of one base64 command-line argument. This avoids Linux's per-argument limit
+  on GitHub's Python 3.12 runner without weakening the production resource tests.
+- Added superseding notes to historical design and plan documents instead of erasing
+  the decision trail. Updated the current architecture, privacy, setup, checklist, and
+  submission text to match the single-path runtime.
+
+### Verification
+
+- `PATH="$PWD/.venv/bin:$PATH" WATTPROOF_REAL_BROWSER=1 make verify` passes **575
+  tests**, including real Chromium; Ruff is clean; strict MyPy is clean across 28
+  source files; and bytecode compilation succeeds.
+- A clean production image builds without the OpenAI Python SDK. Under the deployment's
+  read-only, capability-dropped, no-new-privileges, PID-limited, tmpfs-backed security
+  profile, it passes health, schema 2.0 sample, real official device-code issuance,
+  pending status, logout, Codex 0.145.0, and temporary-session cleanup checks.
+- The latest fetched PR head remained exactly `ab27371` during integration; its prior
+  Python 3.12/3.13 checks and CodeRabbit status were green. No force-push or history
+  rewrite was used.
+- Public WAVE evaluation of the currently deployed pre-PR site remains **0 errors, 0
+  contrast errors, 0 alerts, and 10/10 AIM**. This is a production-baseline result, not
+  certification of the provider-neutral branch; that branch requires a fresh public
+  WAVE run after deployment. Its current local accessibility evidence is the real-
+  browser suite and the eight explicitly non-certification screenshots.

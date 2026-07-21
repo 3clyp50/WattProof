@@ -35,7 +35,7 @@ support a product check, but it is not an independent source for itself. Unsuppo
 tariff coverage is reported as a limitation and does not prevent useful internal
 checks.
 
-**Domain specification:** [Chadwick Jones (`@TerminallyLazy`)](https://devpost.com/TerminallyLazy) contributed the U.S. electricity-billing research and practical interpretation that shaped WattProof's charge model, support boundary, and review language.
+**Team contribution:** [Chadwick Jones (`@TerminallyLazy`)](https://devpost.com/TerminallyLazy) co-designed and implemented WattProof's provider-neutral expansion: the schema and invariants, deterministic multi-utility fixtures and reconciliation, exact adapter boundaries, private household flow, resource hardening, and broad regression and browser evidence. His U.S. utility-billing research also shaped the charge model, support boundary, and review language.
 
 When several independent discrepancies explain the same downstream tax, subtotal,
 current-charge, or amount-due symptom, the ledger keeps the complete ordered root set.
@@ -145,25 +145,9 @@ connected idle sessions expire after 30 minutes. Disconnect or expiry closes the
 process and removes its private temporary directory. The model maps evidence only;
 trusted `Decimal` code still performs every calculation.
 
-## Optional operator visual fallback
-
-An operator may separately configure the Responses API visual reader:
-
-```bash
-read -rsp "OpenAI API key: " OPENAI_API_KEY && printf '\n'
-export OPENAI_API_KEY
-export OPENAI_MODEL="gpt-5.6"
-make run
-```
-
-The configured path sends rendered page images first and the labeled native-text hint
-last to GPT-5.6. The Responses API call uses strict `UtilityDocument` structured output
-and `store=False`. The model maps visible evidence into typed fields; it does not
-calculate, repair facts, invent operands, or supply tariff rates. Trusted local code
-replaces document metadata and performs every calculation.
-
-Without a connected Codex session or configured operator reader, an unknown bill gets
-a controlled sign-in-required or extraction-unavailable response.
+Without a connected Codex session, an unknown bill stops before document rendering and
+returns a controlled sign-in-required response. There is no shared operator key or
+second model path to configure.
 
 ## CLI proof
 
@@ -287,8 +271,7 @@ effective period, source hash, or support claim.
 - Codex sign-in happens only on OpenAI's official page. Passwords and tokens never
   enter the WattProof page or browser storage; server-side session files are temporary
   and removed on disconnect or expiry.
-- Unknown documents reach GPT-5.6 only through a visitor-connected Codex session or an
-  operator-configured Responses reader. The Responses fallback uses `store=False`.
+- Unknown documents reach GPT-5.6 only through a visitor-connected Codex session.
 - Review requests require user review, remain editable in page memory, and are never
   sent automatically.
 - WattProof asks for clarification or correction; it does not accuse a provider,

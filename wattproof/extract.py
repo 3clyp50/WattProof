@@ -13,15 +13,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Literal
 
 from .fixtures import load_sample
 from .models import BillExtraction
 from .utility_fixtures import load_utility_sample
 from .utility_models import UtilityDocument
-
-if TYPE_CHECKING:
-    from openai.types.responses import ResponseInputParam
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 20
@@ -31,8 +28,6 @@ MAX_RENDERED_PAGE_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_RENDERED_BYTES = 64 * 1024 * 1024
 MAX_RENDER_DIMENSION = 2200
 MAX_CONCURRENT_EXTRACTIONS = 2
-MODEL_REQUEST_TIMEOUT_SECONDS = 60.0
-MODEL_MAX_RETRIES = 0
 NATIVE_TEXT_TIMEOUT_SECONDS = 20.0
 RENDER_TIMEOUT_SECONDS = 30.0
 PROCESS_POLL_SECONDS = 0.02
@@ -479,89 +474,6 @@ def _validate_rendered_pages(
     return ordered_pages
 
 
-def _extract_with_gpt(
-    rendered_pages: tuple[RenderedPage, ...],
-    native_hint: str,
-    document_sha256: str,
-    *,
-    page_count: int,
-) -> UtilityDocument:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ExtractionUnavailableError(
-            "Set OPENAI_API_KEY to extract an unknown utility document, or use a "
-            "known local sample."
-        )
-
-    ordered_pages = _validate_rendered_pages(
-        rendered_pages,
-        page_count=page_count,
-    )
-
-    content = [
-        {"type": "input_image", "image_url": page.data_url}
-        for page in ordered_pages
-    ]
-    page_order_legend = "\n".join(
-        f"image {image_number} is [PAGE {page.page}]"
-        for image_number, page in enumerate(ordered_pages, start=1)
-    )
-    content.append(
-        {
-            "type": "input_text",
-            "text": (
-                f"{UNTRUSTED_NATIVE_TEXT_PREFIX}\n\n"
-                f"RENDERED_PAGE_ORDER:\n{page_order_legend}\n\n{native_hint}"
-            ),
-        }
-    )
-    request_input = cast(
-        "ResponseInputParam",
-        [{"role": "user", "content": content}],
-    )
-    try:
-        from openai import OpenAI
-
-        response = OpenAI(
-            api_key=api_key,
-            timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
-            max_retries=MODEL_MAX_RETRIES,
-        ).responses.parse(
-            model=os.getenv("OPENAI_MODEL", "gpt-5.6"),
-            store=False,
-            text_format=UtilityDocument,
-            timeout=MODEL_REQUEST_TIMEOUT_SECONDS,
-            instructions=(
-                "Extract only facts visibly present on the rendered pages of this "
-                "provider-neutral utility statement into the schema 2.0 contract. "
-                "Every material fact must include rendered page and excerpt evidence "
-                "with rendered_page provenance. Native text is locator-only; exclude "
-                "native-only facts. If native text conflicts with rendered content, "
-                "keep the rendered fact and add a warning. Never calculate, repair, "
-                "infer an absent operand, or invent a value. Omit customer identities, "
-                "account identifiers, service addresses, and meter identifiers from "
-                "evidence excerpts unless they are material to the audited fact. "
-                "Pixel-to-text excerpt support is model-mediated. Pydantic validation "
-                "proves only structure and page bounds; it is not deterministic OCR."
-            ),
-            input=request_input,
-        )
-        parsed = response.output_parsed
-        if parsed is None:
-            raise ValueError("missing structured output")
-        raw = parsed.model_dump(mode="json")
-        raw["fixture_kind"] = "uploaded"
-        raw["document_sha256"] = document_sha256
-        raw["page_count"] = page_count
-        raw["source_url"] = None
-        return UtilityDocument.model_validate(raw)
-    except Exception:
-        raise ExtractionUnavailableError(
-            "Structured visual extraction is temporarily unavailable. Try again or "
-            "use a known local sample."
-        ) from None
-
-
 def extract_pdf(
     path: str | Path,
     visual_extractor: VisualExtractor | None = None,
@@ -587,8 +499,7 @@ def extract_pdf(
         return load_utility_sample(known_utility)
     if digest in REJECTED_DOCUMENTS:
         raise UnsupportedDocumentError(REJECTED_DOCUMENTS[digest])
-    use_operator_model = bool(os.getenv("OPENAI_API_KEY"))
-    if visual_extractor is None and not use_operator_model:
+    if visual_extractor is None:
         raise ExtractionLoginRequiredError(
             "This bill needs model-assisted visual extraction. Connect Codex in "
             "WattProof, or use a verified public sample."
@@ -605,14 +516,7 @@ def extract_pdf(
             raise InvalidDocumentError(f"PDFs are limited to {MAX_PAGES} pages.")
         rendered_pages = _render_pages(pdf_path, pages)
         native_hint = _native_text(pdf_path)
-        if visual_extractor is not None:
-            _validate_rendered_pages(rendered_pages, page_count=pages)
-            return visual_extractor(rendered_pages, native_hint, digest, pages)
-        return _extract_with_gpt(
-            rendered_pages,
-            native_hint,
-            digest,
-            page_count=pages,
-        )
+        ordered_pages = _validate_rendered_pages(rendered_pages, page_count=pages)
+        return visual_extractor(ordered_pages, native_hint, digest, pages)
     finally:
         _EXTRACTION_SLOTS.release()
