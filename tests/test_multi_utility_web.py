@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -254,11 +255,40 @@ async function main() {
       })();`,
     });
     await command("Emulation.setDeviceMetricsOverride", {
-      width: 1280,
-      height: 900,
+      width: 1440,
+      height: 1000,
       deviceScaleFactor: 1,
       mobile: false,
     });
+
+    async function captureViewport(filename) {
+      if (!payload.captureDirectory) return;
+      fs.mkdirSync(payload.captureDirectory, { recursive: true });
+      await command("Page.bringToFront");
+      const focusedElementId = await evaluate(`document.activeElement?.id || null`);
+      await evaluate(`(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        return true;
+      })()`);
+      await evaluate(`document.fonts.ready.then(() => new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      }))`);
+      await delay(500);
+      const capture = await command("Page.captureScreenshot", {
+        format: "png",
+        fromSurface: true,
+        captureBeyondViewport: false,
+      });
+      fs.writeFileSync(
+        join(payload.captureDirectory, filename),
+        Buffer.from(capture.data, "base64"),
+      );
+      if (focusedElementId) {
+        await evaluate(
+          `document.getElementById(${JSON.stringify(focusedElementId)})?.focus(); true`,
+        );
+      }
+    }
 
     async function navigateHome() {
       const navigation = await command("Page.navigate", { url: payload.baseUrl });
@@ -380,6 +410,29 @@ async function main() {
       return { sample, identity, review, result, requests, correction };
     }
 
+    async function captureSampleResult(sample, filename) {
+      await navigateHome();
+      await clickById(`${sample}-sample`);
+      await waitFor(`!document.querySelector('[data-step="2"]').hidden
+        && document.activeElement?.id === "review-title"`);
+      await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
+      await waitFor(`!document.querySelector('[data-step="3"]').hidden
+        && document.activeElement?.id === "verify-title"`);
+      await evaluate(`window.scrollTo(0, 0); true`);
+      await delay(250);
+      await captureViewport(filename);
+    }
+
+    if (payload.captureDirectory) {
+      await navigateHome();
+      await evaluate(`window.scrollTo(0, 0); true`);
+      await delay(250);
+      await captureViewport("multi-utility-upload-desktop.png");
+      await captureSampleResult("authentic", "pge-tariff-verified-desktop.png");
+      await captureSampleResult("duke", "duke-internal-reconciliation-desktop.png");
+      await captureSampleResult("centerpoint", "centerpoint-gas-desktop.png");
+    }
+
     const flows = [];
     for (const sample of ["authentic", "synthetic", "duke", "centerpoint", "bloomington"]) {
       flows.push(await runFlow(sample));
@@ -420,6 +473,35 @@ async function main() {
         pageErrors: [...window.__wattproofBrowserErrors],
       };
     })()`);
+
+    if (payload.captureDirectory) {
+      await evaluate(`window.scrollTo(0, 0); true`);
+      await delay(250);
+      await captureViewport("household-bundle-desktop.png");
+      await command("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
+      await delay(500);
+      await evaluate(`(() => {
+        const firstCard = document.querySelector(".household-bill-card");
+        firstCard.scrollIntoView({ block: "start", behavior: "instant" });
+        window.scrollBy(0, -12);
+        return true;
+      })()`);
+      await delay(500);
+      await captureViewport("household-result-mobile.png");
+      await command("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 1000,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
+      await evaluate(`window.scrollTo(0, 0); true`);
+      await delay(250);
+    }
 
     await clickById("review-next-steps");
     await waitFor(`!document.querySelector('[data-step="5"]').hidden
@@ -605,6 +687,11 @@ async function main() {
     await clickById("bloomington-sample");
     await waitFor(`!document.querySelector('[data-step="2"]').hidden
       && document.activeElement?.id === "review-title"`);
+    if (payload.captureDirectory) {
+      await evaluate(`window.scrollTo(0, 0); true`);
+      await delay(250);
+      await captureViewport("water-review-mobile.png");
+    }
     const mobileReview = await evaluate(`(() => {
       const layout = document.querySelector(".review-layout");
       return {
@@ -1574,6 +1661,135 @@ def _sample_document(client: Any, kind: str) -> dict[str, Any]:
         "mode": kind,
         "previewUrl": f"blob:{kind}",
     }
+
+
+def test_review_artifacts_exist() -> None:
+    expected = {
+        "multi-utility-upload-desktop.png": (1440, 1000),
+        "pge-tariff-verified-desktop.png": (1440, 1000),
+        "duke-internal-reconciliation-desktop.png": (1440, 1000),
+        "centerpoint-gas-desktop.png": (1440, 1000),
+        "household-bundle-desktop.png": (1440, 1000),
+        "water-review-mobile.png": (390, 844),
+        "household-result-mobile.png": (390, 844),
+    }
+
+    for name, dimensions in expected.items():
+        image = PROJECT_ROOT / "docs" / "screenshots" / name
+        assert image.is_file()
+        assert image.stat().st_size > 10_000
+        data = image.read_bytes()
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
+        assert tuple(
+            int.from_bytes(data[offset : offset + 4], "big")
+            for offset in (16, 20)
+        ) == dimensions
+    assert (PROJECT_ROOT / "docs" / "screenshots" / "README.md").is_file()
+
+
+def test_public_sample_fetcher_uses_official_hash_pinned_sources() -> None:
+    fetcher = PROJECT_ROOT / "scripts" / "fetch-public-samples.sh"
+    source = fetcher.read_text(encoding="utf-8")
+
+    assert "set -euo pipefail" in source
+    assert "tmp/public-samples" in source
+    assert "sha256sum" in source
+    assert "shasum" in source
+    assert '[[ -e "$destination" || -L "$destination" ]]' in source
+    assert 'ln "$temporary_file" "$destination"' in source
+    expected = {
+        "duke-electricity.pdf": (
+            "https://www.duke-energy.com/-/media/pdfs/bill-examples/"
+            "260482-bill-tutorial-handout-res-dei.pdf",
+            "b131c36a215762796e72f3d20986fbea7e64e2dd611081d8936f8442102c3e9a",
+        ),
+        "centerpoint-gas.pdf": (
+            "https://www.centerpointenergy.com/en-us/CustomerService/Documents/"
+            "bill-guides/240312-20-EIP-IN%20Gas-bill-guide.pdf",
+            "c0b7d9b0252226078b39d6760308506c28b388729906d3ac54db950b9f819262",
+        ),
+        "bloomington-water.pdf": (
+            "https://bloomington.in.gov/sites/default/files/2026-02/"
+            "Understanding%20Your%20Water%20Bill%202026%20Accessible.pdf",
+            "a414c296e3dd71a08aa459bb1a7c38fcdeab0c90aa0bb05f7c4e39ae9d70b79c",
+        ),
+    }
+    for filename, (url, digest) in expected.items():
+        assert filename in source
+        assert url in source
+        assert digest in source
+
+
+def test_public_sample_fetcher_refuses_to_replace_mismatched_existing_file(
+    tmp_path: Path,
+) -> None:
+    isolated_root = tmp_path / "checkout"
+    isolated_scripts = isolated_root / "scripts"
+    isolated_samples = isolated_root / "tmp" / "public-samples"
+    isolated_scripts.mkdir(parents=True)
+    isolated_samples.mkdir(parents=True)
+    fetcher = isolated_scripts / "fetch-public-samples.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / fetcher.name, fetcher)
+    mismatched = isolated_samples / "duke-electricity.pdf"
+    original_bytes = b"not the approved public guide"
+    mismatched.write_bytes(original_bytes)
+
+    completed = subprocess.run(
+        ["bash", str(fetcher)],
+        cwd=isolated_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert mismatched.read_bytes() == original_bytes
+    assert "the existing file was not replaced" in completed.stderr
+    assert not list(isolated_samples.glob(".download.*"))
+    assert sorted(path.name for path in isolated_samples.iterdir()) == [
+        "duke-electricity.pdf"
+    ]
+
+
+def test_public_sample_fetcher_refuses_dangling_destination_symlink(
+    tmp_path: Path,
+) -> None:
+    isolated_root = tmp_path / "checkout"
+    isolated_scripts = isolated_root / "scripts"
+    isolated_samples = isolated_root / "tmp" / "public-samples"
+    fake_bin = isolated_root / "fake-bin"
+    isolated_scripts.mkdir(parents=True)
+    isolated_samples.mkdir(parents=True)
+    fake_bin.mkdir()
+    fetcher = isolated_scripts / "fetch-public-samples.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / fetcher.name, fetcher)
+    dangling = isolated_samples / "duke-electricity.pdf"
+    dangling.symlink_to("missing-target.pdf")
+    download_marker = isolated_root / "download-attempted"
+    fake_curl = fake_bin / "curl"
+    fake_curl.write_text(
+        f"#!/usr/bin/env bash\ntouch {shlex.quote(str(download_marker))}\nexit 99\n",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+    completed = subprocess.run(
+        ["bash", str(fetcher)],
+        cwd=isolated_root,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert dangling.is_symlink()
+    assert os.readlink(dangling) == "missing-target.pdf"
+    assert not download_marker.exists()
+    assert "refusing non-regular existing path" in completed.stderr
+    assert not list(isolated_samples.glob(".download.*"))
 
 
 @pytest.mark.parametrize(
@@ -2646,6 +2862,9 @@ def _run_real_browser_smoke() -> dict[str, Any]:
                 {
                     "baseUrl": f"http://127.0.0.1:{server.server_port}/",
                     "browser": _find_real_browser_binary(),
+                    "captureDirectory": os.environ.get(
+                        "WATTPROOF_SCREENSHOT_DIR"
+                    ),
                     "debugPort": _unused_local_port(),
                     "noSandbox": hasattr(os, "geteuid") and os.geteuid() == 0,
                 }
