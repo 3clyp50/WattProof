@@ -359,6 +359,30 @@ def _review_request(
             grounded_audit_line_ids=(line.id,),
         )
 
+    reconciliation_discrepancies = [
+        line
+        for line in lines
+        if line.category == "reconciliation" and line.status == "discrepancy"
+    ]
+    if reconciliation_discrepancies:
+        line = reconciliation_discrepancies[0]
+        body = (
+            f"Hello,\n\nPlease review the printed totals on my statement dated "
+            f"{bill.statement_date.value.isoformat()}. One printed-total check does not "
+            f"reconcile. The statement shows {_currency(line.billed_amount)} for "
+            f"“{line.label},” while combining the other printed amounts gives "
+            f"{_currency(line.expected_amount or Decimal('0'))}, a difference of "
+            f"{_currency(abs(line.delta or Decimal('0')))}.\n\n"
+            f"Calculation using printed amounts: {line.formula}.\n\n"
+            "Please confirm the total and correct it if appropriate. I will verify my "
+            "account details before sending. Thank you."
+        )
+        return ReviewRequest(
+            subject="Request to review printed electricity bill totals",
+            body=body,
+            grounded_audit_line_ids=(line.id,),
+        )
+
     verified_rate_lines = (
         "pge_peak_energy",
         "pge_off_peak_energy",
@@ -402,13 +426,15 @@ def audit_bill(
     discrepancy_total = round_money(
         sum((abs(delta) for delta in tariff_discrepancies), Decimal("0"))
     )
-    has_discrepancy = bool(tariff_discrepancies or reconciliation_discrepancies)
-    verdict = "possible_discrepancy" if has_discrepancy else "reconciled"
-    headline = (
-        f"Possible {_currency(discrepancy_total)} source-supported discrepancy"
-        if has_discrepancy
-        else "Reconciled where the archived sources support a calculation"
-    )
+    if tariff_discrepancies:
+        verdict = "possible_discrepancy"
+        headline = f"Possible {_currency(discrepancy_total)} source-supported discrepancy"
+    elif reconciliation_discrepancies:
+        verdict = "needs_review"
+        headline = "Printed bill totals need review"
+    else:
+        verdict = "reconciled"
+        headline = "Reconciled where the archived sources support a calculation"
 
     return AuditResult(
         schema_version="1.0",

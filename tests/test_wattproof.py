@@ -108,6 +108,21 @@ def test_synthetic_fixture_catches_exact_five_dollar_error() -> None:
     assert lines["delivery_subtotal"].delta == Decimal("-5.00")
 
 
+def test_reconciliation_only_mismatch_is_review_not_a_zero_dollar_claim() -> None:
+    raw = load_sample("authentic").model_dump(mode="json")
+    raw["amount_due"]["value"] = "97.24"
+
+    result = audit_bill(BillExtraction.model_validate(raw))
+
+    assert result.verdict == "needs_review"
+    assert result.discrepancy_total == Decimal("0.00")
+    assert result.headline == "Printed bill totals need review"
+    assert result.review_request.grounded_audit_line_ids == ("amount_due",)
+    assert "$97.24" in result.review_request.body
+    assert "$96.24" in result.review_request.body
+    assert "$1.00" in result.review_request.body
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -309,6 +324,13 @@ def test_web_flow_exposes_all_five_steps() -> None:
         assert f"<b>{label}</b>" in page
     assert "GPT-5.6 may read" in page
     assert "Decimal arithmetic handles money" in page
+    assert "Local sample mode" not in page
+    assert 'id="charge-review"' in page
+    assert 'id="audit-details"' in page
+    assert 'id="show-all-lines"' not in page
+    assert "logo-mark.png" in page
+    assert '<h2 id="comparison-headline"></h2>' not in page
+    assert "Interval usage is required." in page
 
 
 def test_health_check() -> None:

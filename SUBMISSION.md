@@ -7,7 +7,7 @@ This file is the source of truth for the Devpost entry and demo recording. Repla
 - **Project name:** WattProof
 - **Tagline:** Upload an electricity bill to WattProof. GPT-5.6 extracts evidence, while deterministic code checks each charge against the tariff in effect, flags errors, and drafts a review request.
 - **Submitter type:** Team of Individuals
-- **Team:** Primary submitter and [Chadwick Jones (`@TerminallyLazy`)](https://devpost.com/TerminallyLazy) — invitation accepted; confirmed WattProof teammate
+- **Team:** Primary submitter and [Chadwick Jones (`@TerminallyLazy`)](https://devpost.com/TerminallyLazy) — U.S. electricity-billing research and domain specification
 - **Countries of residence:** Italy; United States (multi-select field)
 - **Category:** Apps for Your Life
 - **Repository:** https://github.com/3clyp50/WattProof

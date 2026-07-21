@@ -12,6 +12,8 @@
 
 WattProof is an OpenAI Build Week project for the **Apps for Your Life** track. Its first polished adapter is intentionally narrow: one public anonymized PG&E delivery + Central Coast Community Energy generation statement, one exact schedule and effective period, audited exceptionally well.
 
+**Domain specification:** [Chadwick Jones (`@TerminallyLazy`)](https://devpost.com/TerminallyLazy) contributed the U.S. electricity-billing research and practical interpretation that shaped WattProof's charge model, support boundary, and review language.
+
 ## The judged vertical slice
 
 1. **Upload** a native PDF or start instantly with the bundled public sample.

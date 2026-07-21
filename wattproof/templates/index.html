@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="WattProof checks residential electricity bill math against period-matched published tariffs.">
     <title>WattProof — Check the math on your power bill</title>
-    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ url_for('static', filename='logo-mark.png') }}" type="image/png">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
   </head>
@@ -13,10 +13,9 @@
     <a class="skip-link" href="#workspace">Skip to audit workspace</a>
     <header class="site-header">
       <a class="brand" href="/" aria-label="WattProof home">
-        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <img class="brand-logo" src="{{ url_for('static', filename='logo-mark.png') }}" alt="" width="42" height="42">
         <span>WattProof</span>
       </a>
-      <p class="header-proof"><span></span> Local sample mode · deterministic math</p>
     </header>
 
     <main id="workspace">
@@ -36,7 +35,7 @@
       <section class="step-panel upload-panel" data-step="1" aria-labelledby="upload-title">
         <div class="hero-copy">
           <p class="eyebrow">A receipt checker for electricity</p>
-          <h1 id="upload-title">Your power bill has a formula.<br><em>WattProof shows its work.</em></h1>
+          <h1 id="upload-title" tabindex="-1">Your power bill has a formula.<br><em>WattProof shows its work.</em></h1>
           <p class="lede">Review what was read, recompute supported charges against the tariff that actually governed the bill, and leave with a calm evidence-backed request.</p>
           <ul class="trust-list">
             <li><span>01</span><strong>Evidence first</strong><small>Every material fact keeps its page and printed text.</small></li>
@@ -81,17 +80,23 @@
             <iframe id="pdf-preview" title="Electricity bill preview" hidden></iframe>
             <div id="synthetic-preview" class="synthetic-preview" hidden>
               <span aria-hidden="true">±</span>
-              <h3>Structured synthetic fixture</h3>
+              <h2>Structured synthetic fixture</h2>
               <p>The authentic public PDF is unchanged. Only the extracted peak-charge value is altered for this detection test.</p>
             </div>
           </div>
           <form id="review-form" class="facts-card">
             <div class="facts-header"><div><span class="card-kicker">Evidence ledger</span><h2>Material bill facts</h2></div><span id="fact-count" class="fact-count"></span></div>
             <div id="fact-fields" class="fact-fields"></div>
-            <div class="charge-review">
-              <h3>Printed charge lines</h3>
-              <div class="table-scroll"><table><thead><tr><th>Charge</th><th>Usage</th><th>Rate</th><th>Billed</th><th>Evidence</th></tr></thead><tbody id="charge-fields"></tbody></table></div>
-            </div>
+            <details id="charge-review" class="charge-review">
+              <summary class="disclosure-summary">
+                <span class="disclosure-title"><strong>Printed charge lines</strong><small>Review usage, rates, billed amounts, and page evidence.</small></span>
+                <span id="charge-count" class="disclosure-count"></span>
+              </summary>
+              <div class="disclosure-body">
+                <p class="scroll-hint">Swipe to review every column →</p>
+                <div class="table-scroll" role="region" aria-label="Editable printed charge lines" tabindex="0"><table class="charge-table"><thead><tr><th>Charge</th><th>Usage</th><th>Rate</th><th>Billed</th><th>Evidence</th></tr></thead><tbody id="charge-fields"></tbody></table></div>
+              </div>
+            </details>
             <div class="form-actions"><button class="button text" type="button" data-back="1">← Start over</button><button class="button primary" type="submit">Confirm &amp; run audit <span aria-hidden="true">→</span></button></div>
           </form>
         </div>
@@ -99,15 +104,20 @@
 
       <section class="step-panel" data-step="3" aria-labelledby="audit-title" hidden>
         <div class="section-heading result-heading">
-          <div><p class="eyebrow">Deterministic result</p><h1 id="audit-title" tabindex="-1">Audit result</h1></div>
-          <p>Expected amounts use archived, hash-verified rate snapshots. Unsupported components remain visible and unclaimed.</p>
+          <div><p class="eyebrow">What we found</p><h1 id="audit-title" tabindex="-1">Audit result</h1></div>
+          <p>Rates are matched to the dates on this bill. Anything WattProof cannot prove stays clearly marked.</p>
         </div>
         <div id="verdict-card" class="verdict-card"></div>
         <div id="audit-metrics" class="metric-grid"></div>
-        <div class="results-card">
-          <div class="results-header"><div><span class="card-kicker">Calculation ledger</span><h2>Every check, line by line</h2></div><button class="button text" type="button" id="show-all-lines">Show all checks</button></div>
-          <div class="table-scroll"><table class="audit-table"><thead><tr><th>Status</th><th>Line</th><th>Billed</th><th>Expected</th><th>Delta</th><th>Trace &amp; evidence</th></tr></thead><tbody id="audit-lines"></tbody></table></div>
-        </div>
+        <details id="audit-details" class="results-card">
+          <summary class="disclosure-summary results-summary">
+            <span class="disclosure-title"><span class="card-kicker">Calculation details</span><strong>See every check and source</strong><small id="audit-line-summary"></small></span>
+          </summary>
+          <div class="disclosure-body results-body">
+            <p class="scroll-hint">Swipe to see formulas and evidence →</p>
+            <div class="table-scroll" role="region" aria-label="Line-by-line audit checks" tabindex="0"><table class="audit-table"><thead><tr><th>Status</th><th>Line</th><th>Billed</th><th>Expected</th><th>Delta</th><th>Formula &amp; evidence</th></tr></thead><tbody id="audit-lines"></tbody></table></div>
+          </div>
+        </details>
         <div class="form-actions"><button class="button text" type="button" data-back="2">← Review facts</button><button class="button primary" type="button" data-next="4">Check plan fit <span aria-hidden="true">→</span></button></div>
       </section>
 
@@ -118,7 +128,7 @@
         </div>
         <div class="comparison-card">
           <div class="insufficiency-mark" aria-hidden="true"><span>?</span></div>
-          <div><span class="status-pill cannot_verify">More data needed</span><h2 id="comparison-headline"></h2><p id="comparison-explanation"></p></div>
+          <div><span class="status-pill cannot_verify">More data needed</span><h2 id="comparison-headline">Interval usage is required.</h2><p id="comparison-explanation">WattProof will not estimate savings without the evidence needed to compare plans.</p></div>
           <div class="needed-data"><h3>What unlocks a real comparison</h3><ul id="comparison-data"></ul><p>Download Green Button interval data from the utility account, then compare schedules over a representative period.</p></div>
         </div>
         <div class="principle-strip"><span>WattProof principle 04</span><strong>If the evidence stops, the claim stops.</strong></div>
@@ -134,7 +144,7 @@
           <div class="letter-card">
             <label for="letter-subject">Subject</label><input id="letter-subject" type="text">
             <label for="letter-body">Message</label><textarea id="letter-body" rows="16"></textarea>
-            <div class="letter-actions"><button id="copy-letter" class="button primary" type="button">Copy request</button><button id="download-letter" class="button secondary" type="button">Download .txt</button></div>
+            <div class="letter-actions"><button id="copy-letter" class="button primary" type="button" aria-live="polite">Copy request</button><button id="download-letter" class="button secondary" type="button">Download .txt</button></div>
             <p class="review-note"><span aria-hidden="true">!</span><strong>User review required.</strong> WattProof never sends messages or adds account details automatically.</p>
           </div>
           <aside class="grounding-card"><span class="card-kicker">Claim ledger</span><h2>Why this wording is safe</h2><ul><li>No accusation or invented cause</li><li>Every material statement maps to an audit line</li><li>Missing source evidence is requested, not invented</li><li>Asks the provider to confirm or correct</li></ul><div id="grounded-lines"></div></aside>
