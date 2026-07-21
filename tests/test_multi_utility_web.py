@@ -359,7 +359,7 @@ async function main() {
             unavailable: billingDays.closest(".fact-field")
               .innerText.includes("Exact numeric spelling unavailable"),
           } : null,
-          message: document.getElementById("global-message").innerText,
+          message: document.getElementById("global-message-text").innerText,
         };
       })()`);
 
@@ -400,7 +400,7 @@ async function main() {
           comparisonHidden: comparison.hidden,
           comparisonVisible: visible(comparison),
           requestCount: document.querySelectorAll(".provider-request-card").length,
-          message: document.getElementById("global-message").innerText,
+          message: document.getElementById("global-message-text").innerText,
         };
       })()`);
 
@@ -711,7 +711,7 @@ async function main() {
     await waitFor(`!document.querySelector('[data-step="1"]').hidden
       && document.activeElement?.id === "upload-title"`);
     await evaluate(`document.querySelector('#upload-form button[type="submit"]').click(); true`);
-    await waitFor(`document.getElementById("global-message").textContent
+    await waitFor(`document.getElementById("global-message-text").textContent
       === "Choose a PDF bill first."`);
     const laterFailure = await evaluate(`({
       bundleLength: state.bundle.length,
@@ -721,7 +721,7 @@ async function main() {
       extractionCleared: state.extraction === null,
       auditCleared: state.audit === null,
       retainedCardCount: document.querySelectorAll(".household-bill-card").length,
-      message: document.getElementById("global-message").textContent,
+      message: document.getElementById("global-message-text").textContent,
       focus: document.activeElement?.id,
       pageErrors: [...window.__wattproofBrowserErrors],
     })`);
@@ -923,7 +923,7 @@ async function main() {
       window.fetch = window.__wattproofPendingNativeFetch;
       return true;
     })()`);
-    await waitFor(`document.getElementById("global-message").textContent
+    await waitFor(`document.getElementById("global-message-text").textContent
       === "Choose a PDF bill first."`);
     const pendingUploadReselect = await evaluate(`({
       firstPreviewUrl: ${JSON.stringify(pendingFirstPreviewUrl)},
@@ -938,7 +938,7 @@ async function main() {
         auditCleared: state.audit === null,
         fileCount: document.getElementById("bill-file").files.length,
         fileLabel: document.getElementById("file-label").textContent,
-        message: document.getElementById("global-message").textContent,
+        message: document.getElementById("global-message-text").textContent,
         createdUrls: [...window.__wattproofPendingCreatedPreviews],
         revokedUrls: [...window.__wattproofPendingRevokedPreviews],
         pageErrors: [...window.__wattproofBrowserErrors],
@@ -1400,7 +1400,7 @@ async function run() {
     return {
       ...currentState(),
       reviewHtml: element("service-review-sections").innerHTML,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
       firstDisabled: element("authentic-sample").disabled,
       secondDisabled: element("duke-sample").disabled,
     };
@@ -1412,7 +1412,7 @@ async function run() {
     await request;
     return {
       activeElement: document.activeElement?.id || null,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
       alertHidden: element("global-message").hidden,
     };
   }
@@ -1429,7 +1429,7 @@ async function run() {
     return {
       ...currentState(),
       reviewHtml: element("service-review-sections").innerHTML,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
       uploadDisabled: element("upload-form-submit").disabled,
       sampleDisabled: element("duke-sample").disabled,
       createdUrls,
@@ -1467,7 +1467,7 @@ async function run() {
       uploadHidden: element("step-1").hidden,
       reviewHidden: element("step-2").hidden,
       retainedHouseholdHtml: element("household-bills").innerHTML,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
       fileInvalid: input.attributes["aria-invalid"] || null,
     });
 
@@ -1562,7 +1562,7 @@ async function run() {
       previewSrc: element("pdf-preview").src,
       previewHidden: element("pdf-preview").hidden,
       uploadHidden: element("step-1").hidden,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
       activeElement: document.activeElement?.id || null,
       fileInvalid: element("bill-file").attributes["aria-invalid"] || null,
     };
@@ -1635,7 +1635,7 @@ async function run() {
       ...currentState(),
       reviewHtml: element("service-review-sections").innerHTML,
       verifyHidden: element("step-3").hidden,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
     };
   }
 
@@ -1650,7 +1650,7 @@ async function run() {
       reloadCount,
       uploadHidden: element("step-1").hidden,
       verifyHidden: element("step-3").hidden,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
     };
   }
 
@@ -1676,7 +1676,7 @@ async function run() {
       activeElement: document.activeElement?.id || null,
       inputInvalid: input.attributes["aria-invalid"] || null,
       inputDescribedBy: input.attributes["aria-describedby"] || null,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
     };
   }
 
@@ -1760,7 +1760,7 @@ async function run() {
     return {
       ...currentState(),
       householdHtml: element("household-bills").innerHTML,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
       activeElement: document.activeElement?.id || null,
       uploadHidden: element("step-1").hidden,
     };
@@ -1779,7 +1779,7 @@ async function run() {
       createdUrls,
       revokedUrls,
       fileCount: element("bill-file").files.length,
-      message: element("global-message").textContent,
+      message: element("global-message-text").textContent,
       activeElement: document.activeElement?.id || null,
       uploadHidden: element("step-1").hidden,
     };
@@ -2794,12 +2794,14 @@ def test_web_redacts_local_paths_from_tariff_integrity_error(
 
     response = client.post("/api/audit", json=extraction)
 
-    assert response.status_code == 422
+    assert response.status_code == 503
     message = response.get_json()["error"]
     assert str(tmp_path) not in message
     assert str(PROJECT_ROOT) not in message
-    assert "PG&E historic residential inclusive TOU rates" in message
-    assert "expected SHA-256" in message
+    assert message == (
+        "WattProof could not verify its archived tariff evidence. "
+        "Please try again later."
+    )
 
 
 @pytest.mark.parametrize("kind", ["duke", "centerpoint", "bloomington"])
@@ -2873,13 +2875,14 @@ def test_web_upload_returns_provider_neutral_extraction(
 ) -> None:
     monkeypatch.setattr(
         "wattproof.app.extract_pdf",
-        lambda _path: load_utility_sample("duke"),
+        lambda _path, _visual_extractor=None: load_utility_sample("duke"),
     )
 
     response = create_app().test_client().post(
         "/api/extract",
         data={"bill": (BytesIO(b"%PDF-placeholder"), "duke.pdf")},
         content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
     )
 
     assert response.status_code == 200
@@ -3288,7 +3291,7 @@ def test_later_bill_failure_keeps_completed_household_cards() -> None:
     assert result["extraction"] is None
     assert result["audit"] is None
     assert result["message"] == "Fixture temporarily unavailable"
-    assert result["activeElement"] == "global-message"
+    assert result["activeElement"] == "duke-sample"
     assert result["uploadHidden"] is False
 
 
@@ -4089,18 +4092,18 @@ def test_correction_provenance_survives_back_and_validation_errors(
     else:
         assert result["activeElement"] == "corrected-input"
         assert result["inputInvalid"] == "true"
-        assert result["inputDescribedBy"] == "global-message"
+        assert result["inputDescribedBy"] == "global-message-text"
         assert fact_path in result["message"]
 
 
-def test_general_request_error_focuses_the_alert() -> None:
+def test_general_request_error_focuses_the_trigger() -> None:
     result = _exercise_async_state_contract(
         "general_error",
         abortAware=False,
     )
 
     assert result == {
-        "activeElement": "global-message",
+        "activeElement": "authentic-sample",
         "message": "Reader temporarily unavailable",
         "alertHidden": False,
     }

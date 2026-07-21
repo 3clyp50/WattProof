@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
@@ -13,21 +15,80 @@ from pydantic import ValidationError
 from wattproof.app import create_app
 from wattproof.audit import UnsupportedBillError, audit_bill, round_money
 from wattproof.cli import main
+from wattproof.codex import (
+    CodexAppServer,
+    CodexConnectionStatus,
+    CodexNotConnectedError,
+    CodexSessionManager,
+    CodexUnavailableError,
+    DeviceLogin,
+    strict_bill_schema,
+)
 from wattproof.extract import (
     MAX_FILE_BYTES,
     MAX_PAGES,
+    ExtractionLoginRequiredError,
     InvalidDocumentError,
+    RenderedPage,
     UnsupportedDocumentError,
     extract_pdf,
 )
 from wattproof.fixtures import FIXTURES_DIR, PROJECT_ROOT, load_sample
 from wattproof.models import AuditLine, AuditResult, BillExtraction, DateFact, TextFact
-from wattproof.tariffs import load_tariff_bundle
+from wattproof.tariffs import SourceIntegrityError, load_tariff_bundle
 from wattproof.utility_fixtures import load_utility_sample
+from wattproof.utility_models import UtilityDocument
 
 
 def _lines(result: AuditResult) -> dict[str, AuditLine]:
     return {line.id: line for line in result.lines}
+
+
+class _FakeCodexClient:
+    def __init__(self) -> None:
+        self.is_connected = False
+        self.closed = False
+        self.extractions: list[tuple[tuple[int, ...], str, str, int]] = []
+
+    @property
+    def connected(self) -> bool:
+        return self.is_connected
+
+    def start_login(self) -> DeviceLogin:
+        return DeviceLogin(
+            verification_url="https://auth.openai.com/codex/device",
+            user_code="ABCD-1234",
+        )
+
+    def status(self) -> CodexConnectionStatus:
+        if self.is_connected:
+            return CodexConnectionStatus("connected", "plus")
+        return CodexConnectionStatus("pending")
+
+    def extract_bill(
+        self,
+        rendered_pages: tuple[RenderedPage, ...],
+        native_hint: str,
+        document_sha256: str,
+        page_count: int,
+    ) -> UtilityDocument:
+        self.extractions.append(
+            (
+                tuple(page.page for page in rendered_pages),
+                native_hint,
+                document_sha256,
+                page_count,
+            )
+        )
+        raw = load_utility_sample("duke").model_dump(mode="json")
+        raw["fixture_kind"] = "uploaded"
+        raw["document_sha256"] = document_sha256
+        raw["page_count"] = page_count
+        raw["source_url"] = None
+        return UtilityDocument.model_validate(raw)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def test_authentic_extraction_matches_golden_fixture() -> None:
@@ -43,6 +104,164 @@ def test_authentic_extraction_matches_golden_fixture() -> None:
     assert extracted.peak_usage.value + extracted.off_peak_usage.value == Decimal(
         "327.119"
     )
+
+
+def test_codex_output_schema_is_strict_and_uses_supported_regex() -> None:
+    schema = strict_bill_schema()
+
+    def assert_strict(node: object) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                assert node["additionalProperties"] is False
+                assert node["required"] == list(properties)
+            pattern = node.get("pattern")
+            if isinstance(pattern, str):
+                assert "(?" not in pattern
+            assert "default" not in node
+            for value in node.values():
+                assert_strict(value)
+        elif isinstance(node, list):
+            for value in node:
+                assert_strict(value)
+
+    assert_strict(schema)
+    assert "sections" in schema["properties"]
+    assert "delivery_provider" not in schema["properties"]
+
+
+def test_codex_visual_extractor_uses_images_and_server_owned_v2_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server = object.__new__(CodexAppServer)
+    setattr(server, "_state", "connected")
+    setattr(server, "_lock", threading.RLock())
+    setattr(server, "_extract_lock", threading.Lock())
+    setattr(server, "_workspace", tmp_path)
+    calls: list[tuple[str, dict[str, object], float]] = []
+
+    def fake_call(
+        method: str,
+        params: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        calls.append((method, params, timeout))
+        if method == "thread/start":
+            return {"thread": {"id": "thread-1"}}
+        return {"turn": {"id": "turn-1"}}
+
+    raw = load_utility_sample("bloomington").model_dump(mode="json")
+    raw["fixture_kind"] = "uploaded"
+    raw["document_sha256"] = "a" * 64
+    raw["source_url"] = "https://untrusted.example/claimed-source"
+
+    monkeypatch.setattr(server, "_call", fake_call)
+    monkeypatch.setattr(
+        server,
+        "_wait_for_turn",
+        lambda _turn_id, timeout: ({"status": "completed"}, json.dumps(raw)),
+    )
+    rendered_pages = (
+        RenderedPage(
+            page=1,
+            data_url="data:image/png;base64,iVBORw0KGgo=",
+        ),
+    )
+
+    extracted = server.extract_bill(
+        rendered_pages,
+        "[PAGE 1]\nUNTRUSTED locator text",
+        "f" * 64,
+        1,
+    )
+
+    turn_params = calls[1][1]
+    turn_input = turn_params["input"]
+    assert isinstance(turn_input, list)
+    assert [item["type"] for item in turn_input] == [
+        "text",
+        "text",
+        "image",
+        "text",
+    ]
+    assert turn_input[2]["url"] == rendered_pages[0].data_url
+    assert "UNTRUSTED_NATIVE_TEXT_HINT" in turn_input[-1]["text"]
+    assert turn_params["outputSchema"] == strict_bill_schema()
+    assert extracted.schema_version == "2.0"
+    assert extracted.fixture_kind == "uploaded"
+    assert extracted.document_sha256 == "f" * 64
+    assert extracted.page_count == 1
+    assert extracted.source_url is None
+
+
+def test_codex_visual_extractor_fails_closed_when_disconnected(tmp_path: Path) -> None:
+    server = object.__new__(CodexAppServer)
+    setattr(server, "_state", "disconnected")
+    setattr(server, "_lock", threading.RLock())
+    setattr(server, "_workspace", tmp_path)
+
+    with pytest.raises(CodexNotConnectedError, match="Connect Codex"):
+        server.extract_bill((), "native-only", "f" * 64, 1)
+
+
+def test_unknown_pdf_can_use_a_connected_model_extractor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pdf = tmp_path / "unknown.pdf"
+    pdf.write_bytes(b"%PDF-unknown-native-bill")
+    calls: list[tuple[tuple[int, ...], str, str, int]] = []
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("wattproof.extract._page_count", lambda _path: 1)
+    monkeypatch.setattr(
+        "wattproof.extract._render_pages",
+        lambda _path, _count: (
+            RenderedPage(
+                page=1,
+                data_url="data:image/png;base64,iVBORw0KGgo=",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "wattproof.extract._native_text", lambda _path: "[PAGE 1]\nBill evidence"
+    )
+
+    def model_extractor(
+        rendered_pages: tuple[RenderedPage, ...],
+        native_hint: str,
+        digest: str,
+        page_count: int,
+    ) -> UtilityDocument:
+        calls.append(
+            (
+                tuple(page.page for page in rendered_pages),
+                native_hint,
+                digest,
+                page_count,
+            )
+        )
+        return load_utility_sample("duke")
+
+    result = extract_pdf(pdf, model_extractor)
+
+    assert result == load_utility_sample("duke")
+    assert calls[0][0] == (1,)
+    assert calls[0][1] == "[PAGE 1]\nBill evidence"
+    assert re.fullmatch(r"[a-f0-9]{64}", calls[0][2])
+    assert calls[0][3] == 1
+
+
+def test_unknown_pdf_requires_a_connected_codex_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pdf = tmp_path / "unknown.pdf"
+    pdf.write_bytes(b"%PDF-unknown-native-bill")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(ExtractionLoginRequiredError, match="Connect Codex"):
+        extract_pdf(pdf)
 
 
 def test_authentic_audit_matches_hand_checked_fixture() -> None:
@@ -368,9 +587,11 @@ def test_web_flow_exposes_all_five_steps() -> None:
         assert f"<b>{label}</b>" in page
     for obsolete_label in ("Audit", "Compare", "Act"):
         assert f"<b>{obsolete_label}</b>" not in page
-    assert "GPT-5.6 may read" in page
+    assert "Personal PDFs use a connected Codex session" in page
     assert "Decimal arithmetic handles money" in page
     assert "Local sample mode" not in page
+    assert 'id="codex-connect"' in page
+    assert 'id="codex-dialog"' in page
     assert "logo-mark.png" in page
 
 
@@ -419,6 +640,147 @@ def test_health_check() -> None:
     assert response.get_json() == {"status": "ok"}
 
 
+def test_codex_device_login_status_and_logout_contract() -> None:
+    created: list[_FakeCodexClient] = []
+
+    def factory() -> _FakeCodexClient:
+        client = _FakeCodexClient()
+        created.append(client)
+        return client
+
+    manager = CodexSessionManager(client_factory=factory)
+    client = create_app(manager).test_client()
+
+    rejected = client.post("/api/codex/login")
+    login = client.post(
+        "/api/codex/login", headers={"X-WattProof-Request": "1"}
+    )
+    pending = client.get("/api/codex/status")
+    created[0].is_connected = True
+    connected = client.get("/api/codex/status")
+    logout = client.post(
+        "/api/codex/logout", headers={"X-WattProof-Request": "1"}
+    )
+
+    assert rejected.status_code == 403
+    assert login.status_code == 200
+    assert login.get_json() == {
+        "model": "GPT-5.6 Luna",
+        "state": "pending",
+        "user_code": "ABCD-1234",
+        "verification_url": "https://auth.openai.com/codex/device",
+    }
+    assert pending.get_json()["state"] == "pending"
+    assert connected.get_json()["state"] == "connected"
+    assert connected.get_json()["plan_type"] == "plus"
+    assert logout.get_json() == {"state": "disconnected"}
+    assert created[0].closed is True
+
+
+def test_pending_codex_login_expires_and_destroys_its_client() -> None:
+    fake = _FakeCodexClient()
+    now = [0.0]
+    manager = CodexSessionManager(
+        client_factory=lambda: fake,
+        clock=lambda: now[0],
+    )
+
+    manager.start_login("pending-session")
+    now[0] = 601.0
+    status = manager.status("pending-session")
+
+    assert status.state == "disconnected"
+    assert fake.closed is True
+
+
+def test_connected_codex_session_extracts_an_unknown_upload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeCodexClient()
+    manager = CodexSessionManager(client_factory=lambda: fake)
+    client = create_app(manager).test_client()
+    client.post("/api/codex/login", headers={"X-WattProof-Request": "1"})
+    fake.is_connected = True
+
+    def fake_extract_pdf(
+        _path: Path,
+        visual_extractor: Callable[
+            [tuple[RenderedPage, ...], str, str, int], UtilityDocument
+        ]
+        | None = None,
+    ) -> UtilityDocument:
+        assert visual_extractor is not None
+        pages = tuple(
+            RenderedPage(
+                page=page,
+                data_url="data:image/png;base64,iVBORw0KGgo=",
+            )
+            for page in range(1, load_utility_sample("duke").page_count + 1)
+        )
+        return visual_extractor(
+            pages,
+            "[PAGE 1]\nPrivate bill evidence",
+            "f" * 64,
+            len(pages),
+        )
+
+    monkeypatch.setattr("wattproof.app.extract_pdf", fake_extract_pdf)
+    response = client.post(
+        "/api/extract",
+        data={"bill": (BytesIO(b"%PDF-private"), "private.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["extraction"]["fixture_kind"] == "uploaded"
+    assert fake.extractions == [
+        (
+            tuple(range(1, load_utility_sample("duke").page_count + 1)),
+            "[PAGE 1]\nPrivate bill evidence",
+            "f" * 64,
+            load_utility_sample("duke").page_count,
+        )
+    ]
+
+
+def test_unknown_upload_without_connected_codex_returns_login_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    response = create_app().test_client().post(
+        "/api/extract",
+        data={"bill": (BytesIO(b"%PDF-private"), "private.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["code"] == "codex_login_required"
+    assert "Connect Codex" in response.get_json()["error"]
+
+
+def test_codex_process_failure_returns_controlled_unavailable_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(_path: Path, _visual_extractor: object = None) -> None:
+        raise CodexUnavailableError("Codex could not complete this request.")
+
+    monkeypatch.setattr("wattproof.app.extract_pdf", unavailable)
+    response = create_app().test_client().post(
+        "/api/extract",
+        data={"bill": (BytesIO(b"%PDF-private"), "private.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "code": "codex_unavailable",
+        "error": "Codex could not complete this request.",
+    }
+
+
 def test_web_sample_review_to_audit_api() -> None:
     client = create_app().test_client()
     extraction_response = client.get("/api/sample/authentic")
@@ -433,15 +795,22 @@ def test_web_sample_review_to_audit_api() -> None:
     assert result["review_requests"][0]["requires_user_review"] is True
 
 
-def test_web_upload_uses_known_public_fixture_without_api_key() -> None:
+def test_web_upload_uses_known_public_fixture_without_sign_in() -> None:
     client = create_app().test_client()
     data = (PROJECT_ROOT / "assets/pge-anonymous-3ce-sample-bill.pdf").read_bytes()
-    response = client.post(
+    rejected = client.post(
         "/api/extract",
         data={"bill": (BytesIO(data), "public-sample.pdf")},
         content_type="multipart/form-data",
     )
+    response = client.post(
+        "/api/extract",
+        data={"bill": (BytesIO(data), "public-sample.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
 
+    assert rejected.status_code == 403
     assert response.status_code == 200
     assert response.get_json()["extraction"]["delivery_schedule"]["value"] == "E-TOU-C"
 
@@ -451,12 +820,13 @@ def test_web_upload_returns_provider_neutral_extraction(
 ) -> None:
     monkeypatch.setattr(
         "wattproof.app.extract_pdf",
-        lambda _path: load_utility_sample("duke"),
+        lambda _path, _visual_extractor=None: load_utility_sample("duke"),
     )
     response = create_app().test_client().post(
         "/api/extract",
         data={"bill": (BytesIO(b"%PDF-placeholder"), "duke.pdf")},
         content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
     )
 
     assert response.status_code == 200
@@ -472,4 +842,25 @@ def test_web_validation_returns_reviewable_field() -> None:
     response = client.post("/api/audit", json=extraction)
 
     assert response.status_code == 422
-    assert "peak and off-peak quantities" in response.get_json()["error"]
+    assert "peak and off-peak quantities do not equal total usage" in (
+        response.get_json()["error"]
+    )
+
+
+def test_web_hides_tariff_source_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken_audit(_extraction: BillExtraction) -> AuditResult:
+        raise SourceIntegrityError(
+            "Missing tariff snapshot: /srv/private/rates.pdf",
+            public_message="Missing tariff snapshot for public evidence.",
+        )
+
+    monkeypatch.setattr("wattproof.app.audit_extraction", broken_audit)
+    extraction = load_sample("authentic").model_dump(mode="json")
+    response = create_app().test_client().post("/api/audit", json=extraction)
+
+    assert response.status_code == 503
+    assert response.get_json()["error"] == (
+        "WattProof could not verify its archived tariff evidence. Please try again later."
+    )

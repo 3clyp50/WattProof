@@ -264,3 +264,67 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - Darkened only those numerals from `#eca72c` (1.85:1) to `#765414` (6.16:1 against the paper background), retaining the brighter amber for non-text brand accents. An independent read-only accessibility pass confirmed WCAG AA contrast with no layout, motion, focus, or responsive side effects.
 - GitHub Actions run [`29861714811`](https://github.com/3clyp50/WattProof/actions/runs/29861714811) passed both Python verification jobs and deployed exact commit `c51bf9d314e119c86930c80271499c4b29705af2`.
 - A fresh cache-busted WAVE evaluation of the deployed domain returned **0 errors, 0 contrast errors, 0 alerts, and an AIM score of 10/10**. WAVE correctly retains the intentionally empty alternative text on the decorative logo image as a feature inside the named `WattProof home` link, not an error.
+
+## 2026-07-21 - Origin-anchored error callouts
+
+> **Historical proof scope:** The deployment, browser, and WAVE claims in this section
+> apply to electricity-only commit `52dd69b`. The provider-neutral merge retains the
+> anchored-callout behavior but requires its own post-merge browser and screenshot
+> evidence before equivalent production claims can be made.
+
+### Notification inventory and interaction decision
+
+- A dedicated read-only subagent traced every user-visible notification and every backend string that can reach it. WattProof has exactly one toast-like renderer: the global error surface used by sample, upload, extraction, and audit failures. Synthetic provenance, loading labels, copied-state feedback, verdicts, line statuses, comparison limitations, and the user-review warning are contextual or inline and remain in place.
+- Replaced the detached page-wide error banner with one compact rounded callout that positions above or below the triggering control, clamps within the viewport, and points back with a centered caret. No toast dependency, severity framework, timer, or field-error parser was added.
+- Preserved `role="alert"`, associated the visible text with its trigger through `aria-describedby`, retained or restored trigger focus after synchronous and asynchronous failures, and cleared the relationship on retry, file selection, or step change. Errors remain visible until the user acts rather than disappearing on a timer.
+- Applied the existing corporate motion identity: a 120 ms decelerating position-and-scale entrance with no bounce. The global reduced-motion rule collapses it to `0.01 ms`.
+
+### Error quality and verification
+
+- Cleaned model-level Pydantic wording from `Review : Value error, …` to a direct `Review: …` message. Added a dedicated 503 response for tariff-source integrity failures so an internal filesystem path can never be exposed in the callout.
+- Browser checks covered the no-file error, a long rejected-document explanation, an audit validation failure, an intercepted async sample failure, both above/below caret orientations, scroll and resize tracking, file-selection clearing, keyboard Enter activation, async focus restoration, and a 390 px mobile viewport with no body overflow.
+- The authentic review-to-audit path remains console-clean. Intentional 422/503 test responses create only the browser's expected failed-resource network entry; no JavaScript exception or warning occurs.
+- `make verify` passes with 30 tests, Ruff clean, strict MyPy clean across 10 source files, successful compilation, clean JavaScript syntax, and no whitespace errors.
+- GitHub Actions run [`29867999090`](https://github.com/3clyp50/WattProof/actions/runs/29867999090) passed Python 3.12 and 3.13 verification and deployed exact commit `52dd69bfc42cdcfb580b0f4c5be8ba1c310971d0`.
+- A fresh production WAVE evaluation of `wattproof.tech/?wave=52dd69b` retained **0 errors, 0 contrast errors, 0 alerts, and an AIM score of 10/10**. The deployed missing-PDF interaction also retained button focus, its alert description, correct caret geometry, and zero console messages.
+
+## 2026-07-21 - Continue with Codex
+
+> **Historical proof scope:** The deployment and production checks below apply to
+> electricity-only commit `9533b08`. That release mapped native PDF text into schema
+> 1.0. The provider-neutral merge changes personal extraction to strict schema 2.0
+> multimodal rendered-page input with native text only as an untrusted locator hint;
+> its verification is recorded separately by the merge commit and current test run.
+
+### Human direction and product decision
+
+- The user rejected an API-key-shaped public experience and proposed a much stronger product moment: let a visitor bring existing Codex access into WattProof through OpenAI's official sign-in. The public authentic and labeled-synthetic paths remain instant and local; the connection exists only for a personal native PDF.
+- Removed the legacy operator-side Responses API fallback, its environment variables, and the OpenAI Python SDK dependency. WattProof now has one unambiguous personal-PDF path and no hidden or shared API-key configuration.
+- Official Codex documentation confirmed that App Server custom clients can call `account/login/start` with `chatgptDeviceCode`, receive the one-time `https://auth.openai.com/codex/device` handoff, and observe account notifications. Chose this supported device ceremony instead of copying a CLI credential, inventing an OAuth callback, or adding an API-key field.
+- Selected GPT-5.6 Luna because the current official model guidance specifically positions it for repeatable structured work such as extraction and classification. The model maps evidence; the existing tariff engine still owns every calculation.
+
+### Protocol failures and corrections
+
+- The first schema-constrained App Server extraction was rejected because Pydantic's Decimal regex uses lookaround that the model schema validator does not support. The strict-schema adapter now preserves validation while removing only unsupported lookaround patterns, removing defaults, requiring every property, and denying additional properties. A recursive regression locks that transformation.
+- An initial strict Codex configuration named an unsupported `tools.view_image` key. Removed it, then disabled the supported browser, computer-use, image-generation, shell, unified-exec, multi-agent, plugin, app, hook, memory, goal, and workspace-dependency features instead.
+- A real full-bill Luna turn then completed in roughly 95 seconds with 26 top-level fields, all 28 printed charge lines, the trusted document digest, and zero tool calls. Any future turn that reports command, file-change, MCP, browser, image, collaboration, dynamic-tool, or web-search activity is rejected rather than accepted as extraction evidence.
+
+### Isolation and interface
+
+- Added one Codex App Server process per signed opaque browser session. Every process gets a private temporary `CODEX_HOME`, an empty read-only workspace, a deny-by-default filesystem profile, disabled tool networking and web search, no approvals, and an ephemeral extraction thread. Document content is delimited as untrusted evidence and cannot become instructions.
+- The browser receives only the one-time code, official OpenAI URL, connection state, model label, and plan label. Passwords and tokens never enter browser storage. Production keeps Codex credentials on `/tmp` tmpfs; logout, a hard 10-minute pending-login limit, or 30 minutes of connected inactivity destroys the process and directory. The service admits eight sessions and a background reaper enforces expiry even when no later request arrives.
+- Added a restrained header control, native accessible dialog, copyable device code, connection progress, connected state, disconnect action, concise upload-card status, and exact privacy copy. Desktop and 390 px mobile render cleanly, initial dialog focus lands on Close, Escape works, and the accessibility snapshot exposes the dialog name, code, official link, progress status, and privacy note.
+
+### Verification before deployment
+
+- `make verify` passes with 35 tests, Ruff clean, strict MyPy clean across 11 source files, and successful bytecode compilation. JavaScript syntax and whitespace checks pass.
+- The production image pins the official Codex 0.145.0 standalone release by SHA-256 rather than carrying Node/npm or the unused Python SDK. The resulting image is 185 MB and runs as UID 10001.
+- An exact production-security container smoke (`read_only`, all capabilities dropped, `no-new-privileges`, PID limit, tmpfs) issued a real OpenAI device code, reported pending status, logged out, and left no Codex temporary directory.
+- The browser pass repeated the device-code flow against that container at desktop and mobile sizes, returned the temporary server session to `disconnected`, and recorded zero console errors or warnings. Screenshot evidence replaced the live code with the inert placeholder `ABCD-EFGH` before capture.
+
+### Production verification
+
+- Commit `9533b08aaaa5567c4213c7a242e7dee3a50cf86c` triggered GitHub Actions run [`29871750262`](https://github.com/3clyp50/WattProof/actions/runs/29871750262). Python 3.12 and 3.13 both passed the full gate, and the dependent deployment job placed that exact commit on the VM.
+- The deployed read-only container reports Codex 0.145.0. HTTPS checks confirmed a secure, HTTP-only, SameSite=Lax session cookie; real device-code issuance on the official OpenAI URL; pending status; logout; and the unchanged local authentic fixture.
+- A fresh 390 px production browser pass confirmed the explicit `Continue with Codex — official OpenAI sign-in` accessible name, initial Close focus, Escape behavior, ten- and thirty-minute privacy copy, successful server cleanup, and zero console errors or warnings.
+- A cache-busted WAVE analysis of the deployed release retained **0 errors, 0 contrast errors, 0 alerts, and an AIM score of 10/10**. WAVE also recognizes the new control's explicit label and popup relationship.

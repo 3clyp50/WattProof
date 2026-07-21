@@ -16,6 +16,17 @@
         <img class="brand-logo" src="{{ url_for('static', filename='logo-mark.png') }}" alt="" width="42" height="42">
         <span>WattProof</span>
       </a>
+      <div class="codex-auth" aria-live="polite">
+        <button id="codex-connect" class="codex-connect" type="button" data-codex-connect aria-haspopup="dialog" aria-label="Continue with Codex — official OpenAI sign-in">
+          <span class="codex-spark" aria-hidden="true">✦</span>
+          <span><strong>Continue with Codex</strong><small>Official OpenAI sign-in</small></span>
+        </button>
+        <div id="codex-connected" class="codex-connected" hidden>
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span><strong>Codex connected</strong><small id="codex-plan">GPT-5.6 Luna</small></span>
+          <button id="codex-disconnect" type="button">Disconnect</button>
+        </div>
+      </div>
     </header>
 
     <main id="workspace">
@@ -29,7 +40,10 @@
         </ol>
       </nav>
 
-      <div id="global-message" class="message" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1" hidden></div>
+      <div id="global-message" class="message" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1" hidden>
+        <span class="message-mark" aria-hidden="true">!</span>
+        <span id="global-message-text"></span>
+      </div>
       <div id="bundle-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
       <div id="synthetic-banner" class="synthetic-banner" role="note" hidden></div>
 
@@ -64,6 +78,11 @@
           </div>
 
           <div class="or"><span>or upload a PDF</span></div>
+          <div id="codex-note" class="codex-note">
+            <span class="connection-dot" aria-hidden="true"></span>
+            <span id="codex-note-text">Personal PDFs require your Codex access.</span>
+            <button type="button" data-codex-connect>Connect</button>
+          </div>
           <form id="upload-form" enctype="multipart/form-data">
             <label class="file-target" for="bill-file">
               <span class="file-icon" aria-hidden="true">PDF</span>
@@ -73,7 +92,7 @@
             </label>
             <button class="button dark wide" type="submit">Extract visible bill facts</button>
           </form>
-          <p class="privacy"><strong>How reading works:</strong> known public fixtures run deterministically and keyless. GPT-5.6 may read other PDFs only when an operator configures the structured visual reader. Uploads use a temporary file that is deleted after processing.</p>
+          <p class="privacy"><strong>How reading works:</strong> known public fixtures run deterministically and keyless. Personal PDFs use a connected Codex session to extract strict schema 2.0 facts from rendered pages; there is no native-text-only fallback. Uploads use a temporary file that is deleted after processing, and session state expires after 30 minutes.</p>
         </div>
       </section>
 
@@ -146,6 +165,23 @@
         <div class="form-actions"><button class="button text" type="button" data-back="4">← Household</button><button class="button dark" type="button" id="restart">Start over</button></div>
       </section>
     </main>
+
+    <dialog id="codex-dialog" class="codex-dialog" aria-labelledby="codex-dialog-title">
+      <form method="dialog"><button class="dialog-close" aria-label="Close Codex sign-in">×</button></form>
+      <span class="dialog-kicker"><span aria-hidden="true">✦</span> Codex connection</span>
+      <h2 id="codex-dialog-title">Use the Codex access you already have.</h2>
+      <p>Open the official OpenAI page, sign in, and enter this one-time code. WattProof receives connection status only; the resulting Codex session stays in temporary server memory.</p>
+      <div class="device-code-row">
+        <code id="codex-user-code">••••-••••</code>
+        <button id="copy-codex-code" type="button">Copy code</button>
+      </div>
+      <a id="codex-open-login" class="button dark wide" href="https://auth.openai.com/codex/device" target="_blank" rel="noopener noreferrer">Continue on OpenAI <span aria-hidden="true">↗</span></a>
+      <div id="codex-login-progress" class="codex-login-progress" role="status" aria-live="polite">
+        <span class="waiting-mark" aria-hidden="true"></span>
+        <span>Waiting for OpenAI confirmation…</span>
+      </div>
+      <p class="dialog-privacy">Your password and Codex tokens never enter this page or browser storage. Pending codes expire after 10 minutes; connected server sessions are deleted on disconnect or after 30 minutes.</p>
+    </dialog>
 
     <footer><span>WattProof · evidence-first utility bill review</span><span>Rendered evidence is extracted. Decimal code calculates.</span></footer>
   </body>

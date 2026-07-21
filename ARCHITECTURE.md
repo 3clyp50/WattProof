@@ -1,8 +1,9 @@
 # WattProof architecture
 
-WattProof is one Flask process plus a framework-free browser client. The server is
-stateless across requests; the browser may retain minimized results only for the life
-of the current page.
+WattProof is one Flask service plus a framework-free browser client. The service keeps
+no bill database; only an optional, isolated Codex device-login session survives across
+requests. The browser may retain minimized bill results only for the life of the
+current page.
 
 ```text
 PDF upload or deterministic public sample
@@ -18,8 +19,9 @@ PDF upload or deterministic public sample
           |                     render every PDF page
           |                                |
           |                     GPT-5.6 strict visual mapping
-          |                (rendered images first, native hint last,
-          |                         store=False, no calculation)
+          |              (connected Codex or operator Responses,
+          |               rendered images plus untrusted text hint,
+          |                        no calculation)
           +---------------+----------------+
                           v
         provider-neutral UtilityDocument + evidence review
@@ -71,7 +73,23 @@ repository retains structured facts, visible evidence references, source URLs, a
 hashes; the optional Duke, CenterPoint, and Bloomington PDFs download only into ignored
 `tmp/public-samples/`.
 
-### Configured unknown documents
+### Unknown documents through Codex
+
+A visitor may choose **Continue with Codex** and complete OpenAI's official device-code
+sign-in. WattProof creates one isolated Codex App Server process for the opaque signed
+browser session. An ephemeral GPT-5.6 Luna thread receives ordered rendered PNG data
+URLs plus a bounded, explicitly untrusted native-text locator hint and must return the
+strict `UtilityDocument` schema 2.0. It cannot call tools, choose rates, or calculate
+money. Trusted local code replaces document identity, digest, and page count before
+schema validation.
+
+Each Codex process has a private temporary `CODEX_HOME`, an isolated workspace, no web
+search or tool network, and deny-by-default filesystem permissions. Pending login
+expires after 10 minutes; a connected idle session expires after 30 minutes. Logout or
+expiry closes the process and removes its temporary directory. Passwords and tokens
+never enter browser storage.
+
+### Operator-configured visual fallback
 
 When an operator provides `OPENAI_API_KEY`, GPT-5.6 receives rendered page images in
 page order, followed by the bounded and explicitly untrusted native-text hint. The
@@ -80,9 +98,9 @@ Instructions forbid calculation, repair, invention, and native-only facts. Trust
 local code replaces model-returned fixture identity, digest, and page count before
 schema validation.
 
-Without a configured reader, an unknown document fails with a controlled,
-actionable extraction-unavailable response. The public keyless deployment does not
-spend API credits on arbitrary uploads.
+Without a connected Codex session or configured operator reader, an unknown document
+fails with a controlled sign-in-required or extraction-unavailable response. There is
+no native-text-only downgrade.
 
 ## Provider-neutral core
 
@@ -138,9 +156,12 @@ Duke guide is illustrative evidence for internal tier/rider arithmetic only.
 
 ## Web and household state
 
-`wattproof/app.py` exposes the page, health check, public fixture API, extraction API,
-and audit API. Each upload is processed inside a temporary file and the Flask service
-stores no bill database or account record.
+`wattproof/app.py` exposes the page, health check, public fixture API, Codex
+login/status/logout lifecycle, extraction API, and audit API. Each upload is processed
+inside a temporary file and the Flask service stores no bill database or WattProof
+account record. `wattproof/codex.py` owns the bounded, isolated server-side Codex
+session; the browser receives only connection status, model/plan labels, and the
+one-time OpenAI device-code handoff.
 
 `wattproof/static/app.js` owns the five-step browser journey:
 
@@ -162,7 +183,7 @@ The bundle lives only in JavaScript memory. Refresh, close, **Clear household**,
 ## Deliberately absent
 
 The current architecture has no React/Next.js layer, separate API service, database,
-accounts, queues, persistent household history, provider login, payment flow,
+WattProof accounts, queues, persistent household history, provider login, payment flow,
 automatic messaging, generalized tax engine, nationwide rate catalog, or Duke tariff
 verification. These are not implied by provider-neutral extraction.
 

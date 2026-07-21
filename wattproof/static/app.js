@@ -15,6 +15,12 @@ const state = {
   currentBundleAuditRevision: null,
   replacementBundleId: null,
   replacementArmed: false,
+  codex: {
+    state: "disconnected",
+    planType: null,
+    model: "GPT-5.6 Luna",
+    revision: 0,
+  },
 };
 
 const legacyFactDefinitions = [
@@ -113,29 +119,65 @@ function isAbortError(error) {
   return error?.name === "AbortError";
 }
 
+let messageAnchor = null;
+let messageInput = null;
+
+function positionMessage() {
+  const element = byId("global-message");
+  if (element.hidden || !element.style) return;
+  if (!messageAnchor || typeof messageAnchor.getBoundingClientRect !== "function") {
+    element.removeAttribute("data-side");
+    element.style.top = "24px";
+    const viewportWidth = Number.isFinite(window.innerWidth) ? window.innerWidth : 384;
+    const messageWidth = Number.isFinite(element.offsetWidth) ? element.offsetWidth : 360;
+    element.style.left = `${Math.max(12, Math.round((viewportWidth - messageWidth) / 2))}px`;
+    return;
+  }
+  const anchorRect = messageAnchor.getBoundingClientRect();
+  const messageRect = element.getBoundingClientRect();
+  const margin = 12;
+  const gap = 12;
+  const above = anchorRect.top >= messageRect.height + gap + margin;
+  const top = above ? anchorRect.top - messageRect.height - gap : anchorRect.bottom + gap;
+  const idealLeft = anchorRect.left + (anchorRect.width - messageRect.width) / 2;
+  const left = Math.max(margin, Math.min(idealLeft, window.innerWidth - messageRect.width - margin));
+  const caret = Math.max(20, Math.min(anchorRect.left + anchorRect.width / 2 - left, messageRect.width - 20));
+  element.dataset.side = above ? "above" : "below";
+  element.style.top = `${Math.round(top)}px`;
+  element.style.left = `${Math.round(left)}px`;
+  element.style.setProperty("--caret-left", `${Math.round(caret)}px`);
+}
+
 function showMessage(message = "", input = null) {
   const element = byId("global-message");
-  document.querySelectorAll('[aria-describedby="global-message"]').forEach((field) => {
+  document.querySelectorAll('[aria-describedby="global-message-text"]').forEach((field) => {
     field.removeAttribute("aria-describedby");
     field.removeAttribute("aria-invalid");
   });
-  element.textContent = message;
+  messageInput = message && input ? input : null;
+  messageAnchor = messageInput?.closest?.(".file-target") || messageInput;
+  byId("global-message-text").textContent = message;
   element.hidden = !message;
   if (!message) return;
-  element.scrollIntoView({ block: "center" });
-  element.focus({ preventScroll: true });
-  if (input) {
-    input.setAttribute("aria-invalid", "true");
-    input.setAttribute("aria-describedby", "global-message");
-    input.focus({ preventScroll: true });
+  if (messageInput) {
+    messageInput.setAttribute("aria-invalid", "true");
+    messageInput.setAttribute("aria-describedby", "global-message-text");
+    messageInput.focus?.({ preventScroll: true });
   }
+  positionMessage();
 }
 
-function showError(error) {
+const supportsBrowserEvents = typeof window.addEventListener === "function";
+if (supportsBrowserEvents) {
+  window.addEventListener("resize", positionMessage);
+  window.addEventListener("scroll", positionMessage, true);
+}
+
+function showError(error, fallback = null) {
   const message = safeErrorMessage(error);
   const input = [...document.querySelectorAll("[data-fact-path]")]
     .find((candidate) => message.includes(candidate.dataset.factPath));
-  showMessage(message, input || null);
+  showMessage(message, input || fallback);
 }
 
 function invalidatePendingOperation() {
@@ -229,9 +271,123 @@ async function responseJson(response) {
     const message = typeof payload?.error === "string"
       ? payload.error
       : "The request could not be completed.";
-    throw new Error(message);
+    const error = new Error(message);
+    error.code = typeof payload?.code === "string" ? payload.code : null;
+    error.status = response.status;
+    throw error;
   }
   return payload;
+}
+
+let codexPollTimer = null;
+let codexPollDeadline = 0;
+
+function codexProgress(message, mode = "") {
+  const progress = byId("codex-login-progress");
+  progress.className = `codex-login-progress${mode ? ` ${mode}` : ""}`;
+  progress.querySelector("span:last-child").textContent = message;
+}
+
+function safeCodexVerificationUrl(value) {
+  try {
+    const url = new URL(String(value));
+    return url.protocol === "https:" && url.hostname === "auth.openai.com"
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function stopCodexPolling() {
+  window.clearInterval(codexPollTimer);
+  codexPollTimer = null;
+}
+
+function renderCodexStatus(payload) {
+  const codexState = ["disconnected", "pending", "connected", "failed"].includes(payload?.state)
+    ? payload.state
+    : "disconnected";
+  state.codex.state = codexState;
+  state.codex.planType = typeof payload?.plan_type === "string" ? payload.plan_type : null;
+  state.codex.model = typeof payload?.model === "string" ? payload.model : "GPT-5.6 Luna";
+  const connected = codexState === "connected";
+  byId("codex-connect").hidden = connected;
+  byId("codex-connected").hidden = !connected;
+  const plan = state.codex.planType
+    ? `${state.codex.planType[0].toUpperCase()}${state.codex.planType.slice(1)} · `
+    : "";
+  byId("codex-plan").textContent = `${plan}${state.codex.model}`;
+  byId("codex-note").classList.toggle("connected", connected);
+  byId("codex-note-text").textContent = connected
+    ? `${state.codex.model} is ready to read rendered bill pages.`
+    : codexState === "pending"
+      ? "Codex sign-in is waiting for confirmation."
+      : "Personal PDFs require your Codex access.";
+  byId("codex-note").querySelector("button").hidden = connected;
+
+  if (connected) {
+    codexProgress(`Connected. ${state.codex.model} is ready.`, "connected");
+    stopCodexPolling();
+    window.setTimeout(() => {
+      if (byId("codex-dialog").open) byId("codex-dialog").close();
+    }, 750);
+  } else if (codexState === "failed") {
+    codexProgress("OpenAI could not complete that sign-in. Please try again.", "failed");
+    stopCodexPolling();
+  }
+}
+
+async function refreshCodexStatus() {
+  const revisionAtStart = state.codex.revision;
+  try {
+    const payload = await responseJson(await fetch("/api/codex/status", { cache: "no-store" }));
+    if (revisionAtStart !== state.codex.revision) return;
+    renderCodexStatus(payload);
+    if (codexPollTimer && Date.now() >= codexPollDeadline) {
+      stopCodexPolling();
+      codexProgress("The sign-in code expired. Close this window and try again.", "failed");
+    }
+  } catch {
+    if (revisionAtStart !== state.codex.revision) return;
+    if (codexPollTimer) codexProgress("Connection check interrupted. Retrying…");
+  }
+}
+
+function pollCodexStatus() {
+  stopCodexPolling();
+  codexPollDeadline = Date.now() + 10 * 60 * 1000;
+  codexPollTimer = window.setInterval(refreshCodexStatus, 1500);
+}
+
+async function startCodexLogin(button) {
+  state.codex.revision += 1;
+  const revisionAtStart = state.codex.revision;
+  showMessage();
+  setLoading(button, true, "Opening secure sign-in…");
+  try {
+    const payload = await responseJson(await fetch("/api/codex/login", {
+      method: "POST",
+      headers: { "X-WattProof-Request": "1" },
+    }));
+    if (revisionAtStart !== state.codex.revision) return;
+    const verificationUrl = safeCodexVerificationUrl(payload.verification_url);
+    if (!verificationUrl || typeof payload.user_code !== "string") {
+      throw new Error("OpenAI returned an invalid sign-in response.");
+    }
+    renderCodexStatus({ ...payload, plan_type: null });
+    byId("codex-user-code").textContent = payload.user_code;
+    byId("codex-open-login").href = verificationUrl;
+    codexProgress("Waiting for OpenAI confirmation…");
+    const dialog = byId("codex-dialog");
+    if (!dialog.open) dialog.showModal();
+    pollCodexStatus();
+  } catch (error) {
+    if (revisionAtStart !== state.codex.revision) return;
+    showMessage(safeErrorMessage(error), button);
+  } finally {
+    setLoading(button, false, "");
+  }
 }
 
 function statusLabel(status) {
@@ -643,7 +799,7 @@ async function loadSample(kind, button) {
     showStep(2);
   } catch (error) {
     if (!isCurrentOperation(operation) || isAbortError(error)) return;
-    showError(error);
+    showError(error, button);
   } finally {
     finishOperation(operation);
   }
@@ -1220,6 +1376,53 @@ function requestText(index) {
   return `Subject: ${byId(`letter-subject-${index}`).value}\n\n${byId(`letter-body-${index}`).value}`;
 }
 
+document.querySelectorAll("[data-codex-connect]").forEach((button) => {
+  button.addEventListener?.("click", () => startCodexLogin(button));
+});
+
+byId("codex-disconnect").addEventListener?.("click", async (event) => {
+  const button = event.currentTarget;
+  state.codex.revision += 1;
+  const revisionAtStart = state.codex.revision;
+  button.disabled = true;
+  try {
+    const payload = await responseJson(await fetch("/api/codex/logout", {
+      method: "POST",
+      headers: { "X-WattProof-Request": "1" },
+    }));
+    if (revisionAtStart !== state.codex.revision) return;
+    stopCodexPolling();
+    renderCodexStatus({ ...payload, model: "GPT-5.6 Luna", plan_type: null });
+  } catch (error) {
+    if (revisionAtStart !== state.codex.revision) return;
+    showMessage(safeErrorMessage(error), button);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+byId("copy-codex-code").addEventListener?.("click", async (event) => {
+  const button = event.currentTarget;
+  const code = byId("codex-user-code").textContent;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(code);
+    copied = true;
+  } catch {
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(byId("codex-user-code"));
+      selection.removeAllRanges();
+      selection.addRange(range);
+      copied = document.execCommand("copy");
+      selection.removeAllRanges();
+    }
+  }
+  button.textContent = copied ? "Copied" : "Copy manually";
+  window.setTimeout(() => { button.textContent = "Copy code"; }, 1800);
+});
+
 byId("authentic-sample").addEventListener("click", (event) => loadSample("authentic", event.currentTarget));
 byId("synthetic-sample").addEventListener("click", (event) => loadSample("synthetic", event.currentTarget));
 byId("duke-sample").addEventListener("click", (event) => loadSample("duke", event.currentTarget));
@@ -1246,12 +1449,16 @@ byId("upload-form").addEventListener("submit", async (event) => {
   const operation = beginOperation(() => setLoading(button, false, ""));
   releasePreview();
   state.previewUrl = URL.createObjectURL(file);
-  setLoading(button, true, "Reading rendered pages…");
+  const loadingLabel = state.codex.state === "connected"
+    ? "Codex is mapping rendered evidence…"
+    : "Reading rendered pages…";
+  setLoading(button, true, loadingLabel);
   try {
     const form = new FormData();
     form.append("bill", file);
     const payload = await responseJson(await fetch("/api/extract", {
       method: "POST",
+      headers: { "X-WattProof-Request": "1" },
       body: form,
       signal: operation.controller.signal,
     }));
@@ -1262,10 +1469,15 @@ byId("upload-form").addEventListener("submit", async (event) => {
   } catch (error) {
     if (!isCurrentOperation(operation) || isAbortError(error)) return;
     const message = safeErrorMessage(error);
+    const loginRequired = error?.code === "codex_login_required";
     finishOperation(operation);
     prepareForNewDocument();
     showStep(1);
-    showMessage(message, byId("bill-file"));
+    if (loginRequired) {
+      await startCodexLogin(byId("codex-connect"));
+    } else {
+      showMessage(message, byId("bill-file"));
+    }
   } finally {
     finishOperation(operation);
   }
@@ -1305,7 +1517,7 @@ byId("review-form").addEventListener("submit", async (event) => {
   } catch (error) {
     if (!isCurrentOperation(operation) || isAbortError(error)) return;
     finishOperation(operation);
-    showError(error);
+    showError(error, button);
   } finally {
     finishOperation(operation);
   }
@@ -1377,3 +1589,5 @@ byId("restart").addEventListener("click", () => {
   clearHousehold();
   window.location.reload();
 });
+
+if (supportsBrowserEvents) refreshCodexStatus();

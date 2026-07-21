@@ -23,6 +23,7 @@ from wattproof.extract import (
     MAX_RENDERED_PAGE_BYTES,
     MODEL_MAX_RETRIES,
     MODEL_REQUEST_TIMEOUT_SECONDS,
+    ExtractionLoginRequiredError,
     ExtractionUnavailableError,
     InvalidDocumentError,
     RenderedPage,
@@ -205,7 +206,7 @@ def test_unknown_pdf_without_api_key_stops_before_poppler(
     for name in ("_page_count", "_render_pages", "_native_text", "_extract_with_gpt"):
         monkeypatch.setattr(f"wattproof.extract.{name}", unexpected_expensive_call)
 
-    with pytest.raises(ExtractionUnavailableError, match="OPENAI_API_KEY"):
+    with pytest.raises(ExtractionLoginRequiredError, match="Connect Codex"):
         extract_pdf(candidate)
 
 
@@ -437,9 +438,16 @@ def test_native_text_keeps_short_and_empty_pages_as_labeled_hints(
 def test_native_text_hint_is_capped_at_one_hundred_thousand_characters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _call, processes = _install_live_output_process(
+    script = """
+import sys
+
+sys.stdout.buffer.write(b"x" * int(sys.argv[1]))
+sys.stdout.buffer.flush()
+"""
+    _call, processes = _install_live_process(
         monkeypatch,
-        b"x" * 120_000,
+        script,
+        lambda _command: ["120000"],
     )
 
     try:

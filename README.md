@@ -1,5 +1,12 @@
 # WattProof
 
+[![Verify](https://github.com/3clyp50/WattProof/actions/workflows/verify.yml/badge.svg)](https://github.com/3clyp50/WattProof/actions/workflows/verify.yml)
+
+**Live demo:** [wattproof.tech](https://wattproof.tech). All five public sample paths
+are deterministic and need no sign-in. For a personal PDF, **Continue with Codex**
+opens OpenAI's official device sign-in; WattProof never asks for an API key or
+password in the browser.
+
 WattProof is an evidence-first residential utility-bill checker. It reads visible
 statement evidence, reproduces printed arithmetic with deterministic `Decimal` code,
 and applies published tariffs only when an exact, period-bound adapter matches.
@@ -88,6 +95,7 @@ Requirements:
 
 - Python 3.12 or newer
 - Poppler command-line tools: `pdfinfo`, `pdftotext`, and `pdftoppm`
+- Optional for personal PDFs: the Codex CLI and a Codex-enabled ChatGPT account
 - Node.js and Chrome/Chromium/Edge only for the opt-in real-browser test
 
 On Ubuntu or Debian, install Poppler with:
@@ -117,9 +125,29 @@ IDs; provider display names remain so each summary can be identified. Refresh, c
 **Clear household**, or **Start over** removes it. Provider review drafts remain
 separate and WattProof never sends them.
 
-## Optional unknown-document reading
+## Personal PDFs with Continue with Codex
 
-Unknown documents require an operator-configured OpenAI key:
+Install the same Codex release pinned by the production image:
+
+```bash
+npm install --global @openai/codex@0.145.0
+```
+
+Choose **Continue with Codex**. WattProof requests a one-time device code and sends the
+visitor to the official `auth.openai.com` page. The browser receives connection status,
+not a password or token. A connected GPT-5.6 Luna session maps ordered rendered page
+images into strict provider-neutral schema 2.0 output. Native PDF text is supplied only
+as an explicitly untrusted locator hint; there is no native-text-only fallback.
+
+Codex runs in an isolated, temporary server-side session with an ephemeral extraction
+thread and no tool or network authority. Pending codes expire after 10 minutes;
+connected idle sessions expire after 30 minutes. Disconnect or expiry closes the
+process and removes its private temporary directory. The model maps evidence only;
+trusted `Decimal` code still performs every calculation.
+
+## Optional operator visual fallback
+
+An operator may separately configure the Responses API visual reader:
 
 ```bash
 read -rsp "OpenAI API key: " OPENAI_API_KEY && printf '\n'
@@ -134,9 +162,8 @@ and `store=False`. The model maps visible evidence into typed fields; it does no
 calculate, repair facts, invent operands, or supply tariff rates. Trusted local code
 replaces document metadata and performs every calculation.
 
-The public keyless deployment intentionally accepts only hash-known deterministic
-fixtures. An unknown bill receives a controlled extraction-unavailable response when
-the visual reader is not configured.
+Without a connected Codex session or configured operator reader, an unknown bill gets
+a controlled sign-in-required or extraction-unavailable response.
 
 ## CLI proof
 
@@ -190,7 +217,8 @@ make verify
 This runs pytest, Ruff, strict MyPy with the Pydantic plugin, and bytecode compilation.
 The suite covers schema validation, rendered-page extraction bounds, native-text
 conflicts, deterministic fixtures, exact adapter matching, reconciliation, privacy,
-async browser state, hostile markup, and the five-step web contract.
+the Codex device-login/session lifecycle, async browser state, hostile markup, and the
+five-step web contract.
 
 Run the actual Chromium smoke test explicitly:
 
@@ -224,13 +252,15 @@ PDF → preflight → render every page → provider-neutral evidence review
 Important modules:
 
 - `wattproof/extract.py` owns bounded PDF inspection, rendering, known-hash routing,
-  and the configured GPT-5.6 visual extraction contract.
+  and the GPT-5.6 visual extraction contract.
+- `wattproof/codex.py` owns official device login, isolated App Server sessions,
+  strict schema 2.0 output, resource limits, and automatic cleanup.
 - `wattproof/utility_models.py` defines the provider-neutral schema and audit result.
 - `wattproof/reconcile.py` performs generic `Decimal` statement checks.
 - `wattproof/adapters.py` contains the exact PG&E/3CE tariff adapter registry.
 - `wattproof/audit_service.py` routes both legacy and provider-neutral documents.
-- `wattproof/app.py` serves stateless request handlers; `wattproof/static/app.js` owns
-  the current-page household state.
+- `wattproof/app.py` serves request handlers and the temporary Codex session lifecycle;
+  `wattproof/static/app.js` owns the current-page household state.
 
 The full rationale and trust boundaries are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -254,8 +284,11 @@ effective period, source hash, or support claim.
 - Uploaded bytes live in a temporary file and are deleted when extraction ends.
 - Raw documents, rendered pages, account identity, and model inputs are not persisted
   by WattProof.
-- Unknown documents reach OpenAI only when the operator supplies a key; response
-  storage is disabled with `store=False`.
+- Codex sign-in happens only on OpenAI's official page. Passwords and tokens never
+  enter the WattProof page or browser storage; server-side session files are temporary
+  and removed on disconnect or expiry.
+- Unknown documents reach GPT-5.6 only through a visitor-connected Codex session or an
+  operator-configured Responses reader. The Responses fallback uses `store=False`.
 - Review requests require user review, remain editable in page memory, and are never
   sent automatically.
 - WattProof asks for clarification or correction; it does not accuse a provider,

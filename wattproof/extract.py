@@ -9,6 +9,7 @@ import selectors
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -81,6 +82,12 @@ class ExtractionUnavailableError(RuntimeError):
     pass
 
 
+class ExtractionLoginRequiredError(ExtractionUnavailableError):
+    """An unknown document needs an authenticated visual model session."""
+
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class RenderedPage:
     page: int
@@ -89,6 +96,12 @@ class RenderedPage:
     def __post_init__(self) -> None:
         if self.page < 1:
             raise ValueError("Rendered page numbers are one-based.")
+
+
+VisualExtractor = Callable[
+    [tuple[RenderedPage, ...], str, str, int],
+    UtilityDocument,
+]
 
 
 def _stop_process(process: subprocess.Popen[bytes]) -> None:
@@ -432,19 +445,12 @@ def _render_pages(path: Path, page_count: int) -> tuple[RenderedPage, ...]:
             _stop_process(process)
 
 
-def _extract_with_gpt(
+def _validate_rendered_pages(
     rendered_pages: tuple[RenderedPage, ...],
-    native_hint: str,
-    document_sha256: str,
     *,
     page_count: int,
-) -> UtilityDocument:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ExtractionUnavailableError(
-            "Set OPENAI_API_KEY to extract an unknown utility document, or use a "
-            "known local sample."
-        )
+) -> tuple[RenderedPage, ...]:
+    """Validate and return rendered pages in trusted one-based page order."""
 
     ordered_pages = tuple(sorted(rendered_pages, key=lambda rendered: rendered.page))
     expected_page_numbers = list(range(1, page_count + 1))
@@ -470,6 +476,27 @@ def _extract_with_gpt(
             raise InvalidDocumentError(
                 f"Rendered page {page.page} must use a valid PNG data URL."
             )
+    return ordered_pages
+
+
+def _extract_with_gpt(
+    rendered_pages: tuple[RenderedPage, ...],
+    native_hint: str,
+    document_sha256: str,
+    *,
+    page_count: int,
+) -> UtilityDocument:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ExtractionUnavailableError(
+            "Set OPENAI_API_KEY to extract an unknown utility document, or use a "
+            "known local sample."
+        )
+
+    ordered_pages = _validate_rendered_pages(
+        rendered_pages,
+        page_count=page_count,
+    )
 
     content = [
         {"type": "input_image", "image_url": page.data_url}
@@ -535,7 +562,10 @@ def _extract_with_gpt(
         ) from None
 
 
-def extract_pdf(path: str | Path) -> BillExtraction | UtilityDocument:
+def extract_pdf(
+    path: str | Path,
+    visual_extractor: VisualExtractor | None = None,
+) -> BillExtraction | UtilityDocument:
     pdf_path = Path(path)
     if not pdf_path.is_file():
         raise InvalidDocumentError("The selected file does not exist.")
@@ -557,10 +587,11 @@ def extract_pdf(path: str | Path) -> BillExtraction | UtilityDocument:
         return load_utility_sample(known_utility)
     if digest in REJECTED_DOCUMENTS:
         raise UnsupportedDocumentError(REJECTED_DOCUMENTS[digest])
-    if not os.getenv("OPENAI_API_KEY"):
-        raise ExtractionUnavailableError(
-            "Set OPENAI_API_KEY to extract an unknown utility document, or use a "
-            "known local sample."
+    use_operator_model = bool(os.getenv("OPENAI_API_KEY"))
+    if visual_extractor is None and not use_operator_model:
+        raise ExtractionLoginRequiredError(
+            "This bill needs model-assisted visual extraction. Connect Codex in "
+            "WattProof, or use a verified public sample."
         )
 
     if not _EXTRACTION_SLOTS.acquire(blocking=False):
@@ -574,6 +605,9 @@ def extract_pdf(path: str | Path) -> BillExtraction | UtilityDocument:
             raise InvalidDocumentError(f"PDFs are limited to {MAX_PAGES} pages.")
         rendered_pages = _render_pages(pdf_path, pages)
         native_hint = _native_text(pdf_path)
+        if visual_extractor is not None:
+            _validate_rendered_pages(rendered_pages, page_count=pages)
+            return visual_extractor(rendered_pages, native_hint, digest, pages)
         return _extract_with_gpt(
             rendered_pages,
             native_hint,
