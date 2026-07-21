@@ -31,6 +31,17 @@ _DECIMAL_SPELLING = re.compile(
 )
 
 
+class RawJSONDecimal(Decimal):
+    """Exact raw JSON decimal/exponent token retaining its lexical provenance."""
+
+    json_token: str
+
+    def __new__(cls, token: str) -> RawJSONDecimal:
+        value = super().__new__(cls, token)
+        value.json_token = token
+        return value
+
+
 def abs_exact(value: Decimal) -> Decimal:
     """Return a Decimal magnitude without applying the ambient context."""
 
@@ -165,6 +176,11 @@ def _validate_integer_input(value: object) -> int:
         raise ValueError(
             "utility-bill integer cannot accept a binary float; use an exact "
             "integer, Decimal, or numeric spelling"
+        )
+    if isinstance(value, RawJSONDecimal):
+        raise ValueError(
+            "utility-bill integer requires an integer JSON token; decimal-point "
+            "or exponent JSON tokens are not accepted"
         )
     if isinstance(value, Decimal):
         return _exact_integer(value)

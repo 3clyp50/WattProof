@@ -1,4 +1,17 @@
 from wattproof.app import create_app
+from wattproof.utility_fixtures import CENTERPOINT_HIDDEN_TEXT_WARNING
+
+
+def test_centerpoint_sample_api_exposes_rendered_evidence_warning_before_audit() -> None:
+    client = create_app().test_client()
+
+    response = client.get("/api/sample/centerpoint")
+
+    assert response.status_code == 200
+    extraction = response.get_json()["extraction"]
+    assert extraction["warnings"] == [CENTERPOINT_HIDDEN_TEXT_WARNING]
+    assert extraction["sections"][0]["usage"]["value"] == "112.277"
+    assert extraction["current_charges"]["value"] == "132.19"
 
 
 def test_audit_api_rejects_duplicate_conversion_ids_without_a_server_error() -> None:

@@ -10,7 +10,10 @@ from pydantic import BaseModel
 
 import wattproof.utility_fixtures as fixture_module
 from wattproof.reconcile import reconcile_document
-from wattproof.utility_fixtures import load_utility_sample
+from wattproof.utility_fixtures import (
+    CENTERPOINT_HIDDEN_TEXT_WARNING,
+    load_utility_sample,
+)
 from wattproof.utility_models import (
     CalculationSpec,
     DateFactV2,
@@ -26,7 +29,6 @@ from wattproof.utility_models import (
 )
 
 UtilitySampleKind = Literal["duke", "centerpoint", "bloomington"]
-
 _PRIVATE_EVIDENCE_MARKERS = (
     "sample",
     "sally",
@@ -602,6 +604,7 @@ def test_centerpoint_fixture_uses_only_rendered_gas_values_and_reconciles() -> N
     assert gas.subtotal.value == Decimal("132.19")
     assert document.current_charges.value == Decimal("132.19")
     assert document.amount_due.value == Decimal("132.19")
+    assert document.warnings == (CENTERPOINT_HIDDEN_TEXT_WARNING,)
 
     result = reconcile_document(document)
     lines = {line.id: line for line in result.lines}
@@ -955,7 +958,7 @@ def test_bloomington_material_facts_have_exact_golden_evidence() -> None:
 
 
 @pytest.mark.parametrize(
-    ("kind", "source_url", "digest", "page_count"),
+    ("kind", "source_url", "digest", "page_count", "warnings"),
     [
         (
             "duke",
@@ -963,6 +966,7 @@ def test_bloomington_material_facts_have_exact_golden_evidence() -> None:
             "260482-bill-tutorial-handout-res-dei.pdf",
             "b131c36a215762796e72f3d20986fbea7e64e2dd611081d8936f8442102c3e9a",
             3,
+            (),
         ),
         (
             "centerpoint",
@@ -970,6 +974,7 @@ def test_bloomington_material_facts_have_exact_golden_evidence() -> None:
             "bill-guides/240312-20-EIP-IN%20Gas-bill-guide.pdf",
             "c0b7d9b0252226078b39d6760308506c28b388729906d3ac54db950b9f819262",
             2,
+            (CENTERPOINT_HIDDEN_TEXT_WARNING,),
         ),
         (
             "bloomington",
@@ -977,6 +982,7 @@ def test_bloomington_material_facts_have_exact_golden_evidence() -> None:
             "Understanding%20Your%20Water%20Bill%202026%20Accessible.pdf",
             "a414c296e3dd71a08aa459bb1a7c38fcdeab0c90aa0bb05f7c4e39ae9d70b79c",
             1,
+            (),
         ),
     ],
 )
@@ -985,6 +991,7 @@ def test_public_fixture_metadata_and_rendered_evidence_are_exact(
     source_url: str,
     digest: str,
     page_count: int,
+    warnings: tuple[str, ...],
 ) -> None:
     document = load_utility_sample(kind)
 
@@ -994,7 +1001,7 @@ def test_public_fixture_metadata_and_rendered_evidence_are_exact(
     assert document.source_url == source_url
     assert document.document_sha256 == digest
     assert document.page_count == page_count
-    assert document.warnings == ()
+    assert document.warnings == warnings
 
     evidence_refs = [
         value for value in nested_values(document) if isinstance(value, EvidenceRef)

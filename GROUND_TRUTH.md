@@ -211,6 +211,10 @@ are explicit exclusions: they must not enter fixture facts, warnings, evidence
 excerpts, calculations, or the audited statement. This is why rendered pixels are
 authoritative and embedded text is only an untrusted hint.
 
+The Review step surfaces the existence of that conflict and states that rendered-page
+evidence took precedence. The warning does not repeat or ingest any excluded hidden
+value.
+
 Limitation: the visible printed conversion, charges, and tax base support internal
 math. No independent CenterPoint tariff source is attached, so this fixture does not
 support a tariff claim.

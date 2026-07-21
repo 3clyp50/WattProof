@@ -56,7 +56,8 @@ misses:
 - **CenterPoint Energy Indiana gas:** the rendered statement shows `108 CCF × 1.03960
   = 112.277 therms` and `$132.19`. Its native text layer also contains an invisible,
   conflicting `$134.69` combined example. WattProof excludes that native-only example,
-  including its `534 kWh` and `6.326 therm` values.
+  including its `534 kWh` and `6.326 therm` values. Review visibly warns that rendered
+  evidence took precedence without importing the hidden values.
 - **City of Bloomington water:** the explanatory wrapper has native text, while the
   actual statement is a raster image. Rendering exposes the water, wastewater,
   stormwater, sanitation, and `$51.92` total that a native-text threshold would miss.

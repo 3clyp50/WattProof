@@ -144,6 +144,85 @@ def _raw_page_body(target: PageTarget, token: str) -> str:
 @pytest.mark.parametrize(
     ("target", "token", "expected_location"),
     (
+        ("legacy_source_page", "4.0", "total_usage.source_page"),
+        ("legacy_source_page", "4e0", "total_usage.source_page"),
+        ("legacy_page_count", "6.0", "page_count"),
+        ("legacy_page_count", "6e0", "page_count"),
+        ("v2_evidence_page", "1.0", "sections.0.provider.evidence.page"),
+        ("v2_evidence_page", "1e0", "sections.0.provider.evidence.page"),
+        ("v2_page_count", "6.0", "page_count"),
+        ("v2_page_count", "6e0", "page_count"),
+    ),
+)
+def test_api_rejects_lexical_json_decimal_tokens_for_integer_page_fields(
+    target: PageTarget,
+    token: str,
+    expected_location: str,
+) -> None:
+    response = create_app().test_client().post(
+        "/api/audit",
+        data=_raw_page_body(target, token),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 422
+    assert response.is_json
+    error = response.get_json()["error"]
+    assert expected_location in error
+    assert "integer JSON token" in error
+    assert "Traceback" not in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    ("target", "token"),
+    (
+        ("legacy_source_page", "4"),
+        ("legacy_page_count", "6"),
+        ("v2_evidence_page", "1"),
+        ("v2_page_count", "6"),
+    ),
+)
+def test_api_accepts_lexical_json_integer_tokens_for_page_fields(
+    target: PageTarget,
+    token: str,
+) -> None:
+    response = create_app().test_client().post(
+        "/api/audit",
+        data=_raw_page_body(target, token),
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+
+
+def test_page_token_provenance_does_not_round_raw_decimal_fields() -> None:
+    body = _raw_page_body("v2_page_count", "6")
+    payload = json.loads(body)
+    payload["sections"][0]["charges"][1]["amount"]["evidence"][
+        "confidence"
+    ] = "__RAW_DECIMAL__"
+    encoded = json.dumps(payload, separators=(",", ":")).replace(
+        '"__RAW_DECIMAL__"',
+        "0.123456789012345678",
+    )
+
+    response = create_app().test_client().post(
+        "/api/audit",
+        data=encoded,
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    charge = next(
+        line for line in response.get_json()["audit"]["lines"]
+        if line["id"] == "charge::energy_tier_1"
+    )
+    assert charge["evidence"][2]["confidence"] == "0.123456789012345678"
+
+
+@pytest.mark.parametrize(
+    ("target", "token", "expected_location"),
+    (
         ("legacy_source_page", "4.5", "total_usage.source_page"),
         ("legacy_page_count", "1e-1", "page_count"),
         (

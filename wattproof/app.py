@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from decimal import Decimal, DecimalException
+from decimal import DecimalException
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
@@ -22,6 +22,7 @@ from .extract import (
 )
 from .fixtures import PROJECT_ROOT, load_sample
 from .models import BillExtraction
+from .numeric import RawJSONDecimal
 from .tariffs import SourceIntegrityError
 from .utility_fixtures import load_utility_sample
 from .utility_models import UtilityDocument
@@ -37,11 +38,11 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"non-standard JSON number: {value}")
 
 
-def _parse_json_decimal(value: str) -> Decimal:
+def _parse_json_decimal(value: str) -> RawJSONDecimal:
     if len(value) > MAX_AUDIT_JSON_NUMBER_CHARACTERS:
         raise ValueError("JSON number is too long")
     try:
-        return Decimal(value)
+        return RawJSONDecimal(value)
     except DecimalException as error:
         raise ValueError("JSON decimal is outside the supported parser range") from error
 

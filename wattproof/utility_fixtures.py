@@ -20,6 +20,12 @@ from .utility_models import (
     UtilityDocument,
 )
 
+CENTERPOINT_HIDDEN_TEXT_WARNING = (
+    "Rendered/native text conflict: this PDF's hidden native-text layer disagrees "
+    "with the visible CenterPoint statement. WattProof used rendered-page evidence "
+    "and excluded all conflicting hidden-text values from this review."
+)
+
 
 def _evidence(page: int, text: str) -> EvidenceRef:
     return EvidenceRef(
@@ -482,6 +488,7 @@ def _centerpoint_document() -> UtilityDocument:
             "Total Current Gas Charges $132.19",
         ),
         amount_due=_money_fact("132.19", 2, "AMOUNT DUE $132.19"),
+        warnings=(CENTERPOINT_HIDDEN_TEXT_WARNING,),
     )
 
 
