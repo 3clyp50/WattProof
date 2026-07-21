@@ -289,8 +289,10 @@ def test_web_flow_exposes_all_five_steps() -> None:
     page = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    for label in ("Upload", "Review", "Audit", "Compare", "Act"):
+    for label in ("Upload", "Review", "Verify", "Household", "Next steps"):
         assert f"<b>{label}</b>" in page
+    for obsolete_label in ("Audit", "Compare", "Act"):
+        assert f"<b>{obsolete_label}</b>" not in page
     assert "GPT-5.6 may read" in page
     assert "Decimal arithmetic handles money" in page
 

@@ -30,7 +30,7 @@
         </ol>
       </nav>
 
-      <div id="global-message" class="message" role="alert" hidden></div>
+      <div id="global-message" class="message" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1" hidden></div>
       <div id="synthetic-banner" class="synthetic-banner" role="note" hidden></div>
 
       <section class="step-panel upload-panel" data-step="1" aria-labelledby="upload-title">
@@ -50,7 +50,7 @@
           <h2>Begin with a public bill</h2>
           <p>PG&amp;E delivery + 3CE generation · E-TOU-C · Dec 2022</p>
           <button class="button primary wide" id="authentic-sample" type="button">
-            <b>Audit</b> authentic sample <span aria-hidden="true">→</span>
+            Audit authentic sample <span aria-hidden="true">→</span>
           </button>
           <button class="button secondary wide" id="synthetic-sample" type="button">
             Detect a labeled $5 synthetic error
@@ -103,7 +103,7 @@
       <section class="step-panel" data-step="3" aria-labelledby="verify-title" hidden>
         <div class="section-heading result-heading">
           <div><p class="eyebrow">Evidence-bound result</p><h1 id="verify-title" tabindex="-1">Verification result</h1></div>
-          <p>Internal reconciliation reproduces printed math. <b>Compare</b> plans only when an exact provider, jurisdiction, schedule, and billing-period tariff adapter applies.</p>
+          <p>Internal reconciliation reproduces printed math. Tariff verification appears only when an exact provider, jurisdiction, schedule, and billing-period adapter applies.</p>
         </div>
         <div id="verification-level" class="verification-level" aria-live="polite"></div>
         <div id="verdict-card" class="verdict-card"></div>
@@ -141,7 +141,7 @@
 
       <section class="step-panel" data-step="5" aria-labelledby="next-steps-title" hidden>
         <div class="section-heading">
-          <div><p class="eyebrow"><b>Act</b> on evidence</p><h1 id="next-steps-title" tabindex="-1">Provider review requests</h1></div>
+          <div><p class="eyebrow">Evidence into action</p><h1 id="next-steps-title" tabindex="-1">Provider review requests</h1></div>
           <p>Each draft is grounded to its provider and audit lines. Review every word and add account-safe details yourself; WattProof never sends a message.</p>
         </div>
         <div id="provider-review-requests" class="provider-review-requests"></div>

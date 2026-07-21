@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 from html import escape
+from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
@@ -23,6 +24,32 @@ from wattproof.utility_models import UtilityAuditResult, UtilityDocument
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_JAVASCRIPT = PROJECT_ROOT / "wattproof" / "static" / "app.js"
+
+
+class _MarkupProbe(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tags: list[str] = []
+        self.attributes: list[tuple[str, str | None]] = []
+        self.text: list[str] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        self.tags.append(tag)
+        self.attributes.extend(attrs)
+
+    def handle_startendtag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_data(self, data: str) -> None:
+        self.text.append(data)
 
 REAL_BROWSER_HARNESS = r"""
 const fs = require("node:fs");
@@ -270,6 +297,16 @@ async function main() {
         };
       })()`);
 
+      let correction = null;
+      if (sample === "duke") {
+        await evaluate(`(() => {
+          const input = document.getElementById("fact-sections-0-usage");
+          input.value = "1002";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          return true;
+        })()`);
+      }
+
       await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
       await waitFor(`(() => {
         const panel = document.querySelector('[data-step="3"]');
@@ -300,6 +337,27 @@ async function main() {
         };
       })()`);
 
+      if (sample === "duke") {
+        await evaluate(`document.querySelector('[data-step="3"] [data-back="2"]').click(); true`);
+        await waitFor(`!document.querySelector('[data-step="2"]').hidden
+          && document.activeElement?.id === "review-title"`);
+        correction = await evaluate(`(() => {
+          const input = document.getElementById("fact-sections-0-usage");
+          const field = input.closest(".fact-field");
+          return {
+            value: input.value,
+            badge: field.querySelector(".evidence-type").textContent.trim(),
+            note: field.querySelector(".correction-note")?.textContent.trim() || "",
+            evidenceText: field.querySelector(".fact-evidence")?.textContent || "",
+          };
+        })()`);
+        await evaluate(
+          `document.querySelector('#review-form button[type="submit"]').click(); true`,
+        );
+        await waitFor(`!document.querySelector('[data-step="3"]').hidden
+          && document.activeElement?.id === "verify-title"`);
+      }
+
       await clickById("finish-household-review");
       await waitFor(`!document.querySelector('[data-step="4"]').hidden
         && document.activeElement?.id === "household-title"`);
@@ -319,7 +377,7 @@ async function main() {
           pageErrors: [...window.__wattproofBrowserErrors],
         };
       })()`);
-      return { sample, identity, review, result, requests };
+      return { sample, identity, review, result, requests, correction };
     }
 
     const flows = [];
@@ -375,11 +433,43 @@ async function main() {
       };
     })()`);
 
+    const hostileDom = await evaluate(`new Promise((resolve) => {
+      window.__wattproofHostileEvent = 0;
+      const marker = "<img id=hostile-real src=x onerror=window.__wattproofHostileEvent+=1>";
+      state.extraction.sections[0].provider.value = marker;
+      state.extraction.sections[0].subtotal.currency = marker;
+      state.audit.lines[0].status = "discrepancy";
+      state.audit.lines[0].label = marker;
+      state.audit.lines[0].unit = marker;
+      state.audit.lines[0].formula = marker;
+      state.audit.lines[0].evidence = [{ page: marker, text: marker }];
+      state.audit.lines[0].citations = [{
+        label: marker,
+        source_url: "javascript:window.__wattproofHostileEvent+=10",
+      }];
+      state.audit.review_requests = [{
+        provider: marker,
+        subject: marker,
+        body: marker,
+        grounded_audit_line_ids: [state.audit.lines[0].id],
+      }];
+      renderAudit();
+      setTimeout(() => resolve({
+        injectedElements: document.querySelectorAll("#hostile-real").length,
+        eventCount: window.__wattproofHostileEvent,
+        textRendered: document.body.innerText.includes(marker),
+        javascriptLinks: [...document.querySelectorAll("a")]
+          .filter((link) => /^(javascript|data):/i.test(link.getAttribute("href") || ""))
+          .length,
+      }), 100);
+    })`);
+
     await evaluate(`new Promise((resolve) => setTimeout(() => resolve(true), 100))`);
     return {
       flows,
       mobileReview,
       mobileResult,
+      hostileDom,
       protocolErrors: devtools.protocolErrors,
       externalRequests: devtools.externalRequests,
     };
@@ -393,6 +483,283 @@ async function main() {
 
 main()
   .then((evidence) => process.stdout.write(JSON.stringify(evidence)))
+  .catch((error) => {
+    process.stderr.write(`${error.stack || error}\n`);
+    process.exitCode = 1;
+  });
+"""
+
+ASYNC_STATE_HARNESS = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+class FakeElement {
+  constructor(id) {
+    this.id = id;
+    this.innerHTML = id.endsWith("submit") ? "Submit" : "";
+    this.textContent = "";
+    this.value = "";
+    this.hidden = false;
+    this.disabled = false;
+    this.files = [];
+    this.dataset = {};
+    this.className = "";
+    this.src = "";
+    this.listeners = {};
+    this.attributes = {};
+    this.classList = { toggle() {}, add() {}, remove() {} };
+  }
+  addEventListener(name, handler) { this.listeners[name] = handler; }
+  querySelector(selector) {
+    if (selector.includes("button[type='submit']")) return element(`${this.id}-submit`);
+    return null;
+  }
+  querySelectorAll(selector) {
+    if (this.id === "review-form" && selector.includes("data-fact-path")) {
+      return [...factInputs, element("review-form-submit")];
+    }
+    return [];
+  }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  removeAttribute(name) {
+    delete this.attributes[name];
+    if (name === "src") this.src = "";
+  }
+  getAttribute(name) { return this.attributes[name] ?? null; }
+  scrollIntoView() {}
+  focus() { document.activeElement = this; }
+  reset() {}
+  select() {}
+  click() { return this.listeners.click?.({ currentTarget: this, target: this }); }
+}
+
+const payload = JSON.parse(fs.readFileSync(0, "utf8"));
+const elements = new Map();
+const element = (id) => {
+  if (!elements.has(id)) elements.set(id, new FakeElement(id));
+  return elements.get(id);
+};
+let factInputs = [];
+let reloadCount = 0;
+const stepPanels = [1, 2, 3, 4, 5].map((step) => {
+  const panel = element(`step-${step}`);
+  panel.dataset.step = String(step);
+  return panel;
+});
+const stepHeadings = new Map(stepPanels.map((panel) => {
+  const heading = element(`heading-${panel.dataset.step}`);
+  heading.id = ({ 2: "review-title", 3: "verify-title" })[panel.dataset.step]
+    || `heading-${panel.dataset.step}`;
+  return [panel.dataset.step, heading];
+}));
+const indicators = [1, 2, 3, 4, 5].map((step) => {
+  const indicator = element(`indicator-${step}`);
+  indicator.dataset.stepIndicator = String(step);
+  return indicator;
+});
+const backToUpload = element("back-to-upload");
+backToUpload.dataset.back = "1";
+const backToReview = element("back-to-review");
+backToReview.dataset.back = "2";
+const backButtons = [backToUpload, backToReview];
+
+const document = {
+  activeElement: null,
+  createElement: (tag) => element(`created-${tag}`),
+  execCommand: () => true,
+  getElementById: element,
+  querySelector(selector) {
+    const headingMatch = selector.match(/^\[data-step="(\d)"\] h1$/);
+    if (headingMatch) return stepHeadings.get(headingMatch[1]);
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector === "[data-step]") return stepPanels;
+    if (selector === "[data-step-indicator]") return indicators;
+    if (selector === "[data-back]") return backButtons;
+    if (selector === "[data-next]" || selector === ".optional-line") return [];
+    if (selector === "[data-fact-path]") return factInputs;
+    if (selector.includes("aria-describedby")) {
+      return factInputs.filter((input) => input.attributes["aria-describedby"]);
+    }
+    return [];
+  },
+};
+
+const requests = [];
+function deferredFetch(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const request = { url: String(url), options, resolve, reject, settled: false };
+    requests.push(request);
+    if (payload.abortAware && options.signal) {
+      options.signal.addEventListener("abort", () => {
+        if (request.settled) return;
+        request.settled = true;
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      }, { once: true });
+    }
+  });
+}
+
+function settle(url, body, ok = true) {
+  const request = requests.find((candidate) => candidate.url === url && !candidate.settled);
+  if (!request) throw new Error(`No pending request for ${url}`);
+  request.settled = true;
+  request.resolve({ ok, json: async () => body });
+}
+
+const context = {
+  AbortController,
+  Blob,
+  console,
+  document,
+  elements,
+  fetch: deferredFetch,
+  FormData,
+  navigator: { clipboard: { writeText: async () => {} } },
+  payload,
+  URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} },
+  window: {
+    location: { reload() { reloadCount += 1; } },
+    scrollTo() {},
+  },
+};
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(payload.appPath, "utf8"), context);
+
+function invoke(expression) {
+  return vm.runInContext(expression, context);
+}
+
+function submitReview() {
+  const form = element("review-form");
+  return form.listeners.submit({
+    preventDefault() {},
+    currentTarget: form,
+  });
+}
+
+function currentState() {
+  return invoke(`({
+    extraction: state.extraction,
+    audit: state.audit,
+    operationToken: state.operationToken,
+  })`);
+}
+
+async function run() {
+  if (payload.scenario === "sample_race") {
+    const first = invoke(`loadSample("authentic", byId("authentic-sample"))`);
+    const second = invoke(`loadSample("duke", byId("duke-sample"))`);
+    settle("/api/sample/duke", { extraction: payload.extractionB });
+    await second;
+    if (requests.some((request) => request.url === "/api/sample/authentic" && !request.settled)) {
+      settle("/api/sample/authentic", { extraction: payload.extractionA });
+    }
+    await first;
+    return {
+      ...currentState(),
+      reviewHtml: element("service-review-sections").innerHTML,
+      message: element("global-message").textContent,
+      firstDisabled: element("authentic-sample").disabled,
+      secondDisabled: element("duke-sample").disabled,
+    };
+  }
+
+  if (payload.scenario === "general_error") {
+    const request = invoke(`loadSample("authentic", byId("authentic-sample"))`);
+    settle("/api/sample/authentic", { error: "Reader temporarily unavailable" }, false);
+    await request;
+    return {
+      activeElement: document.activeElement?.id || null,
+      message: element("global-message").textContent,
+      alertHidden: element("global-message").hidden,
+    };
+  }
+
+  if (payload.scenario === "upload_then_sample") {
+    element("bill-file").files = [new Blob(["%PDF"], { type: "application/pdf" })];
+    const form = element("upload-form");
+    const upload = form.listeners.submit({ preventDefault() {}, currentTarget: form });
+    const sample = invoke(`loadSample("duke", byId("duke-sample"))`);
+    settle("/api/sample/duke", { extraction: payload.extractionB });
+    await sample;
+    settle("/api/extract", { extraction: payload.extractionA });
+    await upload;
+    return {
+      ...currentState(),
+      reviewHtml: element("service-review-sections").innerHTML,
+      message: element("global-message").textContent,
+      uploadDisabled: element("upload-form-submit").disabled,
+      sampleDisabled: element("duke-sample").disabled,
+    };
+  }
+
+  invoke(`state.extraction = payload.extractionA; renderReview(payload.mode); showStep(2)`);
+
+  if (payload.scenario === "audit_then_sample") {
+    const audit = submitReview();
+    const sample = invoke(`loadSample("duke", byId("duke-sample"))`);
+    settle("/api/sample/duke", { extraction: payload.extractionB });
+    await sample;
+    settle("/api/audit", { audit: payload.auditA });
+    await audit;
+    return {
+      ...currentState(),
+      reviewHtml: element("service-review-sections").innerHTML,
+      verifyHidden: element("step-3").hidden,
+      message: element("global-message").textContent,
+    };
+  }
+
+  if (payload.scenario === "audit_then_navigation") {
+    const audit = submitReview();
+    if (payload.navigation === "restart") element("restart").listeners.click();
+    else backToUpload.listeners.click();
+    settle("/api/audit", { audit: payload.auditA });
+    await audit;
+    return {
+      ...currentState(),
+      reloadCount,
+      uploadHidden: element("step-1").hidden,
+      verifyHidden: element("step-3").hidden,
+      message: element("global-message").textContent,
+    };
+  }
+
+  if (payload.scenario === "correction") {
+    const input = element("corrected-input");
+    input.dataset.factPath = payload.factPath;
+    input.value = payload.nextValue;
+    factInputs = [input];
+    const audit = submitReview();
+    if (payload.outcome === "error") {
+      settle("/api/audit", { error: `${payload.factPath}: invalid corrected value` }, false);
+    } else {
+      settle("/api/audit", { audit: payload.auditA });
+    }
+    await audit;
+    if (payload.outcome === "success") backToReview.listeners.click();
+    const fact = invoke(`valueAt(state.extraction, payload.factPath)`);
+    return {
+      ...currentState(),
+      fact,
+      reviewHtml: element("service-review-sections").innerHTML,
+      reviewHidden: element("step-2").hidden,
+      activeElement: document.activeElement?.id || null,
+      inputInvalid: input.attributes["aria-invalid"] || null,
+      inputDescribedBy: input.attributes["aria-describedby"] || null,
+      message: element("global-message").textContent,
+    };
+  }
+
+  throw new Error(`Unknown scenario: ${payload.scenario}`);
+}
+
+run()
+  .then((result) => process.stdout.write(JSON.stringify(result)))
   .catch((error) => {
     process.stderr.write(`${error.stack || error}\n`);
     process.exitCode = 1;
@@ -494,7 +861,9 @@ const output = vm.runInContext(`(() => {
     verificationHtml: byId("verification-level").innerHTML,
     verificationText: byId("verification-level").textContent,
     servicesHtml: byId("service-results").innerHTML,
+    priorityHtml: byId("priority-findings").innerHTML,
     auditHtml: byId("audit-lines").innerHTML,
+    verdictHtml: byId("verdict-card").innerHTML,
     comparisonHtml: byId("optional-comparison").innerHTML,
     comparisonHidden: byId("optional-comparison").hidden,
     requestsHtml: byId("provider-review-requests").innerHTML,
@@ -517,6 +886,34 @@ process.stdout.write(JSON.stringify(output));
         capture_output=True,
         check=True,
     )
+    result: dict[str, Any] = json.loads(completed.stdout)
+    return result
+
+
+def _exercise_async_state_contract(
+    scenario: str,
+    *,
+    extraction_a: dict[str, Any] | None = None,
+    extraction_b: dict[str, Any] | None = None,
+    audit_a: dict[str, Any] | None = None,
+    **options: Any,
+) -> dict[str, Any]:
+    payload = {
+        "appPath": str(APP_JAVASCRIPT),
+        "scenario": scenario,
+        "extractionA": extraction_a,
+        "extractionB": extraction_b,
+        "auditA": audit_a,
+        **options,
+    }
+    completed = subprocess.run(
+        ["node", "-e", ASYNC_STATE_HARNESS],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
     result: dict[str, Any] = json.loads(completed.stdout)
     return result
 
@@ -682,6 +1079,17 @@ def test_result_markup_exposes_neutral_contract() -> None:
     assert "hidden" in page[page.index('id="optional-comparison"') :][:160]
 
 
+def test_global_error_alert_is_keyboard_focusable() -> None:
+    page = create_app().test_client().get("/").get_data(as_text=True)
+    alert_start = page.index('id="global-message"')
+    alert_markup = page[alert_start : alert_start + 220]
+
+    assert 'role="alert"' in alert_markup
+    assert 'aria-live="assertive"' in alert_markup
+    assert 'aria-atomic="true"' in alert_markup
+    assert 'tabindex="-1"' in alert_markup
+
+
 def test_javascript_keeps_exact_schema_and_correction_helpers() -> None:
     source = APP_JAVASCRIPT.read_text(encoding="utf-8")
     for helper in (
@@ -748,6 +1156,257 @@ def test_javascript_renders_both_schemas_and_unified_results_without_crashing(
         "page": 4,
         "text": "Legacy rendered evidence",
         "confidence": 0.75,
+    }
+
+
+def test_dynamic_review_and_audit_values_are_inert_markup() -> None:
+    client = create_app().test_client()
+    extraction = client.get("/api/sample/authentic").get_json()["extraction"]
+    audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+    hostile = {
+        "provider": "<img id=hostile-provider src=x onerror=alert(1)>",
+        "unit": "<svg id=hostile-unit onload=alert(2)>",
+        "currency": "<iframe id=hostile-currency srcdoc=bad>",
+        "label": "<script id=hostile-label>alert(3)</script>",
+        "evidence": "<img id=hostile-evidence src=x onerror=alert(4)>",
+        "headline": "<math id=hostile-headline href=javascript:alert(5)>",
+        "citation": "<svg id=hostile-citation onload=alert(6)>",
+        "request": "<textarea id=hostile-request autofocus onfocus=alert(7)>",
+    }
+
+    extraction["delivery_provider"]["value"] = hostile["provider"]
+    extraction["total_usage"]["unit"] = hostile["unit"]
+    extraction["delivery_subtotal"]["unit"] = hostile["currency"]
+    audit["headline"] = hostile["headline"]
+    audit["currency"] = hostile["currency"]
+    line = audit["lines"][0]
+    line["status"] = "discrepancy"
+    line["label"] = hostile["label"]
+    line["unit"] = hostile["unit"]
+    line["formula"] = hostile["label"]
+    line["limitation"] = hostile["headline"]
+    line["evidence"] = [
+        {
+            "page": hostile["unit"],
+            "text": hostile["evidence"],
+            "confidence": "1.0",
+            "provenance": "rendered_page",
+        }
+    ]
+    line["citations"] = [
+        {
+            "label": hostile["citation"],
+            "source_url": "javascript:alert(8)",
+        },
+        {
+            "label": hostile["evidence"],
+            "source_url": "data:text/html,<svg onload=alert(9)>",
+        },
+    ]
+    audit["comparison"] = {
+        "status": "insufficient_data",
+        "headline": hostile["headline"],
+        "explanation": hostile["evidence"],
+        "required_data": [hostile["unit"]],
+    }
+    audit["review_requests"] = [
+        {
+            "provider": hostile["provider"],
+            "subject": hostile["request"],
+            "body": hostile["evidence"],
+            "grounded_audit_line_ids": [line["id"]],
+            "requires_user_review": True,
+        }
+    ]
+
+    rendered = _exercise_javascript_contract(extraction, audit, mode="authentic")
+    fragments = "".join(
+        rendered[key]
+        for key in (
+            "reviewHtml",
+            "verificationHtml",
+            "verdictHtml",
+            "servicesHtml",
+            "priorityHtml",
+            "auditHtml",
+            "comparisonHtml",
+            "requestsHtml",
+        )
+    )
+    probe = _MarkupProbe()
+    probe.feed(fragments)
+
+    assert not ({"img", "svg", "script", "iframe", "math"} & set(probe.tags))
+    assert not any(name.lower().startswith("on") for name, _value in probe.attributes)
+    assert not any(
+        name.lower() == "href"
+        and value is not None
+        and value.lower().startswith(("javascript:", "data:"))
+        for name, value in probe.attributes
+    )
+    rendered_text = "".join(probe.text)
+    for marker in hostile.values():
+        assert marker in rendered_text or marker in {
+            value for name, value in probe.attributes if name == "value"
+        }
+
+
+@pytest.mark.parametrize("abort_aware", [False, True])
+def test_slow_sample_cannot_overwrite_later_sample(abort_aware: bool) -> None:
+    client = create_app().test_client()
+    authentic = client.get("/api/sample/authentic").get_json()["extraction"]
+    duke = client.get("/api/sample/duke").get_json()["extraction"]
+
+    result = _exercise_async_state_contract(
+        "sample_race",
+        extraction_a=authentic,
+        extraction_b=duke,
+        abortAware=abort_aware,
+    )
+
+    assert result["extraction"]["schema_version"] == "2.0"
+    assert "Duke Energy" in result["reviewHtml"]
+    assert "Pacific Gas and Electric" not in result["reviewHtml"]
+    assert result["audit"] is None
+    assert result["message"] == ""
+    assert result["firstDisabled"] is False
+    assert result["secondDisabled"] is False
+
+
+def test_slow_upload_cannot_overwrite_a_later_sample() -> None:
+    client = create_app().test_client()
+    authentic = client.get("/api/sample/authentic").get_json()["extraction"]
+    duke = client.get("/api/sample/duke").get_json()["extraction"]
+
+    result = _exercise_async_state_contract(
+        "upload_then_sample",
+        extraction_a=authentic,
+        extraction_b=duke,
+        abortAware=False,
+    )
+
+    assert result["extraction"]["schema_version"] == "2.0"
+    assert "Duke Energy" in result["reviewHtml"]
+    assert "Pacific Gas and Electric" not in result["reviewHtml"]
+    assert result["audit"] is None
+    assert result["message"] == ""
+    assert result["uploadDisabled"] is False
+    assert result["sampleDisabled"] is False
+
+
+def test_pending_audit_cannot_render_beside_a_new_bill() -> None:
+    client = create_app().test_client()
+    authentic = client.get("/api/sample/authentic").get_json()["extraction"]
+    authentic_audit = client.post("/api/audit", json=authentic).get_json()["audit"]
+    duke = client.get("/api/sample/duke").get_json()["extraction"]
+
+    result = _exercise_async_state_contract(
+        "audit_then_sample",
+        extraction_a=authentic,
+        extraction_b=duke,
+        audit_a=authentic_audit,
+        mode="authentic",
+        abortAware=False,
+    )
+
+    assert result["extraction"]["schema_version"] == "2.0"
+    assert "Duke Energy" in result["reviewHtml"]
+    assert result["audit"] is None
+    assert result["verifyHidden"] is True
+    assert result["message"] == ""
+
+
+@pytest.mark.parametrize("navigation", ["back", "restart"])
+def test_navigation_invalidates_a_pending_audit(navigation: str) -> None:
+    client = create_app().test_client()
+    authentic = client.get("/api/sample/authentic").get_json()["extraction"]
+    authentic_audit = client.post("/api/audit", json=authentic).get_json()["audit"]
+
+    result = _exercise_async_state_contract(
+        "audit_then_navigation",
+        extraction_a=authentic,
+        audit_a=authentic_audit,
+        mode="authentic",
+        navigation=navigation,
+        abortAware=False,
+    )
+
+    assert result["audit"] is None
+    assert result["verifyHidden"] is True
+    assert result["message"] == ""
+    if navigation == "back":
+        assert result["uploadHidden"] is False
+        assert result["reloadCount"] == 0
+    else:
+        assert result["reloadCount"] == 1
+
+
+@pytest.mark.parametrize(
+    ("kind", "mode", "fact_path", "next_value"),
+    [
+        ("authentic", "authentic", "total_usage", "328.119"),
+        ("duke", "duke", "sections.0.usage", "1002"),
+    ],
+)
+@pytest.mark.parametrize("outcome", ["success", "error"])
+def test_correction_provenance_survives_back_and_validation_errors(
+    kind: str,
+    mode: str,
+    fact_path: str,
+    next_value: str,
+    outcome: str,
+) -> None:
+    client = create_app().test_client()
+    extraction = client.get(f"/api/sample/{kind}").get_json()["extraction"]
+    audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+    fact = extraction
+    for part in fact_path.split("."):
+        fact = fact[int(part)] if part.isdigit() else fact[part]
+    original_value = str(fact["value"])
+    evidence_text = (fact.get("evidence") or {"text": fact["source_text"]})["text"]
+
+    result = _exercise_async_state_contract(
+        "correction",
+        extraction_a=extraction,
+        audit_a=audit,
+        mode=mode,
+        factPath=fact_path,
+        nextValue=next_value,
+        outcome=outcome,
+        abortAware=False,
+    )
+
+    assert result["fact"] == {
+        **fact,
+        "value": next_value,
+        "status": "user_corrected",
+        "original_value": original_value,
+    }
+    assert "user corrected" in result["reviewHtml"]
+    assert f"Originally {original_value}" in result["reviewHtml"]
+    assert f'value="{next_value}"' in result["reviewHtml"]
+    assert escape(evidence_text) in result["reviewHtml"]
+    assert result["reviewHidden"] is False
+    if outcome == "success":
+        assert result["activeElement"] == "review-title"
+        assert result["message"] == ""
+    else:
+        assert result["activeElement"] == "corrected-input"
+        assert result["inputInvalid"] == "true"
+        assert result["inputDescribedBy"] == "global-message"
+        assert fact_path in result["message"]
+
+
+def test_general_request_error_focuses_the_alert() -> None:
+    result = _exercise_async_state_contract(
+        "general_error",
+        abortAware=False,
+    )
+
+    assert result == {
+        "activeElement": "global-message",
+        "message": "Reader temporarily unavailable",
+        "alertHidden": False,
     }
 
 
@@ -1003,6 +1662,13 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         assert requests["pageErrors"] == []
 
     assert flows[0]["requests"]["count"] > 1
+    duke_correction = next(
+        flow["correction"] for flow in flows if flow["sample"] == "duke"
+    )
+    assert duke_correction["value"] == "1002"
+    assert duke_correction["badge"] == "user corrected"
+    assert duke_correction["note"] == "Originally 1001"
+    assert "1,001" in duke_correction["evidenceText"]
     assert all(
         flow["result"]["verificationLabel"] != "Tariff verified"
         for flow in flows
@@ -1010,6 +1676,12 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     )
     assert evidence["protocolErrors"] == []
     assert evidence["externalRequests"] == []
+    assert evidence["hostileDom"] == {
+        "injectedElements": 0,
+        "eventCount": 0,
+        "textRendered": True,
+        "javascriptLinks": 0,
+    }
 
     mobile_review = evidence["mobileReview"]
     assert mobile_review == {

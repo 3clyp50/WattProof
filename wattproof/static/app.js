@@ -5,6 +5,10 @@ const state = {
   audit: null,
   previewUrl: null,
   compactAudit: true,
+  reviewMode: null,
+  extractionRevision: 0,
+  operationToken: 0,
+  activeOperation: null,
 };
 
 const legacyFactDefinitions = [
@@ -92,11 +96,72 @@ function safeErrorMessage(error) {
     : "The request could not be completed.";
 }
 
-function showMessage(message = "") {
+function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+function showMessage(message = "", input = null) {
   const element = byId("global-message");
+  document.querySelectorAll('[aria-describedby="global-message"]').forEach((field) => {
+    field.removeAttribute("aria-describedby");
+    field.removeAttribute("aria-invalid");
+  });
   element.textContent = message;
   element.hidden = !message;
-  if (message) element.scrollIntoView({ block: "center" });
+  if (!message) return;
+  element.scrollIntoView({ block: "center" });
+  element.focus({ preventScroll: true });
+  if (input) {
+    input.setAttribute("aria-invalid", "true");
+    input.setAttribute("aria-describedby", "global-message");
+    input.focus({ preventScroll: true });
+  }
+}
+
+function showError(error) {
+  const message = safeErrorMessage(error);
+  const input = [...document.querySelectorAll("[data-fact-path]")]
+    .find((candidate) => message.includes(candidate.dataset.factPath));
+  showMessage(message, input || null);
+}
+
+function invalidatePendingOperation() {
+  state.operationToken += 1;
+  const operation = state.activeOperation;
+  state.activeOperation = null;
+  if (!operation) return;
+  operation.controller.abort();
+  operation.cleanup();
+}
+
+function beginOperation(cleanup) {
+  invalidatePendingOperation();
+  const operation = {
+    token: state.operationToken,
+    controller: new AbortController(),
+    cleanup,
+  };
+  state.activeOperation = operation;
+  return operation;
+}
+
+function isCurrentOperation(operation) {
+  return state.activeOperation === operation
+    && state.operationToken === operation.token
+    && !operation.controller.signal.aborted;
+}
+
+function finishOperation(operation) {
+  if (!isCurrentOperation(operation)) return;
+  state.activeOperation = null;
+  operation.cleanup();
+}
+
+function replaceExtraction(extraction, mode) {
+  state.extraction = extraction;
+  state.audit = null;
+  state.reviewMode = mode;
+  state.extractionRevision += 1;
 }
 
 function showStep(step) {
@@ -125,6 +190,12 @@ function setLoading(button, loading, label) {
   if (!button.dataset.originalLabel) button.dataset.originalLabel = button.innerHTML;
   button.disabled = loading;
   button.innerHTML = loading ? label : button.dataset.originalLabel;
+}
+
+function setReviewPending(pending) {
+  byId("review-form")
+    .querySelectorAll("[data-fact-path], button[type='submit']")
+    .forEach((control) => { control.disabled = pending; });
 }
 
 async function responseJson(response) {
@@ -361,31 +432,41 @@ function renderDocumentPreview(mode) {
 }
 
 function renderReview(mode) {
+  state.reviewMode = mode;
   if (isUtilityDocument(state.extraction)) renderUtilityReview();
   else renderLegacyReview();
   renderDocumentPreview(mode);
 }
 
 async function loadSample(kind, button) {
+  const operation = beginOperation(() => setLoading(button, false, ""));
   setLoading(button, true, "Loading public fixture…");
   try {
-    const payload = await responseJson(await fetch(`/api/sample/${kind}`));
-    state.extraction = payload.extraction;
-    state.audit = null;
+    const payload = await responseJson(await fetch(`/api/sample/${kind}`, {
+      signal: operation.controller.signal,
+    }));
+    if (!isCurrentOperation(operation)) return;
+    replaceExtraction(payload.extraction, kind);
     renderReview(kind);
     showStep(2);
   } catch (error) {
-    showMessage(safeErrorMessage(error));
+    if (!isCurrentOperation(operation) || isAbortError(error)) return;
+    showError(error);
   } finally {
-    setLoading(button, false, "");
+    finishOperation(operation);
   }
 }
 
 function applyReviewEdits() {
+  let changed = false;
   document.querySelectorAll("[data-fact-path]").forEach((input) => {
     const fact = valueAt(state.extraction, input.dataset.factPath);
-    if (fact && String(fact.value) !== input.value) markCorrected(fact, input.value);
+    if (fact && String(fact.value) !== input.value) {
+      markCorrected(fact, input.value);
+      changed = true;
+    }
   });
+  return changed;
 }
 
 function money(value, currency = "USD") {
@@ -405,8 +486,15 @@ function decimalValue(value) {
 
 function auditValue(value, unit, currency) {
   if (value === null || value === undefined) return "—";
-  if (unit === currency || /^[A-Z]{3}$/.test(unit)) return money(value, unit);
-  return `${decimalValue(value)} ${unit}`;
+  const formatted = unit === currency || /^[A-Z]{3}$/.test(unit)
+    ? money(value, unit)
+    : `${decimalValue(value)} ${unit}`;
+  return escapeHtml(formatted);
+}
+
+function safeSourceUrl(value) {
+  const url = String(value || "").trim();
+  return /^https?:\/\//i.test(url) ? escapeHtml(url) : "";
 }
 
 function serviceResultCards(extraction) {
@@ -421,7 +509,7 @@ function serviceResultCards(extraction) {
             ${section.schedule ? `<div><dt>Schedule</dt><dd>${escapeHtml(section.schedule.value)}</dd></div>` : ""}
             ${period ? `<div><dt>Service period</dt><dd>${escapeHtml(period)}</dd></div>` : ""}
             ${usage ? `<div><dt>Usage</dt><dd>${escapeHtml(usage.value)} ${escapeHtml(usage.unit)}</dd></div>` : ""}
-            <div><dt>Printed subtotal</dt><dd>${money(section.subtotal.value, section.subtotal.currency)}</dd></div>
+            <div><dt>Printed subtotal</dt><dd>${escapeHtml(money(section.subtotal.value, section.subtotal.currency))}</dd></div>
           </dl>
         </article>`;
     });
@@ -438,7 +526,7 @@ function serviceResultCards(extraction) {
         <div><dt>Schedule</dt><dd>${escapeHtml(schedule.value)}</dd></div>
         <div><dt>Service period</dt><dd>${escapeHtml(period)}</dd></div>
         <div><dt>Usage</dt><dd>${escapeHtml(extraction.total_usage.value)} ${escapeHtml(extraction.total_usage.unit)}</dd></div>
-        <div><dt>Printed subtotal</dt><dd>${money(subtotal.value, subtotal.unit)}</dd></div>
+        <div><dt>Printed subtotal</dt><dd>${escapeHtml(money(subtotal.value, subtotal.unit))}</dd></div>
       </dl>
     </article>`);
 }
@@ -466,7 +554,12 @@ function renderPriorityFindings(result) {
 function renderAuditLedger(result) {
   byId("audit-lines").innerHTML = result.lines.map((line) => {
     const optional = line.scope === "statement_reconciliation" && line.status === "verified";
-    const links = (line.citations || []).map((citation) => `<a href="${escapeHtml(citation.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(citation.label)} ↗</a>`).join("");
+    const links = (line.citations || []).map((citation) => {
+      const sourceUrl = safeSourceUrl(citation.source_url);
+      return sourceUrl
+        ? `<a href="${sourceUrl}" target="_blank" rel="noreferrer">${escapeHtml(citation.label)} ↗</a>`
+        : `<span>${escapeHtml(citation.label)}</span>`;
+    }).join("");
     return `
       <tr class="${optional ? "optional-line" : ""}" ${optional && state.compactAudit ? "hidden" : ""}>
         <td data-label="Status"><span class="status-pill ${escapeHtml(line.status)}">${escapeHtml(statusLabels[line.status] || statusLabel(line.status))}</span></td>
@@ -553,11 +646,14 @@ function renderAudit() {
 }
 
 function clearCurrentDocument() {
+  invalidatePendingOperation();
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.extraction = null;
   state.audit = null;
   state.previewUrl = null;
   state.compactAudit = true;
+  state.reviewMode = null;
+  state.extractionRevision += 1;
   byId("upload-form").reset();
   byId("file-label").textContent = "Choose a utility bill";
   showStep(1);
@@ -574,6 +670,8 @@ byId("centerpoint-sample").addEventListener("click", (event) => loadSample("cent
 byId("bloomington-sample").addEventListener("click", (event) => loadSample("bloomington", event.currentTarget));
 
 byId("bill-file").addEventListener("change", (event) => {
+  invalidatePendingOperation();
+  state.audit = null;
   byId("file-label").textContent = event.target.files[0]?.name || "Choose a utility bill";
 });
 
@@ -581,50 +679,79 @@ byId("upload-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector("button[type='submit']");
   const file = byId("bill-file").files[0];
-  if (!file) return showMessage("Choose a PDF bill first.");
+  if (!file) {
+    invalidatePendingOperation();
+    showMessage("Choose a PDF bill first.", byId("bill-file"));
+    return;
+  }
+  const operation = beginOperation(() => setLoading(button, false, ""));
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.previewUrl = URL.createObjectURL(file);
   setLoading(button, true, "Reading rendered pages…");
   try {
     const form = new FormData();
     form.append("bill", file);
-    const payload = await responseJson(await fetch("/api/extract", { method: "POST", body: form }));
-    state.extraction = payload.extraction;
-    state.audit = null;
+    const payload = await responseJson(await fetch("/api/extract", {
+      method: "POST",
+      body: form,
+      signal: operation.controller.signal,
+    }));
+    if (!isCurrentOperation(operation)) return;
+    replaceExtraction(payload.extraction, "uploaded");
     renderReview("uploaded");
     showStep(2);
   } catch (error) {
-    showMessage(safeErrorMessage(error));
+    if (!isCurrentOperation(operation) || isAbortError(error)) return;
+    showError(error);
   } finally {
-    setLoading(button, false, "");
+    finishOperation(operation);
   }
 });
 
 byId("review-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector("button[type='submit']");
-  applyReviewEdits();
+  if (applyReviewEdits()) {
+    state.extractionRevision += 1;
+    renderReview(state.reviewMode);
+  }
+  const extractionAtStart = state.extraction;
+  const revisionAtStart = state.extractionRevision;
+  const operation = beginOperation(() => {
+    setReviewPending(false);
+    setLoading(button, false, "");
+  });
   setLoading(button, true, "Running deterministic checks…");
+  setReviewPending(true);
   try {
     const response = await fetch("/api/audit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(state.extraction),
+      signal: operation.controller.signal,
     });
     const payload = await responseJson(response);
+    if (!isCurrentOperation(operation)
+        || state.extraction !== extractionAtStart
+        || state.extractionRevision !== revisionAtStart) return;
     state.audit = payload.audit;
     state.compactAudit = true;
     renderAudit();
     showStep(3);
   } catch (error) {
-    showMessage(safeErrorMessage(error));
+    if (!isCurrentOperation(operation) || isAbortError(error)) return;
+    finishOperation(operation);
+    showError(error);
   } finally {
-    setLoading(button, false, "");
+    finishOperation(operation);
   }
 });
 
 document.querySelectorAll("[data-back]").forEach((button) => {
-  button.addEventListener("click", () => showStep(Number(button.dataset.back)));
+  button.addEventListener("click", () => {
+    invalidatePendingOperation();
+    showStep(Number(button.dataset.back));
+  });
 });
 
 document.querySelectorAll("[data-next]").forEach((button) => {
@@ -665,4 +792,7 @@ byId("provider-review-requests").addEventListener("click", async (event) => {
 
 byId("add-another-bill").addEventListener("click", clearCurrentDocument);
 byId("finish-household-review").addEventListener("click", () => showStep(4));
-byId("restart").addEventListener("click", () => window.location.reload());
+byId("restart").addEventListener("click", () => {
+  invalidatePendingOperation();
+  window.location.reload();
+});

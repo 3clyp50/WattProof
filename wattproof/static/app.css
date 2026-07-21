@@ -177,6 +177,7 @@ main {
 }
 
 .message { color: #7e3028; background: var(--red-soft); border: 1px solid #ebbbb3; }
+.message:focus-visible { outline: 3px solid rgba(166, 74, 62, 0.38); outline-offset: 2px; }
 .synthetic-banner { color: #66450a; background: var(--amber-soft); border: 1px solid #e8c36e; }
 
 .step-panel { padding: 36px 0 78px; }
