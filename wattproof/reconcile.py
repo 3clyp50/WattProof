@@ -958,6 +958,52 @@ def _billed_phrase(line: UtilityAuditLine, currency: str) -> str:
     return phrase
 
 
+_NON_OPERAND_INPUT_KEYS = frozenset(
+    {
+        "billed_amount",
+        "reported_usage",
+        "reported_result",
+        "rounding",
+        "precision",
+        "required_rate_unit",
+        "required_factor_unit",
+        "referenced_charge_ids",
+        "missing_charge_ids",
+    }
+)
+
+
+def _expected_operand_detail(line: UtilityAuditLine) -> str | None:
+    operands: list[str] = []
+    for key, value in line.inputs.items():
+        if key in _NON_OPERAND_INPUT_KEYS or key.endswith("_provenance"):
+            continue
+        provenance = line.inputs.get(f"{key}_provenance")
+        trace = f"{value} [{provenance}]" if provenance is not None else value
+        operands.append(f"{key}={trace}")
+    if not operands:
+        return None
+    return "Recomputed from " + "; ".join(operands)
+
+
+def _discrepancy_detail(line: UtilityAuditLine, currency: str) -> str:
+    if (
+        line.billed_amount is None
+        or line.expected_amount is None
+        or line.delta is None
+    ):
+        return f"- {line.label}: a discrepancy was recorded without complete operands."
+    detail = (
+        f"- {line.label}: {_billed_phrase(line, currency)}, "
+        f"recomputed {_display_amount(line.expected_amount, line.unit, currency)}, "
+        f"difference {_display_amount(abs(line.delta), line.unit, currency)}."
+    )
+    operand_detail = _expected_operand_detail(line)
+    if operand_detail is not None:
+        detail += f"\n  {operand_detail}."
+    return detail
+
+
 def _review_request(
     provider: str,
     section_ids: set[str],
@@ -982,15 +1028,7 @@ def _review_request(
     needs_review = tuple(line for line in grounded if line.status == "needs_review")
     if discrepancies:
         details = "\n".join(
-            (
-                f"- {line.label}: {_billed_phrase(line, currency)}, "
-                f"recomputed {_display_amount(line.expected_amount, line.unit, currency)}, "
-                f"difference {_display_amount(abs(line.delta), line.unit, currency)}."
-            )
-            for line in discrepancies
-            if line.billed_amount is not None
-            and line.expected_amount is not None
-            and line.delta is not None
+            _discrepancy_detail(line, currency) for line in discrepancies
         )
         review_details = ""
         if needs_review:
@@ -1052,15 +1090,8 @@ def _consolidated_review_request(
         line for line in grounded if line.status == "discrepancy"
     )
     details = "\n".join(
-        (
-            f"- {line.label}: {_billed_phrase(line, currency)}, "
-            f"recomputed {_display_amount(line.expected_amount, line.unit, currency)}, "
-            f"difference {_display_amount(abs(line.delta), line.unit, currency)}."
-        )
+        _discrepancy_detail(line, currency)
         for line in discrepancies
-        if line.billed_amount is not None
-        and line.expected_amount is not None
-        and line.delta is not None
     )
     needs_review = "\n".join(
         f"- {line.label}: {_billed_phrase(line, currency)}; "
@@ -1174,7 +1205,8 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
     )
     provider_sections: dict[str, set[str]] = {}
     for section in document.sections:
-        provider_sections.setdefault(section.provider.value, set()).add(section.id)
+        provider_identity = section.normalized_provider or section.provider.value
+        provider_sections.setdefault(provider_identity, set()).add(section.id)
     unattributed_roots = tuple(
         line
         for line in line_tuple

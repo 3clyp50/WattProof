@@ -28,12 +28,20 @@ def evidence(text: str) -> EvidenceRef:
     )
 
 
-def decimal_fact(value: str, unit: str, label: str) -> DecimalFactV2:
+def decimal_fact(
+    value: str,
+    unit: str,
+    label: str,
+    *,
+    status: FactStatus = "printed",
+    original_value: str | None = None,
+) -> DecimalFactV2:
     return DecimalFactV2(
         value=Decimal(value),
         unit=unit,
-        status="printed",
+        status=status,
         evidence=evidence(label),
+        original_value=original_value,
     )
 
 
@@ -194,6 +202,109 @@ def water_document_with_usage_status(
         update={"charges": (usage, *section.charges[1:])}
     )
     return document.model_copy(update={"sections": (changed_section,)})
+
+
+def water_document_with_usage_operands(
+    *,
+    quantity: DecimalFactV2 | None = None,
+    rate: DecimalFactV2 | None = None,
+) -> UtilityDocument:
+    document = water_document()
+    section = document.sections[0]
+    usage = section.charges[0]
+    updates: dict[str, DecimalFactV2] = {}
+    if quantity is not None:
+        updates["quantity"] = quantity
+    if rate is not None:
+        updates["rate"] = rate
+    changed_usage = usage.model_copy(update=updates)
+    changed_section = section.model_copy(
+        update={"charges": (changed_usage, *section.charges[1:])}
+    )
+    return document.model_copy(update={"sections": (changed_section,)})
+
+
+def water_document_with_service_base_status(
+    status: FactStatus,
+    *,
+    original_value: str | None = None,
+) -> UtilityDocument:
+    document = water_document(
+        subtotal="20.53",
+        current_charges="20.53",
+        amount_due="20.53",
+    )
+    section = document.sections[0]
+    service = section.charges[1].model_copy(
+        update={
+            "amount": money_fact(
+                "8.86",
+                "Service charge $8.86",
+                status=status,
+                original_value=original_value,
+            )
+        }
+    )
+    changed_section = section.model_copy(
+        update={
+            "charges": (
+                section.charges[0],
+                service,
+                *section.charges[2:],
+            )
+        }
+    )
+    return document.model_copy(update={"sections": (changed_section,)})
+
+
+def simple_section(
+    *,
+    section_id: str,
+    charge_id: str,
+    provider: str,
+    normalized_provider: str | None,
+    charge_amount: str,
+    subtotal: str,
+) -> ServiceSection:
+    return ServiceSection(
+        id=section_id,
+        service_type="other",
+        provider=text_fact(provider, f"Provider: {provider}"),
+        normalized_provider=normalized_provider,
+        charges=(
+            UtilityCharge(
+                id=charge_id,
+                label=f"{section_id} service",
+                amount=money_fact(
+                    charge_amount,
+                    f"{section_id} service ${charge_amount}",
+                ),
+            ),
+        ),
+        subtotal=money_fact(subtotal, f"{section_id} subtotal ${subtotal}"),
+    )
+
+
+def document_with_sections(
+    sections: tuple[ServiceSection, ...],
+    *,
+    current_charges: str,
+    amount_due: str | None = None,
+) -> UtilityDocument:
+    due = amount_due if amount_due is not None else current_charges
+    return UtilityDocument(
+        schema_version="2.0",
+        fixture_kind="uploaded",
+        document_sha256="c" * 64,
+        page_count=1,
+        currency="USD",
+        sections=sections,
+        current_charges=money_fact(
+            current_charges,
+            f"Current charges ${current_charges}",
+        ),
+        amount_due=money_fact(due, f"Amount due ${due}"),
+    )
 
 
 def test_round_money_uses_decimal_half_up() -> None:
@@ -665,6 +776,75 @@ def test_multi_provider_current_root_gets_neutral_consolidated_request() -> None
     assert "$1.00" in neutral.body
 
 
+def test_normalized_provider_groups_printed_aliases_into_one_draft() -> None:
+    first = simple_section(
+        section_id="water_alias",
+        charge_id="water_alias_service",
+        provider="Metro Water",
+        normalized_provider="Metro Utility, Inc.",
+        charge_amount="10.00",
+        subtotal="11.00",
+    )
+    second = simple_section(
+        section_id="sewer_alias",
+        charge_id="sewer_alias_service",
+        provider="Metro Sewer Department",
+        normalized_provider="Metro Utility, Inc.",
+        charge_amount="5.00",
+        subtotal="6.00",
+    )
+    document = document_with_sections(
+        (first, second),
+        current_charges="17.00",
+    )
+
+    result = reconcile_document(document)
+
+    assert [request.provider for request in result.review_requests] == [
+        "Metro Utility, Inc.",
+    ]
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        "subtotal::water_alias",
+        "subtotal::sewer_alias",
+    )
+
+
+def test_normalized_provider_keeps_colliding_printed_labels_separate() -> None:
+    first = simple_section(
+        section_id="alpha",
+        charge_id="alpha_service",
+        provider="Community Utility",
+        normalized_provider="Alpha Water LLC",
+        charge_amount="10.00",
+        subtotal="10.00",
+    )
+    second = simple_section(
+        section_id="beta",
+        charge_id="beta_service",
+        provider="Community Utility",
+        normalized_provider="Beta Gas LLC",
+        charge_amount="5.00",
+        subtotal="5.00",
+    )
+    document = document_with_sections(
+        (first, second),
+        current_charges="16.00",
+    )
+
+    result = reconcile_document(document)
+
+    assert [request.provider for request in result.review_requests] == [
+        "Alpha Water LLC",
+        "Beta Gas LLC",
+        "Consolidated statement",
+    ]
+    assert result.review_requests[0].grounded_audit_line_ids == ()
+    assert result.review_requests[1].grounded_audit_line_ids == ()
+    assert result.review_requests[2].grounded_audit_line_ids == (
+        "statement::current_charges",
+    )
+
+
 def test_user_corrected_billed_value_preserves_provenance_in_line_and_draft() -> None:
     result = reconcile_document(
         water_document_with_usage_status(
@@ -702,6 +882,100 @@ def test_inferred_billed_value_is_not_described_as_printed() -> None:
     body = result.review_requests[0].body
     assert "inferred extraction $8.46" in body
     assert "printed $8.46" not in body
+
+
+def test_request_discloses_user_corrected_quantity_operand() -> None:
+    quantity = decimal_fact(
+        "3",
+        "kgal",
+        "Corrected usage: 3 kgal",
+        status="user_corrected",
+        original_value="2",
+    )
+    result = reconcile_document(
+        water_document_with_usage_operands(quantity=quantity)
+    )
+    line = next(line for line in result.lines if line.id == "charge::water_usage")
+
+    expected_trace = (
+        "3 kgal [user-corrected; original extracted value: 2]"
+    )
+    assert expected_trace in line.formula
+    assert line.inputs["quantity"] == expected_trace
+    request = result.review_requests[0]
+    assert request.grounded_audit_line_ids == ("charge::water_usage",)
+    assert f"Recomputed from quantity={expected_trace}" in request.body
+
+
+def test_request_discloses_user_corrected_rate_operand() -> None:
+    rate = decimal_fact(
+        "4.00",
+        "USD/kgal",
+        "Corrected rate: 4.00 USD/kgal",
+        status="user_corrected",
+        original_value="3.73",
+    )
+    result = reconcile_document(water_document_with_usage_operands(rate=rate))
+    line = next(line for line in result.lines if line.id == "charge::water_usage")
+
+    expected_trace = (
+        "4.00 USD/kgal [user-corrected; original extracted value: 3.73]"
+    )
+    assert expected_trace in line.formula
+    assert line.inputs["rate"] == expected_trace
+    request = result.review_requests[0]
+    assert request.grounded_audit_line_ids == ("charge::water_usage",)
+    assert f"rate={expected_trace}" in request.body
+
+
+def test_request_discloses_inferred_rate_operand() -> None:
+    rate = decimal_fact(
+        "4.00",
+        "USD/kgal",
+        "Inferred rate: 4.00 USD/kgal",
+        status="inferred",
+    )
+    result = reconcile_document(water_document_with_usage_operands(rate=rate))
+    line = next(line for line in result.lines if line.id == "charge::water_usage")
+
+    expected_trace = "4.00 USD/kgal [inferred extraction]"
+    assert expected_trace in line.formula
+    assert line.inputs["rate"] == expected_trace
+    request = result.review_requests[0]
+    assert request.grounded_audit_line_ids == ("charge::water_usage",)
+    assert f"rate={expected_trace}" in request.body
+    assert "rate=4.00 USD/kgal [printed]" not in request.body
+
+
+@pytest.mark.parametrize(
+    ("status", "original_value", "expected_trace"),
+    [
+        (
+            "user_corrected",
+            "7.86",
+            "8.86 USD [user-corrected; original extracted value: 7.86]",
+        ),
+        ("inferred", None, "8.86 USD [inferred extraction]"),
+    ],
+)
+def test_percent_request_discloses_referenced_base_provenance(
+    status: FactStatus,
+    original_value: str | None,
+    expected_trace: str,
+) -> None:
+    result = reconcile_document(
+        water_document_with_service_base_status(
+            status,
+            original_value=original_value,
+        )
+    )
+    line = next(line for line in result.lines if line.id == "charge::sales_tax")
+
+    assert expected_trace in line.formula
+    assert line.inputs["charge::service_charge"] == expected_trace
+    request = result.review_requests[0]
+    assert request.grounded_audit_line_ids == ("charge::sales_tax",)
+    assert f"charge::service_charge={expected_trace}" in request.body
 
 
 def test_evidence_is_limited_to_exact_printed_operands() -> None:
