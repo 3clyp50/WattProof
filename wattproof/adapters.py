@@ -8,6 +8,7 @@ from typing import Protocol, runtime_checkable
 from .audit import (
     UnsupportedBillError,
     audit_bill_with_bundle,
+    round_money,
     validate_pge_3ce_bill,
     validate_pge_3ce_identity,
 )
@@ -585,8 +586,15 @@ def _clean_provider_request(
             )
             finding += f" Archived sources: {sources}."
         details.append(f"- {line.label}: {finding}")
+    synthetic_notice = (
+        "This is a synthetic demo request; no real customer bill contained "
+        "this demo condition.\n\n"
+        if bill.fixture_kind == "synthetic"
+        else ""
+    )
     body = (
-        f"Hello,\n\nPlease confirm these {provider} charge calculations on my "
+        f"Hello,\n\n{synthetic_notice}Please confirm these {provider} charge "
+        "calculations on my "
         f"statement dated {bill.statement_date.value.isoformat()}. WattProof's "
         "notes below are limited to lines attributed to your organization:\n"
         + "\n".join(details)
@@ -777,13 +785,31 @@ def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult
         for line in result.lines
     )
     review_requests = _provider_review_requests(bill, result, mapped_lines)
+    discrepancy_total = round_money(
+        sum(
+            (
+                abs(line.delta)
+                for line in mapped_lines
+                if line.status == "discrepancy"
+                and line.unit == "USD"
+                and line.root_cause_id is None
+                and line.delta is not None
+            ),
+            Decimal("0"),
+        )
+    )
+    headline = result.headline
+    if result.verdict == "possible_discrepancy":
+        headline = (
+            f"Possible {_currency(discrepancy_total)} source-supported discrepancy"
+        )
     return UtilityAuditResult(
         schema_version="2.0",
         fixture_kind=result.fixture_kind,
         verdict=result.verdict,
         verification_level="tariff_verified",
-        headline=result.headline,
-        discrepancy_total=result.discrepancy_total,
+        headline=headline,
+        discrepancy_total=discrepancy_total,
         currency=bill.current_charges.unit,
         lines=mapped_lines,
         tariff=result.tariff,

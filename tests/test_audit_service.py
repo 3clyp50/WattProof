@@ -642,6 +642,8 @@ def test_reconciliation_only_amount_due_root_gets_neutral_request() -> None:
     lines = {line.id: line for line in result.lines}
 
     assert result.verdict == "possible_discrepancy"
+    assert result.discrepancy_total == Decimal("2.00")
+    assert result.headline == "Possible $2.00 source-supported discrepancy"
     assert tuple(request.provider for request in result.review_requests) == (
         "Consolidated statement",
     )
@@ -749,6 +751,8 @@ def test_delivery_subtotal_root_explains_current_charges_symptom() -> None:
     assert lines["delivery_subtotal"].root_cause_id is None
     assert lines["current_charges"].status == "discrepancy"
     assert lines["current_charges"].root_cause_id == "delivery_subtotal"
+    assert result.discrepancy_total == Decimal("2.00")
+    assert result.headline == "Possible $2.00 source-supported discrepancy"
     assert tuple(
         request.grounded_audit_line_ids for request in result.review_requests
     ) == (("delivery_subtotal",),)
@@ -844,6 +848,56 @@ def test_unrelated_reconciliation_discrepancy_is_not_collapsed_into_tariff_root(
     assert lines["delivery_subtotal"].root_cause_id == "pge_peak_energy"
     assert lines["amount_due"].status == "discrepancy"
     assert lines["amount_due"].root_cause_id is None
+    assert result.discrepancy_total == Decimal("7.00")
+    assert result.headline == "Possible $7.00 source-supported discrepancy"
+
+
+def test_clean_synthetic_provider_drafts_keep_demo_warning_and_scope() -> None:
+    bill = _changed_charge_amount(
+        load_sample("synthetic"),
+        "pge_peak_energy",
+        Decimal("-5.00"),
+    )
+
+    legacy = audit_bill(bill)
+    result = audit_extraction(bill)
+    sections = {line.id: line.section_id for line in result.lines}
+
+    assert result.verdict == "reconciled"
+    assert result.discrepancy_total == Decimal("0.00")
+    assert result.headline == legacy.headline
+    assert tuple(request.provider for request in result.review_requests) == (
+        bill.delivery_provider.value,
+        bill.generation_provider.value,
+    )
+    for request, expected_section in zip(
+        result.review_requests,
+        ("pge_delivery", "cca_generation"),
+        strict=True,
+    ):
+        assert "synthetic demo request" in request.body.lower()
+        assert (
+            "no real customer bill contained this demo condition"
+            in request.body.lower()
+        )
+        assert request.grounded_audit_line_ids
+        assert all(
+            sections[line_id] == expected_section
+            for line_id in request.grounded_audit_line_ids
+        )
+        own_labels = {
+            line.label
+            for line in result.lines
+            if line.id in request.grounded_audit_line_ids
+        }
+        other_labels = {
+            line.label
+            for line in result.lines
+            if line.section_id in {"pge_delivery", "cca_generation"}
+            and line.section_id != expected_section
+        }
+        assert all(label in request.body for label in own_labels)
+        assert all(label not in request.body for label in other_labels)
 
 
 def test_synthetic_neutral_request_keeps_demo_warning() -> None:
