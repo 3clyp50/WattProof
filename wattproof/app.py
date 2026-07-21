@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import tempfile
 from datetime import timedelta
+from decimal import DecimalException
+from json import JSONDecodeError
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request, send_file, session
 from pydantic import BaseModel, ValidationError
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from .audit import UnsupportedBillError, audit_bill
+from .audit import UnsupportedBillError
+from .audit_service import audit_extraction
 from .codex import (
     CODEX_MODEL_LABEL,
     CodexNotConnectedError,
@@ -20,6 +24,7 @@ from .codex import (
 )
 from .extract import (
     MAX_FILE_BYTES,
+    ExtractionLoginRequiredError,
     ExtractionUnavailableError,
     InvalidDocumentError,
     UnsupportedDocumentError,
@@ -27,11 +32,58 @@ from .extract import (
 )
 from .fixtures import PROJECT_ROOT, load_sample
 from .models import BillExtraction
+from .numeric import RawJSONDecimal
 from .tariffs import SourceIntegrityError
+from .utility_fixtures import load_utility_sample
+from .utility_models import UtilityDocument
+
+MAX_AUDIT_JSON_NUMBER_CHARACTERS = 128
 
 
 def _json_model(model: BaseModel) -> dict[str, Any]:
     return model.model_dump(mode="json")
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON number: {value}")
+
+
+def _parse_json_decimal(value: str) -> RawJSONDecimal:
+    if len(value) > MAX_AUDIT_JSON_NUMBER_CHARACTERS:
+        raise ValueError("JSON number is too long")
+    try:
+        return RawJSONDecimal(value)
+    except DecimalException as error:
+        raise ValueError("JSON decimal is outside the supported parser range") from error
+
+
+def _parse_json_integer(value: str) -> int:
+    if len(value) > MAX_AUDIT_JSON_NUMBER_CHARACTERS:
+        raise ValueError("JSON number is too long")
+    return int(value)
+
+
+def _exact_audit_payload() -> dict[str, Any] | None:
+    """Decode audit numbers exactly instead of first rounding them through float."""
+
+    if not request.is_json:
+        return None
+    try:
+        payload: Any = json.loads(
+            request.get_data(cache=True),
+            parse_float=_parse_json_decimal,
+            parse_int=_parse_json_integer,
+            parse_constant=_reject_json_constant,
+        )
+    except (
+        JSONDecodeError,
+        OverflowError,
+        RecursionError,
+        UnicodeDecodeError,
+        ValueError,
+    ):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def create_app(codex_manager: CodexSessionManager | None = None) -> Flask:
@@ -74,12 +126,25 @@ def create_app(codex_manager: CodexSessionManager | None = None) -> Flask:
 
     @app.get("/api/sample/<kind>")
     def sample(kind: str) -> Response | tuple[Response, int]:
-        if kind not in {"authentic", "synthetic"}:
-            return jsonify(error="Choose the authentic or synthetic sample."), 404
-        sample_kind: Literal["authentic", "synthetic"] = (
-            "authentic" if kind == "authentic" else "synthetic"
-        )
-        return jsonify(extraction=_json_model(load_sample(sample_kind)))
+        extraction: BillExtraction | UtilityDocument
+        if kind == "authentic":
+            extraction = load_sample("authentic")
+        elif kind == "synthetic":
+            extraction = load_sample("synthetic")
+        elif kind == "duke":
+            extraction = load_utility_sample("duke")
+        elif kind == "centerpoint":
+            extraction = load_utility_sample("centerpoint")
+        elif kind == "bloomington":
+            extraction = load_utility_sample("bloomington")
+        else:
+            return jsonify(
+                error=(
+                    "Choose one of: authentic, synthetic, duke, centerpoint, "
+                    "bloomington."
+                )
+            ), 404
+        return jsonify(extraction=_json_model(extraction))
 
     @app.post("/api/codex/login")
     def codex_login() -> Response | tuple[Response, int]:
@@ -136,11 +201,20 @@ def create_app(codex_manager: CodexSessionManager | None = None) -> Flask:
 
     @app.post("/api/audit")
     def audit() -> Response | tuple[Response, int]:
-        payload = request.get_json(silent=True)
-        if not isinstance(payload, dict):
+        payload = _exact_audit_payload()
+        if payload is None:
             return jsonify(error="The reviewed extraction is missing."), 400
-        extraction = BillExtraction.model_validate(payload)
-        return jsonify(audit=_json_model(audit_bill(extraction)))
+        schema_version = payload.get("schema_version")
+        extraction: BillExtraction | UtilityDocument
+        if schema_version == "1.0":
+            extraction = BillExtraction.model_validate(payload)
+        elif schema_version == "2.0":
+            extraction = UtilityDocument.model_validate(payload)
+        else:
+            return jsonify(
+                error="Review schema_version: expected '1.0' or '2.0'."
+            ), 422
+        return jsonify(audit=_json_model(audit_extraction(extraction)))
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(_error: RequestEntityTooLarge) -> tuple[Response, int]:
@@ -148,11 +222,29 @@ def create_app(codex_manager: CodexSessionManager | None = None) -> Flask:
 
     @app.errorhandler(ValidationError)
     def validation_error(error: ValidationError) -> tuple[Response, int]:
-        first = error.errors(include_url=False)[0]
-        location = ".".join(str(part) for part in first["loc"])
-        message = str(first["msg"]).removeprefix("Value error, ")
-        prefix = f"Review {location}: " if location else "Review: "
-        return jsonify(error=f"{prefix}{message}"), 422
+        errors = error.errors(include_url=False)
+        first = next(
+            (
+                item
+                for item in errors
+                if "utility-bill" in str(item["msg"])
+            ),
+            errors[0],
+        )
+        location = ".".join(
+            str(part)
+            for part in first["loc"]
+            if not (
+                isinstance(part, str)
+                and part.startswith(("function-after[", "function-before["))
+            )
+        ) or "document"
+        message = str(first["msg"])
+        if "percent_of_charges references unknown charge ID:" in message:
+            message = (
+                "Value error, percent_of_charges references an unknown charge ID"
+            )
+        return jsonify(error=f"Review {location}: {message}"), 422
 
     @app.errorhandler(SourceIntegrityError)
     def source_integrity_error(_error: SourceIntegrityError) -> tuple[Response, int]:
@@ -166,9 +258,9 @@ def create_app(codex_manager: CodexSessionManager | None = None) -> Flask:
     def reviewable_error(error: Exception) -> tuple[Response, int]:
         return jsonify(error=str(error)), 422
 
-    @app.errorhandler(ExtractionUnavailableError)
+    @app.errorhandler(ExtractionLoginRequiredError)
     def extraction_login_required(
-        error: ExtractionUnavailableError,
+        error: ExtractionLoginRequiredError,
     ) -> tuple[Response, int]:
         return jsonify(error=str(error), code="codex_login_required"), 401
 
@@ -179,6 +271,10 @@ def create_app(codex_manager: CodexSessionManager | None = None) -> Flask:
     @app.errorhandler(CodexUnavailableError)
     def codex_unavailable(error: CodexUnavailableError) -> tuple[Response, int]:
         return jsonify(error=str(error), code="codex_unavailable"), 503
+
+    @app.errorhandler(ExtractionUnavailableError)
+    def extraction_unavailable(error: ExtractionUnavailableError) -> tuple[Response, int]:
+        return jsonify(error=str(error), code="extraction_unavailable"), 503
 
     for error_type in (
         InvalidDocumentError,

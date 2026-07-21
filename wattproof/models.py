@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EvidenceStatus = Literal["printed", "inferred"]
+from .numeric import (
+    ConfidenceDecimal,
+    UtilityDecimal,
+    UtilityInteger,
+    abs_exact,
+    add_exact,
+    subtract_exact,
+)
+
+EvidenceStatus = Literal["printed", "inferred", "user_corrected"]
 AuditStatus = Literal[
     "verified", "discrepancy", "estimated", "cannot_verify", "needs_review"
 ]
@@ -15,10 +25,21 @@ AuditStatus = Literal[
 class EvidenceBase(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    source_page: int = Field(ge=1)
+    source_page: UtilityInteger = Field(ge=1, le=20)
     source_text: str = Field(min_length=1)
-    confidence: float = Field(ge=0, le=1)
+    confidence: ConfidenceDecimal
     status: EvidenceStatus
+    original_value: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def validate_correction(self) -> Self:
+        if self.status == "user_corrected" and self.original_value is None:
+            raise ValueError("user-corrected facts require original_value")
+        if self.status != "user_corrected" and self.original_value is not None:
+            raise ValueError("original_value is only valid for user-corrected facts")
+        return self
 
 
 class TextFact(EvidenceBase):
@@ -30,12 +51,12 @@ class DateFact(EvidenceBase):
 
 
 class IntegerFact(EvidenceBase):
-    value: int
+    value: UtilityInteger
     unit: str | None = None
 
 
 class DecimalFact(EvidenceBase):
-    value: Decimal
+    value: UtilityDecimal
     unit: str
 
 
@@ -51,6 +72,37 @@ class ChargeLine(BaseModel):
     billed_amount: DecimalFact
 
 
+def iter_bill_evidence(bill: BillExtraction) -> Iterator[EvidenceBase]:
+    yield bill.delivery_provider
+    yield bill.generation_provider
+    yield bill.delivery_schedule
+    yield bill.generation_schedule
+    yield bill.statement_date
+    yield bill.service_start
+    yield bill.service_end
+    yield bill.billing_days
+    yield bill.total_usage
+    yield bill.peak_usage
+    yield bill.off_peak_usage
+    yield bill.baseline_territory
+    yield bill.heat_source
+    yield bill.baseline_allowance
+    yield bill.daily_baseline_quantity
+    if bill.meter_read_status is not None:
+        yield bill.meter_read_status
+    for line in bill.charges:
+        if line.quantity is not None:
+            yield line.quantity
+        if line.rate is not None:
+            yield line.rate
+        yield line.billed_amount
+    yield bill.delivery_subtotal
+    yield bill.generation_subtotal
+    yield bill.current_charges
+    yield bill.outstanding_balance
+    yield bill.amount_due
+
+
 class BillExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -58,6 +110,7 @@ class BillExtraction(BaseModel):
     fixture_kind: Literal["authentic", "synthetic", "uploaded"]
     synthetic_notice: str | None = None
     document_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    page_count: UtilityInteger | None = Field(default=None, ge=1, le=20)
     delivery_provider: TextFact
     generation_provider: TextFact
     delivery_schedule: TextFact
@@ -90,16 +143,29 @@ class BillExtraction(BaseModel):
         if self.billing_days.value not in {day_span, day_span + 1}:
             raise ValueError("billing_days does not match the printed service period")
 
-        if abs(
-            self.peak_usage.value
-            + self.off_peak_usage.value
-            - self.total_usage.value
-        ) > Decimal("0.001"):
+        usage_sum = add_exact(self.peak_usage.value, self.off_peak_usage.value)
+        if abs_exact(subtract_exact(usage_sum, self.total_usage.value)) > Decimal(
+            "0.001"
+        ):
             raise ValueError("peak and off-peak quantities do not equal total usage")
 
         charge_ids = [line.id for line in self.charges]
         if len(charge_ids) != len(set(charge_ids)):
             raise ValueError("charge line IDs must be unique")
+
+        charge_sections = {line.section for line in self.charges}
+        for required_section in ("pge_delivery", "cca_generation"):
+            if required_section not in charge_sections:
+                raise ValueError(
+                    f"charges must include at least one {required_section} charge"
+                )
+
+        if self.page_count is not None and any(
+            fact.source_page > self.page_count for fact in iter_bill_evidence(self)
+        ):
+            raise ValueError(
+                "evidence source_page cannot exceed authoritative page_count"
+            )
 
         if self.fixture_kind == "synthetic" and not self.synthetic_notice:
             raise ValueError("synthetic fixtures require a visible notice")

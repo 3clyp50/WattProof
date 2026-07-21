@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
@@ -15,22 +16,28 @@ from wattproof.app import create_app
 from wattproof.audit import UnsupportedBillError, audit_bill, round_money
 from wattproof.cli import main
 from wattproof.codex import (
+    CodexAppServer,
     CodexConnectionStatus,
+    CodexNotConnectedError,
     CodexSessionManager,
+    CodexUnavailableError,
     DeviceLogin,
     strict_bill_schema,
 )
 from wattproof.extract import (
     MAX_FILE_BYTES,
     MAX_PAGES,
-    ExtractionUnavailableError,
+    ExtractionLoginRequiredError,
     InvalidDocumentError,
+    RenderedPage,
     UnsupportedDocumentError,
     extract_pdf,
 )
 from wattproof.fixtures import FIXTURES_DIR, PROJECT_ROOT, load_sample
 from wattproof.models import AuditLine, AuditResult, BillExtraction, DateFact, TextFact
 from wattproof.tariffs import SourceIntegrityError, load_tariff_bundle
+from wattproof.utility_fixtures import load_utility_sample
+from wattproof.utility_models import UtilityDocument
 
 
 def _lines(result: AuditResult) -> dict[str, AuditLine]:
@@ -41,7 +48,7 @@ class _FakeCodexClient:
     def __init__(self) -> None:
         self.is_connected = False
         self.closed = False
-        self.extractions: list[tuple[str, str]] = []
+        self.extractions: list[tuple[tuple[int, ...], str, str, int]] = []
 
     @property
     def connected(self) -> bool:
@@ -58,12 +65,27 @@ class _FakeCodexClient:
             return CodexConnectionStatus("connected", "plus")
         return CodexConnectionStatus("pending")
 
-    def extract_bill(self, text: str, document_sha256: str) -> BillExtraction:
-        self.extractions.append((text, document_sha256))
-        raw = load_sample("authentic").model_dump(mode="json")
+    def extract_bill(
+        self,
+        rendered_pages: tuple[RenderedPage, ...],
+        native_hint: str,
+        document_sha256: str,
+        page_count: int,
+    ) -> UtilityDocument:
+        self.extractions.append(
+            (
+                tuple(page.page for page in rendered_pages),
+                native_hint,
+                document_sha256,
+                page_count,
+            )
+        )
+        raw = load_utility_sample("duke").model_dump(mode="json")
         raw["fixture_kind"] = "uploaded"
         raw["document_sha256"] = document_sha256
-        return BillExtraction.model_validate(raw)
+        raw["page_count"] = page_count
+        raw["source_url"] = None
+        return UtilityDocument.model_validate(raw)
 
     def close(self) -> None:
         self.closed = True
@@ -71,8 +93,11 @@ class _FakeCodexClient:
 
 def test_authentic_extraction_matches_golden_fixture() -> None:
     extracted = extract_pdf(PROJECT_ROOT / "assets/pge-anonymous-3ce-sample-bill.pdf")
-    golden = BillExtraction.model_validate_json(
-        (FIXTURES_DIR / "authentic-extraction.json").read_text(encoding="utf-8")
+    golden = BillExtraction.model_validate(
+        json.loads(
+            (FIXTURES_DIR / "authentic-extraction.json").read_text(encoding="utf-8"),
+            parse_float=Decimal,
+        )
     )
     assert extracted == golden
     assert extracted.total_usage.value == Decimal("327.119")
@@ -101,6 +126,84 @@ def test_codex_output_schema_is_strict_and_uses_supported_regex() -> None:
                 assert_strict(value)
 
     assert_strict(schema)
+    assert "sections" in schema["properties"]
+    assert "delivery_provider" not in schema["properties"]
+
+
+def test_codex_visual_extractor_uses_images_and_server_owned_v2_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server = object.__new__(CodexAppServer)
+    setattr(server, "_state", "connected")
+    setattr(server, "_lock", threading.RLock())
+    setattr(server, "_extract_lock", threading.Lock())
+    setattr(server, "_workspace", tmp_path)
+    calls: list[tuple[str, dict[str, object], float]] = []
+
+    def fake_call(
+        method: str,
+        params: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        calls.append((method, params, timeout))
+        if method == "thread/start":
+            return {"thread": {"id": "thread-1"}}
+        return {"turn": {"id": "turn-1"}}
+
+    raw = load_utility_sample("bloomington").model_dump(mode="json")
+    raw["fixture_kind"] = "uploaded"
+    raw["document_sha256"] = "a" * 64
+    raw["source_url"] = "https://untrusted.example/claimed-source"
+
+    monkeypatch.setattr(server, "_call", fake_call)
+    monkeypatch.setattr(
+        server,
+        "_wait_for_turn",
+        lambda _turn_id, timeout: ({"status": "completed"}, json.dumps(raw)),
+    )
+    rendered_pages = (
+        RenderedPage(
+            page=1,
+            data_url="data:image/png;base64,iVBORw0KGgo=",
+        ),
+    )
+
+    extracted = server.extract_bill(
+        rendered_pages,
+        "[PAGE 1]\nUNTRUSTED locator text",
+        "f" * 64,
+        1,
+    )
+
+    turn_params = calls[1][1]
+    turn_input = turn_params["input"]
+    assert isinstance(turn_input, list)
+    assert [item["type"] for item in turn_input] == [
+        "text",
+        "text",
+        "image",
+        "text",
+    ]
+    assert turn_input[2]["url"] == rendered_pages[0].data_url
+    assert "UNTRUSTED_NATIVE_TEXT_HINT" in turn_input[-1]["text"]
+    assert turn_params["outputSchema"] == strict_bill_schema()
+    assert extracted.schema_version == "2.0"
+    assert extracted.fixture_kind == "uploaded"
+    assert extracted.document_sha256 == "f" * 64
+    assert extracted.page_count == 1
+    assert extracted.source_url is None
+
+
+def test_codex_visual_extractor_fails_closed_when_disconnected(tmp_path: Path) -> None:
+    server = object.__new__(CodexAppServer)
+    setattr(server, "_state", "disconnected")
+    setattr(server, "_lock", threading.RLock())
+    setattr(server, "_workspace", tmp_path)
+
+    with pytest.raises(CodexNotConnectedError, match="Connect Codex"):
+        server.extract_bill((), "native-only", "f" * 64, 1)
 
 
 def test_unknown_pdf_can_use_a_connected_model_extractor(
@@ -108,35 +211,53 @@ def test_unknown_pdf_can_use_a_connected_model_extractor(
 ) -> None:
     pdf = tmp_path / "unknown.pdf"
     pdf.write_bytes(b"%PDF-unknown-native-bill")
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[tuple[int, ...], str, str, int]] = []
 
     monkeypatch.setattr("wattproof.extract._page_count", lambda _path: 1)
+    monkeypatch.setattr(
+        "wattproof.extract._render_pages",
+        lambda _path, _count: (
+            RenderedPage(
+                page=1,
+                data_url="data:image/png;base64,iVBORw0KGgo=",
+            ),
+        ),
+    )
     monkeypatch.setattr(
         "wattproof.extract._native_text", lambda _path: "[PAGE 1]\nBill evidence"
     )
 
-    def model_extractor(text: str, digest: str) -> BillExtraction:
-        calls.append((text, digest))
-        return load_sample("authentic")
+    def model_extractor(
+        rendered_pages: tuple[RenderedPage, ...],
+        native_hint: str,
+        digest: str,
+        page_count: int,
+    ) -> UtilityDocument:
+        calls.append(
+            (
+                tuple(page.page for page in rendered_pages),
+                native_hint,
+                digest,
+                page_count,
+            )
+        )
+        return load_utility_sample("duke")
 
     result = extract_pdf(pdf, model_extractor)
 
-    assert result == load_sample("authentic")
-    assert calls[0][0] == "[PAGE 1]\nBill evidence"
-    assert re.fullmatch(r"[a-f0-9]{64}", calls[0][1])
+    assert result == load_utility_sample("duke")
+    assert calls[0][0] == (1,)
+    assert calls[0][1] == "[PAGE 1]\nBill evidence"
+    assert re.fullmatch(r"[a-f0-9]{64}", calls[0][2])
+    assert calls[0][3] == 1
 
 
 def test_unknown_pdf_requires_a_connected_codex_session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     pdf = tmp_path / "unknown.pdf"
     pdf.write_bytes(b"%PDF-unknown-native-bill")
-    monkeypatch.setattr("wattproof.extract._page_count", lambda _path: 1)
-    monkeypatch.setattr(
-        "wattproof.extract._native_text", lambda _path: "[PAGE 1]\nBill evidence"
-    )
-
-    with pytest.raises(ExtractionUnavailableError, match="Connect Codex"):
+    with pytest.raises(ExtractionLoginRequiredError, match="Connect Codex"):
         extract_pdf(pdf)
 
 
@@ -355,6 +476,26 @@ def test_oversized_pdf_is_rejected_before_processing(tmp_path: Path) -> None:
         extract_pdf(file)
 
 
+def test_oversized_pdf_is_rejected_before_read_render_or_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    file = tmp_path / "sparse-too-large.pdf"
+    with file.open("wb") as stream:
+        stream.write(b"%PDF-")
+        stream.truncate(MAX_FILE_BYTES + 1)
+
+    def unexpected_work(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("oversized PDFs must stop at the stat preflight")
+
+    monkeypatch.setattr(Path, "read_bytes", unexpected_work)
+    monkeypatch.setattr("wattproof.extract.subprocess.run", unexpected_work)
+    for name in ("_page_count", "_render_pages", "_native_text"):
+        monkeypatch.setattr(f"wattproof.extract.{name}", unexpected_work)
+
+    with pytest.raises(InvalidDocumentError, match="10 MB"):
+        extract_pdf(file)
+
+
 def test_excess_page_count_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -366,7 +507,7 @@ def test_excess_page_count_is_rejected(
 
     monkeypatch.setattr("wattproof.extract._page_count", page_count)
     with pytest.raises(InvalidDocumentError, match="20 pages"):
-        extract_pdf(file)
+        extract_pdf(file, lambda *_args: load_utility_sample("duke"))
 
 
 def test_cli_happy_path_and_error(capsys: pytest.CaptureFixture[str]) -> None:
@@ -379,25 +520,113 @@ def test_cli_happy_path_and_error(capsys: pytest.CaptureFixture[str]) -> None:
     assert "does not exist" in output.err
 
 
+def test_cli_audits_provider_neutral_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "wattproof.cli.extract_pdf",
+        lambda _path: load_utility_sample("duke"),
+    )
+
+    assert main(["--file", "unknown.pdf"]) == 0
+    output = capsys.readouterr()
+    assert "Verification level: Internally reconciled" in output.out
+    assert "tariff verified" not in output.out.lower()
+    assert output.err == ""
+
+
+def test_cli_labels_multi_root_dependent_discrepancies(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    document = load_utility_sample("duke")
+    electricity = document.sections[0]
+    changed = electricity.model_copy(
+        update={
+            "charges": tuple(
+                charge.model_copy(
+                    update={
+                        "amount": charge.amount.model_copy(
+                            update={"value": charge.amount.value + Decimal("1.00")}
+                        )
+                    }
+                )
+                if charge.id in {"energy_tier_1", "energy_tier_2"}
+                else charge
+                for charge in electricity.charges
+            )
+        }
+    )
+    changed_document = document.model_copy(
+        update={"sections": (changed, *document.sections[1:])}
+    )
+    monkeypatch.setattr("wattproof.cli.extract_pdf", lambda _path: changed_document)
+
+    assert main(["--file", "multi-root.pdf"]) == 0
+    output = capsys.readouterr()
+
+    assert "Possible discrepancy found" in output.out
+    assert "Printed energy tier quantities" not in output.out
+    assert "derived from roots: charge::energy_tier_1, charge::energy_tier_2" in (
+        output.out
+    )
+
+
 def test_web_flow_exposes_all_five_steps() -> None:
     client = create_app().test_client()
     response = client.get("/")
     page = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    for label in ("Upload", "Review", "Audit", "Compare", "Act"):
+    for label in ("Upload", "Review", "Verify", "Household", "Next steps"):
         assert f"<b>{label}</b>" in page
-    assert "GPT-5.6 may read" in page
+    for obsolete_label in ("Audit", "Compare", "Act"):
+        assert f"<b>{obsolete_label}</b>" not in page
+    assert "Personal PDFs use a connected Codex session" in page
     assert "Decimal arithmetic handles money" in page
     assert "Local sample mode" not in page
-    assert 'id="global-message-text"' in page
-    assert 'class="message-mark" aria-hidden="true"' in page
-    assert 'id="charge-review"' in page
-    assert 'id="audit-details"' in page
-    assert 'id="show-all-lines"' not in page
+    assert 'id="codex-connect"' in page
+    assert 'id="codex-dialog"' in page
     assert "logo-mark.png" in page
-    assert '<h2 id="comparison-headline"></h2>' not in page
-    assert "Interval usage is required." in page
+
+
+def test_web_shell_keeps_provider_neutral_accessibility_contract() -> None:
+    page = create_app().test_client().get("/").get_data(as_text=True)
+
+    assert 'aria-label="WattProof home"' in page
+    assert 'class="brand-logo"' in page
+    assert 'alt=""' in page
+    assert "favicon.svg" not in page
+    assert "header-proof" not in page
+    assert '<h2 id="document-placeholder-title">' in page
+    assert '<h3 id="document-placeholder-title">' not in page
+    assert (
+        '<div class="table-scroll" role="region" '
+        'aria-label="Line-by-line calculation ledger" tabindex="0">'
+    ) in page
+    assert 'id="show-all-lines"' in page
+    for obsolete_id in ("charge-review", "audit-details", "copy-letter"):
+        assert f'id="{obsolete_id}"' not in page
+    for title_id in (
+        "upload-title",
+        "review-title",
+        "verify-title",
+        "household-title",
+        "next-steps-title",
+    ):
+        assert f'id="{title_id}" tabindex="-1"' in page
+
+
+def test_web_script_announces_loading_and_provider_copy_feedback() -> None:
+    script = (PROJECT_ROOT / "wattproof/static/app.js").read_text(encoding="utf-8")
+
+    assert 'button.setAttribute("aria-busy", "true");' in script
+    assert 'button.removeAttribute("aria-busy");' in script
+    assert 'data-copy-request="${index}" aria-live="polite"' in script
+    assert 'copyButton.textContent = "Copied — review before sending";' in script
+    assert 'copyButton.textContent = "Copy request";' in script
+    assert '.focus({ preventScroll: true })' in script
 
 
 def test_health_check() -> None:
@@ -471,10 +700,25 @@ def test_connected_codex_session_extracts_an_unknown_upload(
 
     def fake_extract_pdf(
         _path: Path,
-        model_extractor: Callable[[str, str], BillExtraction] | None = None,
-    ) -> BillExtraction:
-        assert model_extractor is not None
-        return model_extractor("[PAGE 1]\nPrivate bill evidence", "f" * 64)
+        visual_extractor: Callable[
+            [tuple[RenderedPage, ...], str, str, int], UtilityDocument
+        ]
+        | None = None,
+    ) -> UtilityDocument:
+        assert visual_extractor is not None
+        pages = tuple(
+            RenderedPage(
+                page=page,
+                data_url="data:image/png;base64,iVBORw0KGgo=",
+            )
+            for page in range(1, load_utility_sample("duke").page_count + 1)
+        )
+        return visual_extractor(
+            pages,
+            "[PAGE 1]\nPrivate bill evidence",
+            "f" * 64,
+            len(pages),
+        )
 
     monkeypatch.setattr("wattproof.app.extract_pdf", fake_extract_pdf)
     response = client.post(
@@ -486,7 +730,48 @@ def test_connected_codex_session_extracts_an_unknown_upload(
 
     assert response.status_code == 200
     assert response.get_json()["extraction"]["fixture_kind"] == "uploaded"
-    assert fake.extractions == [("[PAGE 1]\nPrivate bill evidence", "f" * 64)]
+    assert fake.extractions == [
+        (
+            tuple(range(1, load_utility_sample("duke").page_count + 1)),
+            "[PAGE 1]\nPrivate bill evidence",
+            "f" * 64,
+            load_utility_sample("duke").page_count,
+        )
+    ]
+
+
+def test_unknown_upload_without_connected_codex_returns_login_required() -> None:
+    response = create_app().test_client().post(
+        "/api/extract",
+        data={"bill": (BytesIO(b"%PDF-private"), "private.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["code"] == "codex_login_required"
+    assert "Connect Codex" in response.get_json()["error"]
+
+
+def test_codex_process_failure_returns_controlled_unavailable_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(_path: Path, _visual_extractor: object = None) -> None:
+        raise CodexUnavailableError("Codex could not complete this request.")
+
+    monkeypatch.setattr("wattproof.app.extract_pdf", unavailable)
+    response = create_app().test_client().post(
+        "/api/extract",
+        data={"bill": (BytesIO(b"%PDF-private"), "private.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "code": "codex_unavailable",
+        "error": "Codex could not complete this request.",
+    }
 
 
 def test_web_sample_review_to_audit_api() -> None:
@@ -500,7 +785,7 @@ def test_web_sample_review_to_audit_api() -> None:
     assert audit_response.status_code == 200
     assert result["verdict"] == "reconciled"
     assert result["comparison"]["status"] == "cannot_verify"
-    assert result["review_request"]["requires_user_review"] is True
+    assert result["review_requests"][0]["requires_user_review"] is True
 
 
 def test_web_upload_uses_known_public_fixture_without_sign_in() -> None:
@@ -523,6 +808,26 @@ def test_web_upload_uses_known_public_fixture_without_sign_in() -> None:
     assert response.get_json()["extraction"]["delivery_schedule"]["value"] == "E-TOU-C"
 
 
+def test_web_upload_returns_provider_neutral_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "wattproof.app.extract_pdf",
+        lambda _path, _visual_extractor=None: load_utility_sample("duke"),
+    )
+    response = create_app().test_client().post(
+        "/api/extract",
+        data={"bill": (BytesIO(b"%PDF-placeholder"), "duke.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["extraction"]["schema_version"] == "2.0"
+    assert payload["extraction"]["fixture_kind"] == "duke"
+
+
 def test_web_validation_returns_reviewable_field() -> None:
     client = create_app().test_client()
     extraction = load_sample("authentic").model_dump(mode="json")
@@ -530,8 +835,8 @@ def test_web_validation_returns_reviewable_field() -> None:
     response = client.post("/api/audit", json=extraction)
 
     assert response.status_code == 422
-    assert response.get_json()["error"] == (
-        "Review: peak and off-peak quantities do not equal total usage"
+    assert "peak and off-peak quantities do not equal total usage" in (
+        response.get_json()["error"]
     )
 
 
@@ -539,9 +844,12 @@ def test_web_hides_tariff_source_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def broken_audit(_extraction: BillExtraction) -> AuditResult:
-        raise SourceIntegrityError("Missing tariff snapshot: /srv/private/rates.pdf")
+        raise SourceIntegrityError(
+            "Missing tariff snapshot: /srv/private/rates.pdf",
+            public_message="Missing tariff snapshot for public evidence.",
+        )
 
-    monkeypatch.setattr("wattproof.app.audit_bill", broken_audit)
+    monkeypatch.setattr("wattproof.app.audit_extraction", broken_audit)
     extraction = load_sample("authentic").model_dump(mode="json")
     response = create_app().test_client().post("/api/audit", json=extraction)
 

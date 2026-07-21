@@ -106,7 +106,7 @@ The authentic fixture reconciles internally:
 - Current electricity charges are `$62.11 + $34.33 = $96.44`.
 - The prior `$0.20` credit produces the printed amount due: `$96.44 - $0.20 = $96.24`.
 
-## Support boundary
+## PG&E/3CE support boundary
 
 | Bill line | MVP treatment | Reason |
 | --- | --- | --- |
@@ -114,7 +114,7 @@ The authentic fixture reconciles internally:
 | 3CE peak/off-peak generation | `calculable` | Exact period quantities and effective official rates are available. |
 | Franchise fee surcharge | `calculable` | Exact total usage and the published 2020-vintage rate are available. |
 | Section subtotals and amount due | `reconcilable_only` | Printed arithmetic can be checked independently of tariff eligibility. |
-| 3CE utility users' tax | `calculable` | The bill prints the 1.000% rate and the taxable period charges. |
+| 3CE utility users' tax | `printed_math_only` | The bill prints the 1.000% rate and taxable period charges, so their arithmetic can be checked. No independently archived source establishes that percentage as the governing tariff. |
 | Generation credit | `unsupported` | The matching PG&E generation-credit component source is not archived. |
 | PCIA | `unsupported` | The 3CE sheet's 2020-vintage rate calculates `$4.50`, not the printed `$4.53`; WattProof must not force a match. |
 | Energy Commission tax | `unsupported` | The exact effective tax source has not been archived. |
@@ -123,3 +123,139 @@ The authentic fixture reconciles internally:
 | Alternative-plan savings | `cannot_verify` | Aggregate 4-9 p.m. usage cannot reconstruct 5-8 p.m. or hourly usage; interval data is required. |
 
 This boundary is intentional: WattProof reports unsupported lines and still verifies every supported dollar without inventing the rest.
+
+## Provider-neutral public fixture ground truth
+
+Retrieved and hash-checked on **2026-07-21**. These Indiana documents are public
+adversarial fixtures for a provider-neutral engine, not a geographic product boundary
+and not a tariff catalog. They support visible-evidence extraction and deterministic
+internal reconciliation only.
+
+The optional fetcher downloads the documents into ignored `tmp/public-samples/`:
+
+```bash
+scripts/fetch-public-samples.sh
+```
+
+Third-party PDFs are not tracked. A downloaded or pre-existing file is usable only
+when its SHA-256 matches the value recorded below.
+
+### Duke Energy Indiana electricity guide
+
+- Official URL: https://www.duke-energy.com/-/media/pdfs/bill-examples/260482-bill-tutorial-handout-res-dei.pdf
+- Local optional filename: `tmp/public-samples/duke-electricity.pdf`
+- SHA-256: `b131c36a215762796e72f3d20986fbea7e64e2dd611081d8936f8442102c3e9a`
+- Document shape: three native-text pages with a complete illustrative residential
+  electricity statement.
+- Evidence pages: meter and usage on page 1, current charge lines on page 2, and the
+  tax explanation on page 3.
+- Highest supported level: `internally_reconciled`.
+
+Visible meter arithmetic:
+
+- Previous reading `137956 kWh`.
+- Current reading `138957 kWh`.
+- `138957 - 137956 = 1001 kWh`.
+
+Visible pre-tax charge arithmetic:
+
+| Line | Printed operands | Printed amount |
+| --- | --- | ---: |
+| Connection charge | fixed | $13.70 |
+| First energy tier | `300 kWh x $0.186556/kWh` | $55.97 |
+| Second energy tier | `700 kWh x $0.135777/kWh` | $95.04 |
+| Remaining energy tier | `1 kWh x $0.123051/kWh` | $0.12 |
+| Rider 60 | `1001 kWh x $0.006090/kWh` | $6.10 |
+| Rider 62 | `1001 kWh x -$0.003619/kWh` | -$3.62 |
+| Rider 65 | `1001 kWh x $0.002259/kWh` | $2.26 |
+| Rider 66 | `1001 kWh x $0.002717/kWh` | $2.72 |
+| Rider 67 | `1001 kWh x -$0.006040/kWh` | -$6.05 |
+| Rider 68 | `1001 kWh x $0.001947/kWh` | $1.95 |
+| Rider 70 | `1001 kWh x $0.000496/kWh` | $0.50 |
+| Rider 73 | `1001 kWh x $0.000036/kWh` | $0.04 |
+| Rider 74 | `1001 kWh x -$0.001064/kWh` | -$1.07 |
+
+The pre-tax lines sum to the printed `$167.66`. The guide prints a seven-percent
+Indiana state tax over those identified lines: `$167.66 x 0.07 = $11.7362`, rounded
+half-up to `$11.74`. The printed total is `$167.66 + $11.74 = $179.40`.
+
+Limitation: the guide explicitly describes its dates and charges as illustrative. Its
+printed schedule and rates can test tier and rider arithmetic, but they are not
+independent published-tariff evidence. WattProof has no Duke tariff adapter and must
+never display **Tariff verified** for this fixture.
+
+### CenterPoint Energy Indiana gas guide
+
+- Official URL: https://www.centerpointenergy.com/en-us/CustomerService/Documents/bill-guides/240312-20-EIP-IN%20Gas-bill-guide.pdf
+- Local optional filename: `tmp/public-samples/centerpoint-gas.pdf`
+- SHA-256: `c0b7d9b0252226078b39d6760308506c28b388729906d3ac54db950b9f819262`
+- Document shape: a two-page guide whose rendered gas statement conflicts with a
+  separate invisible example in the native text layer.
+- Evidence pages: the visible statement summary uses pages 1-2; all audited gas values
+  are visibly supported on rendered page 2.
+- Highest supported level: `internally_reconciled`.
+
+Only the rendered gas statement supplies ground truth:
+
+| Line | Deterministic calculation | Printed |
+| --- | --- | ---: |
+| Therm conversion | `108 CCF x 1.03960 therm/CCF` | 112.277 therms |
+| Distribution and service | fixed visible line | $96.03 |
+| Gas cost | fixed visible line | $27.51 |
+| Indiana state sales tax | `($96.03 + $27.51) x 7%` | $8.65 |
+| Current gas charges / amount due | `$96.03 + $27.51 + $8.65` | $132.19 |
+
+The PDF's page-two native text also contains a different invisible combined
+electric/gas example. The native-only values `534 kWh`, `6.326 therm`, and `$134.69`
+are explicit exclusions: they must not enter fixture facts, warnings, evidence
+excerpts, calculations, or the audited statement. This is why rendered pixels are
+authoritative and embedded text is only an untrusted hint.
+
+The Review step surfaces the existence of that conflict and states that rendered-page
+evidence took precedence. The warning does not repeat or ingest any excluded hidden
+value.
+
+Limitation: the visible printed conversion, charges, and tax base support internal
+math. No independent CenterPoint tariff source is attached, so this fixture does not
+support a tariff claim.
+
+### City of Bloomington water guide
+
+- Official URL: https://bloomington.in.gov/sites/default/files/2026-02/Understanding%20Your%20Water%20Bill%202026%20Accessible.pdf
+- Local optional filename: `tmp/public-samples/bloomington-water.pdf`
+- SHA-256: `a414c296e3dd71a08aa459bb1a7c38fcdeab0c90aa0bb05f7c4e39ae9d70b79c`
+- Document shape: a native-text explanatory wrapper containing the actual utility
+  statement as a large raster image.
+- Evidence page: all audited statement values are visibly supported on rendered page
+  1.
+- Highest supported level: `internally_reconciled`.
+
+Visible service arithmetic:
+
+| Section | Printed lines | Section subtotal |
+| --- | --- | ---: |
+| Water | `2 kgal x $3.73 = $7.46`; service `$7.86`; fire protection `$2.93`; sales tax `$1.28` | $19.53 |
+| Wastewater | `2 kgal x $7.76 = $15.52`; service `$7.95` | $23.47 |
+| Stormwater | fixed charge `$2.70` | $2.70 |
+| Sanitation | one small cart at `$6.22` | $6.22 |
+
+The section rollup is `$19.53 + $23.47 + $2.70 + $6.22 = $51.92`, matching both
+printed current charges and amount due.
+
+Limitation: a native-text length test sees the wrapper but misses the raster statement.
+Only page rendering establishes these values. The printed rates and tax amount support
+internal statement checks, not a generalized Bloomington tariff or municipal-tax rule.
+
+## Multi-utility support boundary
+
+| Fixture | Evidence extracted | Internally reconciled | Tariff verified |
+| --- | --- | --- | --- |
+| PG&E/3CE authentic | Yes | Yes | Yes, exact 2022 adapter only |
+| PG&E/3CE labeled synthetic | Yes | Detects the `$5.00` root discrepancy | Exact adapter applies to the labeled regression data |
+| Duke illustrative electricity | Yes | Yes | No adapter; illustrative rates only |
+| CenterPoint gas | Yes, rendered visible statement only | Yes | No adapter |
+| Bloomington water/city services | Yes, including raster statement | Yes | No adapter |
+
+Provider-neutral evidence and arithmetic do not imply nationwide tariff coverage.
+Any future adapter must archive exact provider, jurisdiction, schedule, effective
+period, rule, and source-hash evidence and must fail closed outside that boundary.

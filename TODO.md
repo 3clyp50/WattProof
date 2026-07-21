@@ -50,8 +50,8 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 
 ## P0 — Build the headless vertical slice
 
-- [x] Extract native PDF text before invoking vision.
-- [x] Use GPT-5.6 structured output to map bill evidence into `BillExtraction`.
+- [x] Render PDF pages as extraction authority; use native text only as an untrusted locator hint.
+- [x] Use strict visual structured output to map bill evidence into versioned `UtilityDocument` data.
 - [x] Let users connect their own Codex access through the official OpenAI device flow without entering an API key in WattProof.
 - [x] Validate line-item, subtotal, total, and meter-usage invariants.
 - [x] Return low-confidence or inconsistent fields for user correction.
@@ -117,16 +117,20 @@ These are not release blockers. The fixture's 4–9 p.m. aggregate bucket cannot
 
 ## Deliberate post-MVP extensions — extraction
 
-The submission supports native PDFs and makes the boundary visible. Scanned-document vision is deferred rather than represented by an unreliable demo path.
+The submission renders every accepted bounded PDF page and makes the evidence boundary
+visible. Native text is locator-only, so raster statements follow the same visual
+contract instead of a weaker fallback.
 
-- Add rendered-page vision extraction and native-text cross-checking together.
-- On disagreement, request correction instead of silently choosing one reading.
+- [x] Add rendered-page visual extraction with native text labeled as an untrusted
+  locator hint.
+- [x] Preserve rendered values and surface a warning when native text conflicts.
 - Add adversarial fixtures for transposed digits, missing negative signs, duplicated lines, and unreadable scans.
-- Keep the shipped 10 MB, 20-page, native-PDF limits at the trust boundary.
+- Keep the shipped 10 MB and 20-page limits at the trust boundary.
 
 ## P1 — README and judge experience
 
-- [x] Explain the problem, audience, differentiation, and PG&E-first scope.
+- [x] Explain the problem, audience, differentiation, provider-neutral document scope,
+  and exact PG&E/3CE tariff scope.
 - [x] Include architecture diagram or concise architecture section.
 - [x] Document setup, environment variables, run, test, and sample-mode steps.
 - [x] State which utilities, schedules, and effective periods are actually supported.

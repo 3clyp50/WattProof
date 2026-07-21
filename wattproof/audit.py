@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal
+import unicodedata
+from decimal import Decimal
 
 from .models import (
     AuditLine,
@@ -11,6 +12,16 @@ from .models import (
     Citation,
     PlanComparison,
     ReviewRequest,
+)
+from .numeric import (
+    abs_exact,
+    add_exact,
+    format_decimal_exact,
+    format_usd_exact,
+    multiply_exact,
+    quantize_exact,
+    subtract_exact,
+    sum_exact,
 )
 from .tariffs import RateRule, TariffBundle, load_tariff_bundle
 
@@ -23,50 +34,80 @@ class UnsupportedBillError(ValueError):
 
 
 def round_money(value: Decimal) -> Decimal:
-    return value.quantize(CENT, rounding=ROUND_HALF_UP)
+    return quantize_exact(value, CENT)
 
 
 def _status(delta: Decimal) -> AuditStatus:
-    return "verified" if abs(delta) <= TOLERANCE else "discrepancy"
+    return "verified" if abs_exact(delta) <= TOLERANCE else "discrepancy"
 
 
 def _currency(value: Decimal) -> str:
-    sign = "-" if value < 0 else ""
-    return f"{sign}${abs(value):.2f}"
+    return format_usd_exact(value)
 
 
 def _rate(value: Decimal) -> str:
     sign = "-" if value < 0 else ""
-    return f"{sign}${abs(value)}/kWh"
+    return f"{sign}${format_decimal_exact(abs_exact(value))}/kWh"
 
 
 def _citation(bundle: TariffBundle, rule: RateRule) -> tuple[Citation, ...]:
     return tuple(bundle.citation_map[key] for key in rule.citations)
 
 
-def _validate_supported_bill(bill: BillExtraction, bundle: TariffBundle) -> None:
-    provider = bill.delivery_provider.value.lower()
-    if "pacific gas" not in provider and "pg&e" not in provider:
+def _normalized_identity(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+_DELIVERY_PROVIDER_ALIASES = frozenset(
+    _normalized_identity(value)
+    for value in (
+        "Pacific Gas and Electric Company",
+        "Pacific Gas & Electric Company",
+        "PG&E",
+    )
+)
+_GENERATION_PROVIDER_ALIASES = frozenset(
+    _normalized_identity(value)
+    for value in (
+        "Central Coast Community Energy",
+        "3CE",
+    )
+)
+_DELIVERY_SCHEDULE_ALIASES = frozenset((_normalized_identity("E-TOU-C"),))
+_GENERATION_SCHEDULE_ALIASES = frozenset(
+    (_normalized_identity("MBRETCH1 3Cchoice"),)
+)
+
+
+def validate_pge_3ce_identity(bill: BillExtraction) -> None:
+    """Require exact supported PG&E/3CE provider and schedule identities."""
+
+    provider = _normalized_identity(bill.delivery_provider.value)
+    if provider not in _DELIVERY_PROVIDER_ALIASES:
         raise UnsupportedBillError(
             "The MVP supports PG&E residential delivery bills only."
         )
-    if bill.delivery_schedule.value != "E-TOU-C":
+    delivery_schedule = _normalized_identity(bill.delivery_schedule.value)
+    if delivery_schedule not in _DELIVERY_SCHEDULE_ALIASES:
         raise UnsupportedBillError(
             "The MVP supports only PG&E E-TOU-C for this verified rate period."
         )
-    generation_provider = bill.generation_provider.value.lower()
-    if (
-        "central coast community energy" not in generation_provider
-        and "3ce" not in generation_provider
-    ):
+    generation_provider = _normalized_identity(bill.generation_provider.value)
+    if generation_provider not in _GENERATION_PROVIDER_ALIASES:
         raise UnsupportedBillError(
             "The MVP supports Central Coast Community Energy generation only."
         )
-    generation_schedule = bill.generation_schedule.value.lower()
-    if "mbretch1" not in generation_schedule or "3cchoice" not in generation_schedule:
+    generation_schedule = _normalized_identity(bill.generation_schedule.value)
+    if generation_schedule not in _GENERATION_SCHEDULE_ALIASES:
         raise UnsupportedBillError(
             "The MVP supports only the 3CE MBRETCH1 3Cchoice schedule for this bill."
         )
+
+
+def validate_pge_3ce_bill(bill: BillExtraction, bundle: TariffBundle) -> None:
+    """Require an exact supported PG&E/3CE identity and archived rate period."""
+
+    validate_pge_3ce_identity(bill)
     if (
         bill.service_start.value < bundle.version.effective_start
         or bill.service_end.value > bundle.version.effective_end
@@ -90,9 +131,9 @@ def _quantity_rule(
     else:
         raise ValueError(f"Missing quantity for calculable line: {line_id}")
 
-    expected = round_money(quantity * rule.rate)
+    expected = round_money(multiply_exact(quantity, rule.rate))
     billed = billed_line.billed_amount.value
-    delta = round_money(billed - expected)
+    delta = round_money(subtract_exact(billed, expected))
     return AuditLine(
         id=line_id,
         label=billed_line.label,
@@ -101,10 +142,10 @@ def _quantity_rule(
         billed_amount=billed,
         expected_amount=expected,
         delta=delta,
-        formula=f"{quantity} kWh × {_rate(rule.rate)}",
+        formula=f"{format_decimal_exact(quantity)} kWh × {_rate(rule.rate)}",
         inputs={
-            "quantity_kwh": str(quantity),
-            "official_rate_usd_per_kwh": str(rule.rate),
+            "quantity_kwh": format_decimal_exact(quantity),
+            "official_rate_usd_per_kwh": format_decimal_exact(rule.rate),
             "rounding": "nearest cent, decimal half-up",
         },
         source_page=billed_line.billed_amount.source_page,
@@ -118,12 +159,15 @@ def _percentage_rule(
     line_id: str,
     rule: RateRule,
     billed_line: ChargeLine,
-    expected_by_id: dict[str, Decimal],
+    billed_by_id: dict[str, Decimal],
 ) -> AuditLine:
-    base = sum((expected_by_id[item] for item in rule.line_ids), Decimal("0"))
-    expected = round_money(base * rule.rate)
+    if billed_line.rate is None:
+        raise ValueError(f"Missing printed rate for percentage line: {line_id}")
+    printed_rate = billed_line.rate.value
+    base = sum_exact(tuple(billed_by_id[item] for item in rule.line_ids))
+    expected = round_money(multiply_exact(base, printed_rate))
     billed = billed_line.billed_amount.value
-    delta = round_money(billed - expected)
+    delta = round_money(subtract_exact(billed, expected))
     return AuditLine(
         id=line_id,
         label=billed_line.label,
@@ -132,16 +176,24 @@ def _percentage_rule(
         billed_amount=billed,
         expected_amount=expected,
         delta=delta,
-        formula=f"{_currency(base)} taxable generation × {rule.rate * 100}%",
+        formula=(
+            f"{_currency(base)} taxable generation × "
+            f"{format_decimal_exact(multiply_exact(printed_rate, Decimal('100')))}%"
+        ),
         inputs={
-            "taxable_generation_usd": str(base),
-            "printed_tax_rate": str(rule.rate),
+            "taxable_generation_usd": format_decimal_exact(base),
+            "printed_tax_rate": format_decimal_exact(printed_rate),
             "rounding": "nearest cent, decimal half-up",
         },
         source_page=billed_line.billed_amount.source_page,
         source_text=billed_line.billed_amount.source_text,
         citations=(),
         status=_status(delta),
+        limitation=(
+            "WattProof checked arithmetic using the percentage rate and base "
+            "amounts printed on this statement; no independently archived source "
+            "establishes that rate as the governing tariff."
+        ),
     )
 
 
@@ -149,7 +201,10 @@ def _tariff_lines(
     bill: BillExtraction, bundle: TariffBundle
 ) -> tuple[AuditLine, ...]:
     results: list[AuditLine] = []
-    expected_by_id: dict[str, Decimal] = {}
+    billed_by_id = {
+        billed_line.id: billed_line.billed_amount.value
+        for billed_line in bill.charges
+    }
     for billed_line in bill.charges:
         rule = bundle.rules.get(billed_line.id)
         if rule is None:
@@ -163,7 +218,11 @@ def _tariff_lines(
                     expected_amount=None,
                     delta=None,
                     formula="Not recomputed",
-                    inputs={"printed_amount_usd": str(billed_line.billed_amount.value)},
+                    inputs={
+                        "printed_amount_usd": format_decimal_exact(
+                            billed_line.billed_amount.value
+                        )
+                    },
                     source_page=billed_line.billed_amount.source_page,
                     source_text=billed_line.billed_amount.source_text,
                     citations=(),
@@ -182,13 +241,11 @@ def _tariff_lines(
             )
         elif rule.kind == "percent_of_lines":
             result = _percentage_rule(
-                billed_line.id, rule, billed_line, expected_by_id
+                billed_line.id, rule, billed_line, billed_by_id
             )
         else:
             raise ValueError(f"Unknown rate rule kind: {rule.kind}")
         results.append(result)
-        if result.expected_amount is not None:
-            expected_by_id[result.id] = result.expected_amount
     return tuple(results)
 
 
@@ -203,7 +260,7 @@ def _reconciliation_line(
     formula: str,
     inputs: dict[str, str],
 ) -> AuditLine:
-    delta = round_money(billed - expected)
+    delta = round_money(subtract_exact(billed, expected))
     return AuditLine(
         id=line_id,
         label=label,
@@ -231,10 +288,12 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
         for line in bill.charges
         if line.section == "cca_generation"
     ]
-    delivery_sum = sum(delivery_lines, Decimal("0"))
-    generation_sum = sum(generation_lines, Decimal("0"))
-    current_sum = bill.delivery_subtotal.value + bill.generation_subtotal.value
-    due_sum = bill.current_charges.value + bill.outstanding_balance.value
+    delivery_sum = sum_exact(tuple(delivery_lines))
+    generation_sum = sum_exact(tuple(generation_lines))
+    current_sum = add_exact(
+        bill.delivery_subtotal.value, bill.generation_subtotal.value
+    )
+    due_sum = add_exact(bill.current_charges.value, bill.outstanding_balance.value)
 
     checks = [
         _reconciliation_line(
@@ -245,7 +304,7 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             source_page=bill.delivery_subtotal.source_page,
             source_text=bill.delivery_subtotal.source_text,
             formula="sum of printed PG&E delivery lines",
-            inputs={"line_sum_usd": str(delivery_sum)},
+            inputs={"line_sum_usd": format_decimal_exact(delivery_sum)},
         ),
         _reconciliation_line(
             line_id="generation_subtotal",
@@ -255,7 +314,7 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             source_page=bill.generation_subtotal.source_page,
             source_text=bill.generation_subtotal.source_text,
             formula="sum of printed 3CE generation lines",
-            inputs={"line_sum_usd": str(generation_sum)},
+            inputs={"line_sum_usd": format_decimal_exact(generation_sum)},
         ),
         _reconciliation_line(
             line_id="current_charges",
@@ -266,8 +325,12 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             source_text=bill.current_charges.source_text,
             formula="PG&E subtotal + 3CE subtotal",
             inputs={
-                "pge_subtotal_usd": str(bill.delivery_subtotal.value),
-                "3ce_subtotal_usd": str(bill.generation_subtotal.value),
+                "pge_subtotal_usd": format_decimal_exact(
+                    bill.delivery_subtotal.value
+                ),
+                "3ce_subtotal_usd": format_decimal_exact(
+                    bill.generation_subtotal.value
+                ),
             },
         ),
         _reconciliation_line(
@@ -279,8 +342,12 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             source_text=bill.amount_due.source_text,
             formula="current charges + outstanding balance",
             inputs={
-                "current_charges_usd": str(bill.current_charges.value),
-                "outstanding_balance_usd": str(bill.outstanding_balance.value),
+                "current_charges_usd": format_decimal_exact(
+                    bill.current_charges.value
+                ),
+                "outstanding_balance_usd": format_decimal_exact(
+                    bill.outstanding_balance.value
+                ),
             },
         ),
     ]
@@ -294,7 +361,9 @@ def _reconciliation_lines(bill: BillExtraction) -> tuple[AuditLine, ...]:
             expected_amount=None,
             delta=None,
             formula="current meter read − prior meter read",
-            inputs={"printed_usage_kwh": str(bill.total_usage.value)},
+            inputs={
+                "printed_usage_kwh": format_decimal_exact(bill.total_usage.value)
+            },
             source_page=bill.total_usage.source_page,
             source_text=bill.total_usage.source_text,
             status="cannot_verify",
@@ -333,23 +402,35 @@ def _review_request(
     ]
     if discrepancies:
         line = discrepancies[0]
-        source_list = "\n".join(
-            f"- {citation.label}: {citation.source_url}"
-            for citation in line.citations
-        )
         synthetic_prefix = (
             "This is a synthetic demo request; no real customer bill contained this error.\n\n"
             if bill.fixture_kind == "synthetic"
             else ""
         )
+        if line.citations:
+            source_list = "\n".join(
+                f"- {citation.label}: {citation.source_url}"
+                for citation in line.citations
+            )
+            calculation_basis = (
+                "Applying the published rate to the printed usage gives "
+                f"{_currency(line.expected_amount or Decimal('0'))}, a difference of "
+                f"{_currency(abs_exact(line.delta or Decimal('0')))}.\n\n"
+                f"Calculation: {line.formula}.\n"
+                f"Rate sources:\n{source_list}\n\n"
+            )
+        else:
+            calculation_basis = (
+                "Recomputing the printed rate and printed base amounts gives "
+                f"{_currency(line.expected_amount or Decimal('0'))}, a difference of "
+                f"{_currency(abs_exact(line.delta or Decimal('0')))}.\n\n"
+                f"Calculation: {line.formula}.\n"
+                f"Limit: {line.limitation}\n\n"
+            )
         body = (
             f"Hello,\n\n{synthetic_prefix}Please review the {line.label} on "
             f"the statement dated {bill.statement_date.value.isoformat()}. The statement "
-            f"shows {_currency(line.billed_amount)}. Applying the published rate to the "
-            f"printed usage gives {_currency(line.expected_amount or Decimal('0'))}, a "
-            f"difference of {_currency(abs(line.delta or Decimal('0')))}.\n\n"
-            f"Calculation: {line.formula}.\n"
-            f"Rate sources:\n{source_list}\n\n"
+            f"shows {_currency(line.billed_amount)}. {calculation_basis}"
             "Please confirm the quantity and rate used and explain or correct the charge "
             "if appropriate. I will verify my account details before sending. Thank you."
         )
@@ -367,12 +448,13 @@ def _review_request(
     if reconciliation_discrepancies:
         line = reconciliation_discrepancies[0]
         body = (
-            f"Hello,\n\nPlease review the printed totals on my statement dated "
+            f"Hello,\n\nPlease review the printed totals on my "
+            f"{bill.delivery_provider.value} statement dated "
             f"{bill.statement_date.value.isoformat()}. One printed-total check does not "
             f"reconcile. The statement shows {_currency(line.billed_amount)} for "
             f"“{line.label},” while combining the other printed amounts gives "
             f"{_currency(line.expected_amount or Decimal('0'))}, a difference of "
-            f"{_currency(abs(line.delta or Decimal('0')))}.\n\n"
+            f"{_currency(abs_exact(line.delta or Decimal('0')))}.\n\n"
             f"Calculation using printed amounts: {line.formula}.\n\n"
             "Please confirm the total and correct it if appropriate. I will verify my "
             "account details before sending. Thank you."
@@ -406,11 +488,13 @@ def _review_request(
     )
 
 
-def audit_bill(
-    bill: BillExtraction, *, verify_sources: bool = True
+def audit_bill_with_bundle(
+    bill: BillExtraction,
+    bundle: TariffBundle,
 ) -> AuditResult:
-    bundle = load_tariff_bundle(verify_sources=verify_sources)
-    _validate_supported_bill(bill, bundle)
+    """Audit with one caller-supplied tariff snapshot."""
+
+    validate_pge_3ce_bill(bill, bundle)
     tariff_lines = _tariff_lines(bill, bundle)
     reconciliation_lines = _reconciliation_lines(bill)
     lines = tariff_lines + reconciliation_lines
@@ -424,7 +508,7 @@ def audit_bill(
         line for line in reconciliation_lines if line.status == "discrepancy"
     ]
     discrepancy_total = round_money(
-        sum((abs(delta) for delta in tariff_discrepancies), Decimal("0"))
+        sum_exact(tuple(abs_exact(delta) for delta in tariff_discrepancies))
     )
     if tariff_discrepancies:
         verdict = "possible_discrepancy"
@@ -447,3 +531,10 @@ def audit_bill(
         comparison=_comparison(),
         review_request=_review_request(bill, lines),
     )
+
+
+def audit_bill(
+    bill: BillExtraction, *, verify_sources: bool = True
+) -> AuditResult:
+    bundle = load_tariff_bundle(verify_sources=verify_sources)
+    return audit_bill_with_bundle(bill, bundle)
