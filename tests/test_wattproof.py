@@ -242,6 +242,26 @@ def test_oversized_pdf_is_rejected_before_processing(tmp_path: Path) -> None:
         extract_pdf(file)
 
 
+def test_oversized_pdf_is_rejected_before_read_render_or_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    file = tmp_path / "sparse-too-large.pdf"
+    with file.open("wb") as stream:
+        stream.write(b"%PDF-")
+        stream.truncate(MAX_FILE_BYTES + 1)
+
+    def unexpected_work(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("oversized PDFs must stop at the stat preflight")
+
+    monkeypatch.setattr(Path, "read_bytes", unexpected_work)
+    monkeypatch.setattr("wattproof.extract.subprocess.run", unexpected_work)
+    for name in ("_page_count", "_render_pages", "_native_text", "_extract_with_gpt"):
+        monkeypatch.setattr(f"wattproof.extract.{name}", unexpected_work)
+
+    with pytest.raises(InvalidDocumentError, match="10 MB"):
+        extract_pdf(file)
+
+
 def test_excess_page_count_is_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -532,7 +532,11 @@ def extract_pdf(path: str | Path) -> BillExtraction | UtilityDocument:
     pdf_path = Path(path)
     if not pdf_path.is_file():
         raise InvalidDocumentError("The selected file does not exist.")
+    if pdf_path.stat().st_size > MAX_FILE_BYTES:
+        raise InvalidDocumentError("PDFs are limited to 10 MB.")
     data = pdf_path.read_bytes()
+    # Keep the in-memory check as a defense against replacement or growth between
+    # the metadata preflight and the read.
     if len(data) > MAX_FILE_BYTES:
         raise InvalidDocumentError("PDFs are limited to 10 MB.")
     if not data.startswith(b"%PDF-"):
