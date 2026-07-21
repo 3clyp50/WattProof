@@ -63,7 +63,9 @@ def _assert_internal_fallback(bill: BillExtraction) -> None:
 
 
 def test_exact_pg_and_e_bill_keeps_tariff_verified_result() -> None:
-    result = audit_extraction(load_sample("authentic"))
+    bill = load_sample("authentic")
+    legacy = audit_bill(bill)
+    result = audit_extraction(bill)
 
     assert result.schema_version == "2.0"
     assert result.verification_level == "tariff_verified"
@@ -75,6 +77,30 @@ def test_exact_pg_and_e_bill_keeps_tariff_verified_result() -> None:
         set(request.grounded_audit_line_ids) <= line_ids
         for request in result.review_requests
     )
+    assert tuple(request.provider for request in result.review_requests) == (
+        bill.delivery_provider.value,
+        bill.generation_provider.value,
+    )
+    sections = {line.id: line.section_id for line in result.lines}
+    expected_sections = ("pge_delivery", "cca_generation")
+    for request, expected_section in zip(
+        result.review_requests,
+        expected_sections,
+        strict=True,
+    ):
+        assert request.subject == legacy.review_request.subject
+        assert request.body == legacy.review_request.body
+        assert request.requires_user_review is True
+        assert request.grounded_audit_line_ids
+        assert all(
+            sections[line_id] == expected_section
+            for line_id in request.grounded_audit_line_ids
+        )
+    assert {
+        line_id
+        for request in result.review_requests
+        for line_id in request.grounded_audit_line_ids
+    } == set(legacy.review_request.grounded_audit_line_ids)
 
 
 def test_synthetic_error_remains_exactly_five_dollars() -> None:

@@ -392,6 +392,11 @@ def _provider_review_requests(
     result: AuditResult,
 ) -> tuple[ProviderReviewRequest, ...]:
     line_ids = {line.id for line in result.lines}
+    section_by_id = _section_by_line_id(bill)
+    provider_sections = (
+        ("pge_delivery", bill.delivery_provider.value),
+        ("cca_generation", bill.generation_provider.value),
+    )
     discrepancies = tuple(
         line
         for line in result.lines
@@ -403,21 +408,32 @@ def _provider_review_requests(
             review.grounded_audit_line_ids,
             line_ids,
         )
-        return (
+        clean_requests = tuple(
             ProviderReviewRequest(
-                provider=bill.delivery_provider.value,
+                provider=provider,
                 subject=review.subject,
                 body=review.body,
-                grounded_audit_line_ids=grounded,
+                grounded_audit_line_ids=tuple(
+                    line_id
+                    for line_id in grounded
+                    if section_by_id.get(line_id) == section_id
+                ),
                 requires_user_review=True,
-            ),
+            )
+            for section_id, provider in provider_sections
+            if any(section_by_id.get(line_id) == section_id for line_id in grounded)
         )
+        partitioned = tuple(
+            line_id
+            for request in clean_requests
+            for line_id in request.grounded_audit_line_ids
+        )
+        if len(partitioned) != len(grounded) or set(partitioned) != set(grounded):
+            raise ValueError(
+                "Provider review request grounding has no supported provider section"
+            )
+        return clean_requests
 
-    section_by_id = _section_by_line_id(bill)
-    provider_sections = (
-        ("pge_delivery", bill.delivery_provider.value),
-        ("cca_generation", bill.generation_provider.value),
-    )
     requests: list[ProviderReviewRequest] = []
     legacy_review = result.review_request
     for section_id, provider in provider_sections:
