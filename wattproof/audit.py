@@ -70,8 +70,8 @@ _GENERATION_SCHEDULE_ALIASES = frozenset(
 )
 
 
-def validate_pge_3ce_bill(bill: BillExtraction, bundle: TariffBundle) -> None:
-    """Require an exact supported PG&E/3CE identity and archived rate period."""
+def validate_pge_3ce_identity(bill: BillExtraction) -> None:
+    """Require exact supported PG&E/3CE provider and schedule identities."""
 
     provider = _normalized_identity(bill.delivery_provider.value)
     if provider not in _DELIVERY_PROVIDER_ALIASES:
@@ -93,6 +93,12 @@ def validate_pge_3ce_bill(bill: BillExtraction, bundle: TariffBundle) -> None:
         raise UnsupportedBillError(
             "The MVP supports only the 3CE MBRETCH1 3Cchoice schedule for this bill."
         )
+
+
+def validate_pge_3ce_bill(bill: BillExtraction, bundle: TariffBundle) -> None:
+    """Require an exact supported PG&E/3CE identity and archived rate period."""
+
+    validate_pge_3ce_identity(bill)
     if (
         bill.service_start.value < bundle.version.effective_start
         or bill.service_end.value > bundle.version.effective_end
@@ -408,10 +414,12 @@ def _review_request(
     )
 
 
-def audit_bill(
-    bill: BillExtraction, *, verify_sources: bool = True
+def audit_bill_with_bundle(
+    bill: BillExtraction,
+    bundle: TariffBundle,
 ) -> AuditResult:
-    bundle = load_tariff_bundle(verify_sources=verify_sources)
+    """Audit with one caller-supplied tariff snapshot."""
+
     validate_pge_3ce_bill(bill, bundle)
     tariff_lines = _tariff_lines(bill, bundle)
     reconciliation_lines = _reconciliation_lines(bill)
@@ -447,3 +455,10 @@ def audit_bill(
         comparison=_comparison(),
         review_request=_review_request(bill, lines),
     )
+
+
+def audit_bill(
+    bill: BillExtraction, *, verify_sources: bool = True
+) -> AuditResult:
+    bundle = load_tariff_bundle(verify_sources=verify_sources)
+    return audit_bill_with_bundle(bill, bundle)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -52,6 +52,44 @@ def _changed_charge_amount(
         for charge in bill.charges
     )
     return bill.model_copy(update={"charges": charges})
+
+
+def _changed_charge_rate(
+    bill: BillExtraction,
+    charge_id: str,
+    value: Decimal,
+) -> BillExtraction:
+    charges = []
+    for charge in bill.charges:
+        if charge.id == charge_id:
+            assert charge.rate is not None
+            charge = charge.model_copy(
+                update={
+                    "rate": charge.rate.model_copy(update={"value": value})
+                }
+            )
+        charges.append(charge)
+    return bill.model_copy(update={"charges": tuple(charges)})
+
+
+def _changed_charge_quantity(
+    bill: BillExtraction,
+    charge_id: str,
+    delta: Decimal,
+) -> BillExtraction:
+    charges = []
+    for charge in bill.charges:
+        if charge.id == charge_id:
+            assert charge.quantity is not None
+            charge = charge.model_copy(
+                update={
+                    "quantity": charge.quantity.model_copy(
+                        update={"value": charge.quantity.value + delta}
+                    )
+                }
+            )
+        charges.append(charge)
+    return bill.model_copy(update={"charges": tuple(charges)})
 
 
 def _assert_internal_fallback(bill: BillExtraction) -> None:
@@ -257,6 +295,53 @@ def test_unsupported_tariff_operand_unit_fails_closed() -> None:
     _assert_internal_fallback(bill.model_copy(update={"charges": charges}))
 
 
+@pytest.mark.parametrize("charge_id", ["pge_peak_energy", "cca_nov_uut"])
+def test_printed_rate_must_match_archived_rule_rate(charge_id: str) -> None:
+    bill = _changed_charge_rate(
+        load_sample("authentic"),
+        charge_id,
+        Decimal("999"),
+    )
+
+    _assert_internal_fallback(bill)
+    result = audit_extraction(bill)
+    line = next(
+        line for line in result.lines if line.id == f"charge::{charge_id}"
+    )
+    assert line.status == "discrepancy"
+
+
+def test_changed_quantity_remains_a_tariff_calculation_discrepancy() -> None:
+    bill = _changed_charge_quantity(
+        load_sample("authentic"),
+        "pge_peak_energy",
+        Decimal("1"),
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert result.verification_level == "tariff_verified"
+    assert result.tariff is not None
+    assert lines["pge_peak_energy"].status == "discrepancy"
+    assert lines["pge_peak_energy"].inputs["quantity_kwh"] == "93.965"
+
+
+def test_limited_printed_rate_is_not_treated_as_archived_truth() -> None:
+    bill = _changed_charge_rate(
+        load_sample("authentic"),
+        "pge_uut",
+        Decimal("999"),
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert result.verification_level == "tariff_verified"
+    assert lines["pge_uut"].status == "cannot_verify"
+    assert lines["pge_uut"].expected_amount is None
+
+
 @pytest.mark.parametrize("malformation", ["missing_rule", "wrong_rule_kind"])
 def test_malformed_archived_rule_set_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
@@ -280,6 +365,103 @@ def test_malformed_archived_rule_set_fails_closed(
     monkeypatch.setattr(adapters, "load_tariff_bundle", load_malformed_bundle)
 
     _assert_internal_fallback(load_sample("authentic"))
+
+
+def test_atomic_service_uses_one_verified_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stable = load_tariff_bundle(verify_sources=False)
+    drifted_rules = dict(stable.rules)
+    drifted_rules["pge_peak_energy"] = replace(
+        drifted_rules["pge_peak_energy"],
+        rate=Decimal("999"),
+    )
+    drifted = replace(stable, rules=drifted_rules)
+    calls: list[bool] = []
+
+    def load_counted_bundle(*, verify_sources: bool = True) -> TariffBundle:
+        calls.append(verify_sources)
+        return stable if len(calls) == 1 else drifted
+
+    monkeypatch.setattr(adapters, "load_tariff_bundle", load_counted_bundle)
+
+    result = audit_extraction(load_sample("authentic"))
+    line = next(line for line in result.lines if line.id == "pge_peak_energy")
+
+    assert calls == [True]
+    assert result.verification_level == "tariff_verified"
+    assert result.tariff == stable.version
+    assert line.expected_amount == Decimal("36.44")
+
+
+def test_unsupported_identity_does_not_load_archived_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+
+    def unexpected_load(*, verify_sources: bool = True) -> TariffBundle:
+        calls.append(verify_sources)
+        raise AssertionError("unsupported identity must not load tariff sources")
+
+    monkeypatch.setattr(adapters, "load_tariff_bundle", unexpected_load)
+    bill = _changed_text(
+        load_sample("authentic"),
+        "delivery_provider",
+        "Example Utility",
+    )
+
+    result = audit_extraction(bill)
+
+    assert calls == []
+    assert result.verification_level == "internally_reconciled"
+    assert result.tariff is None
+
+
+@pytest.mark.parametrize("drift_kind", ["rule_rate", "citation", "version"])
+def test_archived_snapshot_metadata_drift_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    drift_kind: str,
+) -> None:
+    bundle = load_tariff_bundle(verify_sources=False)
+    if drift_kind == "rule_rate":
+        rules = dict(bundle.rules)
+        rules["pge_peak_energy"] = replace(
+            rules["pge_peak_energy"],
+            rate=Decimal("0.40000"),
+        )
+        drifted = replace(bundle, rules=rules)
+    elif drift_kind == "citation":
+        citation_map = dict(bundle.citation_map)
+        citation_map["pge_nov"] = citation_map["pge_nov"].model_copy(
+            update={"label": "Drifted citation label"}
+        )
+        drifted = replace(
+            bundle,
+            citation_map=citation_map,
+            version=bundle.version.model_copy(
+                update={"citations": tuple(citation_map.values())}
+            ),
+        )
+    else:
+        drifted = replace(
+            bundle,
+            version=bundle.version.model_copy(
+                update={
+                    "retrieved_on": bundle.version.retrieved_on + timedelta(days=1)
+                }
+            ),
+        )
+
+    def load_drifted_bundle(*, verify_sources: bool = True) -> TariffBundle:
+        assert verify_sources is True
+        return drifted
+
+    monkeypatch.setattr(adapters, "load_tariff_bundle", load_drifted_bundle)
+
+    result = audit_extraction(load_sample("authentic"))
+
+    assert result.verification_level == "internally_reconciled"
+    assert result.tariff is None
 
 
 def test_percentage_rule_dependencies_must_precede_dependent_charge() -> None:
@@ -551,6 +733,104 @@ def test_section_level_reconciliation_root_routes_to_section_provider() -> None:
     assert "3CE generation lines sum to subtotal" not in request.body
 
 
+def test_delivery_subtotal_root_explains_current_charges_symptom() -> None:
+    bill = load_sample("authentic")
+    bill = bill.model_copy(
+        update={
+            "delivery_subtotal": bill.delivery_subtotal.model_copy(
+                update={"value": bill.delivery_subtotal.value + Decimal("2.00")}
+            )
+        }
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["delivery_subtotal"].root_cause_id is None
+    assert lines["current_charges"].status == "discrepancy"
+    assert lines["current_charges"].root_cause_id == "delivery_subtotal"
+    assert tuple(
+        request.grounded_audit_line_ids for request in result.review_requests
+    ) == (("delivery_subtotal",),)
+
+
+def test_current_charges_root_explains_amount_due_symptom() -> None:
+    bill = load_sample("authentic")
+    bill = bill.model_copy(
+        update={
+            "current_charges": bill.current_charges.model_copy(
+                update={"value": bill.current_charges.value + Decimal("2.00")}
+            )
+        }
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["current_charges"].root_cause_id is None
+    assert lines["amount_due"].status == "discrepancy"
+    assert lines["amount_due"].root_cause_id == "current_charges"
+    assert tuple(request.provider for request in result.review_requests) == (
+        "Consolidated statement",
+    )
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        "current_charges",
+    )
+
+
+def test_multiple_section_roots_do_not_collapse_current_charges() -> None:
+    bill = load_sample("authentic")
+    bill = bill.model_copy(
+        update={
+            "delivery_subtotal": bill.delivery_subtotal.model_copy(
+                update={"value": bill.delivery_subtotal.value + Decimal("2.00")}
+            ),
+            "generation_subtotal": bill.generation_subtotal.model_copy(
+                update={"value": bill.generation_subtotal.value + Decimal("3.00")}
+            ),
+        }
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["current_charges"].status == "discrepancy"
+    assert lines["current_charges"].root_cause_id is None
+    assert tuple(
+        request.grounded_audit_line_ids for request in result.review_requests
+    ) == (
+        ("delivery_subtotal",),
+        ("generation_subtotal",),
+        ("current_charges",),
+    )
+
+
+def test_single_section_root_without_corrected_proof_does_not_collapse() -> None:
+    bill = load_sample("authentic")
+    bill = bill.model_copy(
+        update={
+            "delivery_subtotal": bill.delivery_subtotal.model_copy(
+                update={"value": bill.delivery_subtotal.value + Decimal("2.00")}
+            ),
+            "current_charges": bill.current_charges.model_copy(
+                update={"value": bill.current_charges.value + Decimal("1.00")}
+            ),
+            "amount_due": bill.amount_due.model_copy(
+                update={"value": bill.amount_due.value + Decimal("1.00")}
+            ),
+        }
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert lines["current_charges"].status == "discrepancy"
+    assert lines["current_charges"].root_cause_id is None
+    assert tuple(
+        request.grounded_audit_line_ids for request in result.review_requests
+    ) == (("delivery_subtotal",), ("current_charges",))
+
+
 def test_unrelated_reconciliation_discrepancy_is_not_collapsed_into_tariff_root() -> None:
     bill = load_sample("synthetic")
     amount_due = bill.amount_due.model_copy(
@@ -564,6 +844,28 @@ def test_unrelated_reconciliation_discrepancy_is_not_collapsed_into_tariff_root(
     assert lines["delivery_subtotal"].root_cause_id == "pge_peak_energy"
     assert lines["amount_due"].status == "discrepancy"
     assert lines["amount_due"].root_cause_id is None
+
+
+def test_synthetic_neutral_request_keeps_demo_warning() -> None:
+    bill = load_sample("synthetic")
+    bill = bill.model_copy(
+        update={
+            "amount_due": bill.amount_due.model_copy(
+                update={"value": bill.amount_due.value + Decimal("2.00")}
+            )
+        }
+    )
+
+    result = audit_extraction(bill)
+    neutral = next(
+        request
+        for request in result.review_requests
+        if request.provider == "Consolidated statement"
+    )
+
+    assert "synthetic demo request" in neutral.body.lower()
+    assert "no real customer bill contained" in neutral.body.lower()
+    assert neutral.grounded_audit_line_ids == ("amount_due",)
 
 
 def test_multiple_tariff_discrepancies_do_not_collapse_subtotal_symptom() -> None:

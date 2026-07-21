@@ -14,7 +14,8 @@ def audit_extraction(extraction: Extraction) -> UtilityAuditResult:
 
     if isinstance(extraction, BillExtraction):
         for adapter in TARIFF_ADAPTERS:
-            if adapter.matches(extraction):
-                return adapter.audit(extraction)
+            result = adapter.audit_if_supported(extraction)
+            if result is not None:
+                return result
         return reconcile_document(translate_legacy_bill(extraction))
     return reconcile_document(extraction)
