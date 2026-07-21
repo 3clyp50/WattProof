@@ -19,6 +19,7 @@ from .audit_service import audit_extraction
 from .codex import (
     CODEX_MODEL_LABEL,
     CodexNotConnectedError,
+    CodexOutputInvalidError,
     CodexSessionManager,
     CodexUnavailableError,
 )
@@ -267,6 +268,10 @@ def create_app(codex_manager: CodexSessionManager | None = None) -> Flask:
     @app.errorhandler(CodexNotConnectedError)
     def codex_login_required(error: CodexNotConnectedError) -> tuple[Response, int]:
         return jsonify(error=str(error), code="codex_login_required"), 401
+
+    @app.errorhandler(CodexOutputInvalidError)
+    def codex_output_invalid(error: CodexOutputInvalidError) -> tuple[Response, int]:
+        return jsonify(error=str(error), code="codex_output_invalid"), 503
 
     @app.errorhandler(CodexUnavailableError)
     def codex_unavailable(error: CodexUnavailableError) -> tuple[Response, int]:

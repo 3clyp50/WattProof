@@ -19,6 +19,7 @@ from wattproof.codex import (
     CodexAppServer,
     CodexConnectionStatus,
     CodexNotConnectedError,
+    CodexOutputInvalidError,
     CodexSessionManager,
     CodexUnavailableError,
     DeviceLogin,
@@ -194,6 +195,118 @@ def test_codex_visual_extractor_uses_images_and_server_owned_v2_metadata(
     assert extracted.document_sha256 == "f" * 64
     assert extracted.page_count == 1
     assert extracted.source_url is None
+
+
+def test_codex_visual_extractor_recovers_once_from_invalid_model_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server = object.__new__(CodexAppServer)
+    setattr(server, "_state", "connected")
+    setattr(server, "_lock", threading.RLock())
+    setattr(server, "_extract_lock", threading.Lock())
+    setattr(server, "_workspace", tmp_path)
+    calls: list[tuple[str, dict[str, object], float]] = []
+
+    def fake_call(
+        method: str,
+        params: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        calls.append((method, params, timeout))
+        if method == "thread/start":
+            return {"thread": {"id": "thread-1"}}
+        turn_number = sum(call[0] == "turn/start" for call in calls)
+        return {"turn": {"id": f"turn-{turn_number}"}}
+
+    valid = load_utility_sample("bloomington").model_dump(mode="json")
+    invalid = json.loads(json.dumps(valid))
+    assert invalid["sections"][0]["provider"]["status"] == "printed"
+    invalid["sections"][0]["provider"]["original_value"] = "hidden-invalid"
+    answers = {
+        "turn-1": json.dumps(invalid),
+        "turn-2": json.dumps(valid),
+    }
+
+    monkeypatch.setattr(server, "_call", fake_call)
+    monkeypatch.setattr(
+        server,
+        "_wait_for_turn",
+        lambda turn_id, timeout: ({"status": "completed"}, answers[turn_id]),
+    )
+
+    extracted = server.extract_bill(
+        (
+            RenderedPage(
+                page=1,
+                data_url="data:image/png;base64,iVBORw0KGgo=",
+            ),
+        ),
+        "[PAGE 1]\nPRIVATE_NATIVE_MARKER",
+        "f" * 64,
+        1,
+    )
+
+    turn_calls = [
+        params for method, params, _timeout in calls if method == "turn/start"
+    ]
+    assert len(turn_calls) == 2
+    retry_input = turn_calls[1]["input"]
+    assert isinstance(retry_input, list)
+    assert "PRIVATE_NATIVE_MARKER" not in json.dumps(retry_input)
+    assert extracted.fixture_kind == "uploaded"
+    assert extracted.document_sha256 == "f" * 64
+
+
+def test_codex_visual_extractor_rejects_repeated_invalid_model_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    server = object.__new__(CodexAppServer)
+    setattr(server, "_state", "connected")
+    setattr(server, "_lock", threading.RLock())
+    setattr(server, "_extract_lock", threading.Lock())
+    setattr(server, "_workspace", tmp_path)
+    calls: list[tuple[str, dict[str, object], float]] = []
+
+    def fake_call(
+        method: str,
+        params: dict[str, object],
+        *,
+        timeout: float,
+    ) -> dict[str, object]:
+        calls.append((method, params, timeout))
+        if method == "thread/start":
+            return {"thread": {"id": "thread-1"}}
+        turn_number = sum(call[0] == "turn/start" for call in calls)
+        return {"turn": {"id": f"turn-{turn_number}"}}
+
+    invalid = load_utility_sample("bloomington").model_dump(mode="json")
+    assert invalid["sections"][0]["provider"]["status"] == "printed"
+    invalid["sections"][0]["provider"]["original_value"] = "hidden-invalid"
+
+    monkeypatch.setattr(server, "_call", fake_call)
+    monkeypatch.setattr(
+        server,
+        "_wait_for_turn",
+        lambda _turn_id, timeout: ({"status": "completed"}, json.dumps(invalid)),
+    )
+
+    with pytest.raises(CodexOutputInvalidError):
+        server.extract_bill(
+            (
+                RenderedPage(
+                    page=1,
+                    data_url="data:image/png;base64,iVBORw0KGgo=",
+                ),
+            ),
+            "[PAGE 1]\nPRIVATE_NATIVE_MARKER",
+            "f" * 64,
+            1,
+        )
+
+    assert sum(method == "turn/start" for method, _params, _timeout in calls) == 2
 
 
 def test_codex_visual_extractor_fails_closed_when_disconnected(tmp_path: Path) -> None:
@@ -772,6 +885,27 @@ def test_codex_process_failure_returns_controlled_unavailable_response(
     assert response.get_json() == {
         "code": "codex_unavailable",
         "error": "Codex could not complete this request.",
+    }
+
+
+def test_invalid_codex_output_returns_specific_retriable_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def invalid(_path: Path, _visual_extractor: object = None) -> None:
+        raise CodexOutputInvalidError("Codex output did not pass safety checks.")
+
+    monkeypatch.setattr("wattproof.app.extract_pdf", invalid)
+    response = create_app().test_client().post(
+        "/api/extract",
+        data={"bill": (BytesIO(b"%PDF-private"), "private.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "code": "codex_output_invalid",
+        "error": "Codex output did not pass safety checks.",
     }
 
 
