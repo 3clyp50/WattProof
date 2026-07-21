@@ -4,6 +4,10 @@ const state = {
   extraction: null,
   audit: null,
   previewUrl: null,
+  codex: {
+    state: "disconnected",
+    planType: null,
+  },
 };
 
 const factDefinitions = [
@@ -111,9 +115,134 @@ function setLoading(button, loading, label) {
 
 async function responseJson(response) {
   const payload = await response.json().catch(() => ({ error: "Unexpected server response." }));
-  if (!response.ok) throw new Error(payload.error || "The request could not be completed.");
+  if (!response.ok) {
+    const error = new Error(payload.error || "The request could not be completed.");
+    error.code = payload.code;
+    throw error;
+  }
   return payload;
 }
+
+let codexPollTimer = null;
+let codexPollDeadline = 0;
+
+function codexProgress(message, mode = "") {
+  const progress = byId("codex-login-progress");
+  progress.className = `codex-login-progress${mode ? ` ${mode}` : ""}`;
+  progress.querySelector("span:last-child").textContent = message;
+}
+
+function renderCodexStatus(payload) {
+  state.codex.state = payload.state;
+  state.codex.planType = payload.plan_type || null;
+  const connected = payload.state === "connected";
+  byId("codex-connect").hidden = connected;
+  byId("codex-connected").hidden = !connected;
+  byId("codex-plan").textContent = connected
+    ? `${payload.plan_type ? `${payload.plan_type[0].toUpperCase()}${payload.plan_type.slice(1)} · ` : ""}${payload.model}`
+    : payload.model;
+  byId("codex-note").classList.toggle("connected", connected);
+  byId("codex-note-text").textContent = connected
+    ? `${payload.model} is ready for this PDF.`
+    : "Personal PDFs use your Codex access.";
+  byId("codex-note").querySelector("button").hidden = connected;
+
+  if (connected) {
+    codexProgress("Connected. GPT-5.6 Luna is ready.", "connected");
+    window.clearInterval(codexPollTimer);
+    codexPollTimer = null;
+    window.setTimeout(() => {
+      if (byId("codex-dialog").open) byId("codex-dialog").close();
+    }, 750);
+  } else if (payload.state === "failed") {
+    codexProgress("OpenAI could not complete that sign-in. Please try again.", "failed");
+    window.clearInterval(codexPollTimer);
+    codexPollTimer = null;
+  }
+}
+
+async function refreshCodexStatus() {
+  try {
+    const payload = await responseJson(await fetch("/api/codex/status", { cache: "no-store" }));
+    renderCodexStatus(payload);
+    if (codexPollTimer && Date.now() >= codexPollDeadline) {
+      window.clearInterval(codexPollTimer);
+      codexPollTimer = null;
+      codexProgress("The sign-in code expired. Close this window and try again.", "failed");
+    }
+  } catch {
+    if (codexPollTimer) codexProgress("Connection check interrupted. Retrying…");
+  }
+}
+
+function pollCodexStatus() {
+  window.clearInterval(codexPollTimer);
+  codexPollDeadline = Date.now() + 10 * 60 * 1000;
+  codexPollTimer = window.setInterval(refreshCodexStatus, 1500);
+}
+
+async function startCodexLogin(button) {
+  showMessage();
+  setLoading(button, true, "Opening secure sign-in…");
+  try {
+    const payload = await responseJson(await fetch("/api/codex/login", {
+      method: "POST",
+      headers: { "X-WattProof-Request": "1" },
+    }));
+    byId("codex-user-code").textContent = payload.user_code;
+    byId("codex-open-login").href = payload.verification_url;
+    codexProgress("Waiting for OpenAI confirmation…");
+    const dialog = byId("codex-dialog");
+    if (!dialog.open) dialog.showModal();
+    pollCodexStatus();
+  } catch (error) {
+    showMessage(error.message, button);
+  } finally {
+    setLoading(button, false, "");
+  }
+}
+
+document.querySelectorAll("[data-codex-connect]").forEach((button) => {
+  button.addEventListener("click", () => startCodexLogin(button));
+});
+
+byId("codex-disconnect").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const payload = await responseJson(await fetch("/api/codex/logout", {
+      method: "POST",
+      headers: { "X-WattProof-Request": "1" },
+    }));
+    renderCodexStatus({ ...payload, model: "GPT-5.6 Luna", plan_type: null });
+  } catch (error) {
+    showMessage(error.message, button);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+byId("copy-codex-code").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const code = byId("codex-user-code").textContent;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(code);
+    copied = true;
+  } catch {
+    const selection = window.getSelection();
+    if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(byId("codex-user-code"));
+      selection.removeAllRanges();
+      selection.addRange(range);
+      copied = document.execCommand("copy");
+      selection.removeAllRanges();
+    }
+  }
+  button.textContent = copied ? "Copied" : "Copy manually";
+  window.setTimeout(() => { button.textContent = "Copy code"; }, 1800);
+});
 
 function renderReview(mode) {
   const extraction = state.extraction;
@@ -288,11 +417,18 @@ byId("upload-form").addEventListener("submit", async (event) => {
   showMessage();
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.previewUrl = URL.createObjectURL(file);
-  setLoading(button, true, "Extracting native PDF…");
+  const loadingLabel = state.codex.state === "connected"
+    ? "Codex is mapping the evidence…"
+    : "Reading the verified PDF…";
+  setLoading(button, true, loadingLabel);
   try {
     const form = new FormData();
     form.append("bill", file);
-    const payload = await responseJson(await fetch("/api/extract", { method: "POST", body: form }));
+    const payload = await responseJson(await fetch("/api/extract", {
+      method: "POST",
+      headers: { "X-WattProof-Request": "1" },
+      body: form,
+    }));
     state.extraction = payload.extraction;
     state.audit = null;
     renderReview("uploaded");
@@ -360,3 +496,5 @@ byId("download-letter").addEventListener("click", () => {
 });
 
 byId("restart").addEventListener("click", () => window.location.reload());
+
+refreshCodexStatus();

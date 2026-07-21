@@ -52,6 +52,7 @@ Deadline: **Tuesday, July 21, 2026 at 5:00 PM PT**. Work in priority order. Do n
 
 - [x] Extract native PDF text before invoking vision.
 - [x] Use GPT-5.6 structured output to map bill evidence into `BillExtraction`.
+- [x] Let users connect their own Codex access through the official OpenAI device flow without entering an API key in WattProof.
 - [x] Validate line-item, subtotal, total, and meter-usage invariants.
 - [x] Return low-confidence or inconsistent fields for user correction.
 - [x] Implement the first PG&E tariff adapter for the exact sample schedule and period.

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from .fixtures import load_sample
@@ -10,6 +10,7 @@ from .models import BillExtraction
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_PAGES = 20
+MAX_TEXT_CHARS = 250_000
 AUTHENTIC_SHA256 = "50cb3a012f46d2ae478079e28b7b109d08fc74ae098d95317a97c2b99175a9e6"
 REJECTED_DOCUMENTS = {
     "7e61bcc3e961edea79f63b9263007b473a40d16b08d884c4d363c507abab782e": (
@@ -75,45 +76,17 @@ def _native_text(path: Path) -> str:
         raise UnsupportedDocumentError(
             "This file has no usable native text layer. OCR is not in the MVP."
         )
+    if len(marked) > MAX_TEXT_CHARS:
+        raise UnsupportedDocumentError(
+            "This PDF contains too much text for a safe bill extraction."
+        )
     return marked
 
 
-def _extract_with_gpt(text: str, document_sha256: str) -> BillExtraction:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ExtractionUnavailableError(
-            "This is not the known sample. Set OPENAI_API_KEY to map another "
-            "native PG&E/3CE bill with GPT-5.6, or use sample mode."
-        )
-
-    from openai import OpenAI
-
-    response = OpenAI(api_key=api_key).responses.parse(
-        model=os.getenv("OPENAI_MODEL", "gpt-5.6"),
-        store=False,
-        text_format=BillExtraction,
-        instructions=(
-            "Extract only evidence present in this residential electricity bill. "
-            "Use the canonical charge IDs and sections shown by the schema. Quote "
-            "the shortest supporting source text and preserve its [PAGE n] number. "
-            "Mark a schedule as inferred if the bill prints only its description. "
-            "Use fixture_kind='uploaded', synthetic_notice=null, and the supplied "
-            f"document SHA-256 {document_sha256}. Never calculate, repair, or invent "
-            "a value. Use null for a missing meter-read status."
-        ),
-        input=text,
-    )
-    parsed = response.output_parsed
-    if parsed is None:
-        raise ExtractionUnavailableError("GPT-5.6 returned no structured extraction.")
-    raw = parsed.model_dump(mode="json")
-    raw["fixture_kind"] = "uploaded"
-    raw["synthetic_notice"] = None
-    raw["document_sha256"] = document_sha256
-    return BillExtraction.model_validate(raw)
-
-
-def extract_pdf(path: str | Path) -> BillExtraction:
+def extract_pdf(
+    path: str | Path,
+    model_extractor: Callable[[str, str], BillExtraction] | None = None,
+) -> BillExtraction:
     pdf_path = Path(path)
     if not pdf_path.is_file():
         raise InvalidDocumentError("The selected file does not exist.")
@@ -132,4 +105,10 @@ def extract_pdf(path: str | Path) -> BillExtraction:
     pages = _page_count(pdf_path)
     if pages > MAX_PAGES:
         raise InvalidDocumentError(f"PDFs are limited to {MAX_PAGES} pages.")
-    return _extract_with_gpt(_native_text(pdf_path), digest)
+    text = _native_text(pdf_path)
+    if model_extractor is None:
+        raise ExtractionUnavailableError(
+            "This bill needs model-assisted extraction. Connect Codex in WattProof, "
+            "or use the verified public sample."
+        )
+    return model_extractor(text, digest)

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-import sys
+from collections.abc import Callable
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -15,12 +14,18 @@ from pydantic import ValidationError
 from wattproof.app import create_app
 from wattproof.audit import UnsupportedBillError, audit_bill, round_money
 from wattproof.cli import main
+from wattproof.codex import (
+    CodexConnectionStatus,
+    CodexSessionManager,
+    DeviceLogin,
+    strict_bill_schema,
+)
 from wattproof.extract import (
     MAX_FILE_BYTES,
     MAX_PAGES,
+    ExtractionUnavailableError,
     InvalidDocumentError,
     UnsupportedDocumentError,
-    _extract_with_gpt,
     extract_pdf,
 )
 from wattproof.fixtures import FIXTURES_DIR, PROJECT_ROOT, load_sample
@@ -30,6 +35,38 @@ from wattproof.tariffs import SourceIntegrityError, load_tariff_bundle
 
 def _lines(result: AuditResult) -> dict[str, AuditLine]:
     return {line.id: line for line in result.lines}
+
+
+class _FakeCodexClient:
+    def __init__(self) -> None:
+        self.is_connected = False
+        self.closed = False
+        self.extractions: list[tuple[str, str]] = []
+
+    @property
+    def connected(self) -> bool:
+        return self.is_connected
+
+    def start_login(self) -> DeviceLogin:
+        return DeviceLogin(
+            verification_url="https://auth.openai.com/codex/device",
+            user_code="ABCD-1234",
+        )
+
+    def status(self) -> CodexConnectionStatus:
+        if self.is_connected:
+            return CodexConnectionStatus("connected", "plus")
+        return CodexConnectionStatus("pending")
+
+    def extract_bill(self, text: str, document_sha256: str) -> BillExtraction:
+        self.extractions.append((text, document_sha256))
+        raw = load_sample("authentic").model_dump(mode="json")
+        raw["fixture_kind"] = "uploaded"
+        raw["document_sha256"] = document_sha256
+        return BillExtraction.model_validate(raw)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def test_authentic_extraction_matches_golden_fixture() -> None:
@@ -44,35 +81,63 @@ def test_authentic_extraction_matches_golden_fixture() -> None:
     )
 
 
-def test_gpt_extraction_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    parsed = load_sample("authentic")
-    call: dict[str, object] = {}
+def test_codex_output_schema_is_strict_and_uses_supported_regex() -> None:
+    schema = strict_bill_schema()
 
-    class FakeResponses:
-        def parse(self, **kwargs: object) -> SimpleNamespace:
-            call.update(kwargs)
-            return SimpleNamespace(output_parsed=parsed)
+    def assert_strict(node: object) -> None:
+        if isinstance(node, dict):
+            properties = node.get("properties")
+            if isinstance(properties, dict):
+                assert node["additionalProperties"] is False
+                assert node["required"] == list(properties)
+            pattern = node.get("pattern")
+            if isinstance(pattern, str):
+                assert "(?" not in pattern
+            assert "default" not in node
+            for value in node.values():
+                assert_strict(value)
+        elif isinstance(node, list):
+            for value in node:
+                assert_strict(value)
 
-    class FakeOpenAI:
-        def __init__(self, api_key: str) -> None:
-            assert api_key == "test-key"
-            self.responses = FakeResponses()
+    assert_strict(schema)
 
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.delenv("OPENAI_MODEL", raising=False)
-    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
 
-    digest = "f" * 64
-    extraction = _extract_with_gpt("[PAGE 1]\nPrinted bill evidence", digest)
+def test_unknown_pdf_can_use_a_connected_model_extractor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pdf = tmp_path / "unknown.pdf"
+    pdf.write_bytes(b"%PDF-unknown-native-bill")
+    calls: list[tuple[str, str]] = []
 
-    assert call["model"] == "gpt-5.6"
-    assert call["store"] is False
-    assert call["text_format"] is BillExtraction
-    assert call["input"] == "[PAGE 1]\nPrinted bill evidence"
-    assert "Never calculate, repair, or invent" in str(call["instructions"])
-    assert extraction.fixture_kind == "uploaded"
-    assert extraction.synthetic_notice is None
-    assert extraction.document_sha256 == digest
+    monkeypatch.setattr("wattproof.extract._page_count", lambda _path: 1)
+    monkeypatch.setattr(
+        "wattproof.extract._native_text", lambda _path: "[PAGE 1]\nBill evidence"
+    )
+
+    def model_extractor(text: str, digest: str) -> BillExtraction:
+        calls.append((text, digest))
+        return load_sample("authentic")
+
+    result = extract_pdf(pdf, model_extractor)
+
+    assert result == load_sample("authentic")
+    assert calls[0][0] == "[PAGE 1]\nBill evidence"
+    assert re.fullmatch(r"[a-f0-9]{64}", calls[0][1])
+
+
+def test_unknown_pdf_requires_a_connected_codex_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pdf = tmp_path / "unknown.pdf"
+    pdf.write_bytes(b"%PDF-unknown-native-bill")
+    monkeypatch.setattr("wattproof.extract._page_count", lambda _path: 1)
+    monkeypatch.setattr(
+        "wattproof.extract._native_text", lambda _path: "[PAGE 1]\nBill evidence"
+    )
+
+    with pytest.raises(ExtractionUnavailableError, match="Connect Codex"):
+        extract_pdf(pdf)
 
 
 def test_authentic_audit_matches_hand_checked_fixture() -> None:
@@ -342,6 +407,88 @@ def test_health_check() -> None:
     assert response.get_json() == {"status": "ok"}
 
 
+def test_codex_device_login_status_and_logout_contract() -> None:
+    created: list[_FakeCodexClient] = []
+
+    def factory() -> _FakeCodexClient:
+        client = _FakeCodexClient()
+        created.append(client)
+        return client
+
+    manager = CodexSessionManager(client_factory=factory)
+    client = create_app(manager).test_client()
+
+    rejected = client.post("/api/codex/login")
+    login = client.post(
+        "/api/codex/login", headers={"X-WattProof-Request": "1"}
+    )
+    pending = client.get("/api/codex/status")
+    created[0].is_connected = True
+    connected = client.get("/api/codex/status")
+    logout = client.post(
+        "/api/codex/logout", headers={"X-WattProof-Request": "1"}
+    )
+
+    assert rejected.status_code == 403
+    assert login.status_code == 200
+    assert login.get_json() == {
+        "model": "GPT-5.6 Luna",
+        "state": "pending",
+        "user_code": "ABCD-1234",
+        "verification_url": "https://auth.openai.com/codex/device",
+    }
+    assert pending.get_json()["state"] == "pending"
+    assert connected.get_json()["state"] == "connected"
+    assert connected.get_json()["plan_type"] == "plus"
+    assert logout.get_json() == {"state": "disconnected"}
+    assert created[0].closed is True
+
+
+def test_pending_codex_login_expires_and_destroys_its_client() -> None:
+    fake = _FakeCodexClient()
+    now = [0.0]
+    manager = CodexSessionManager(
+        client_factory=lambda: fake,
+        clock=lambda: now[0],
+    )
+
+    manager.start_login("pending-session")
+    now[0] = 601.0
+    status = manager.status("pending-session")
+
+    assert status.state == "disconnected"
+    assert fake.closed is True
+
+
+def test_connected_codex_session_extracts_an_unknown_upload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _FakeCodexClient()
+    manager = CodexSessionManager(client_factory=lambda: fake)
+    client = create_app(manager).test_client()
+    client.post("/api/codex/login", headers={"X-WattProof-Request": "1"})
+    fake.is_connected = True
+
+    def fake_extract_pdf(
+        _path: Path,
+        model_extractor: Callable[[str, str], BillExtraction] | None = None,
+    ) -> BillExtraction:
+        assert model_extractor is not None
+        return model_extractor("[PAGE 1]\nPrivate bill evidence", "f" * 64)
+
+    monkeypatch.setattr("wattproof.app.extract_pdf", fake_extract_pdf)
+    response = client.post(
+        "/api/extract",
+        data={"bill": (BytesIO(b"%PDF-private"), "private.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["extraction"]["fixture_kind"] == "uploaded"
+    assert fake.extractions == [("[PAGE 1]\nPrivate bill evidence", "f" * 64)]
+
+
 def test_web_sample_review_to_audit_api() -> None:
     client = create_app().test_client()
     extraction_response = client.get("/api/sample/authentic")
@@ -356,15 +503,22 @@ def test_web_sample_review_to_audit_api() -> None:
     assert result["review_request"]["requires_user_review"] is True
 
 
-def test_web_upload_uses_known_public_fixture_without_api_key() -> None:
+def test_web_upload_uses_known_public_fixture_without_sign_in() -> None:
     client = create_app().test_client()
     data = (PROJECT_ROOT / "assets/pge-anonymous-3ce-sample-bill.pdf").read_bytes()
-    response = client.post(
+    rejected = client.post(
         "/api/extract",
         data={"bill": (BytesIO(data), "public-sample.pdf")},
         content_type="multipart/form-data",
     )
+    response = client.post(
+        "/api/extract",
+        data={"bill": (BytesIO(data), "public-sample.pdf")},
+        content_type="multipart/form-data",
+        headers={"X-WattProof-Request": "1"},
+    )
 
+    assert rejected.status_code == 403
     assert response.status_code == 200
     assert response.get_json()["extraction"]["delivery_schedule"]["value"] == "E-TOU-C"
 

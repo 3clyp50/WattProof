@@ -2,7 +2,7 @@
 
 [![Verify](https://github.com/3clyp50/WattProof/actions/workflows/verify.yml/badge.svg)](https://github.com/3clyp50/WattProof/actions/workflows/verify.yml)
 
-**Live demo:** [wattproof.tech](https://wattproof.tech) — no credentials or API key are required for the authentic and labeled-synthetic audit paths.
+**Live demo:** [wattproof.tech](https://wattproof.tech) — the authentic and labeled-synthetic audit paths need no sign-in. For a personal native PDF, **Continue with Codex** opens OpenAI's official device sign-in; the site never asks for an API key or password.
 
 **WattProof checks the math on household electricity bills.** A user uploads a bill, reviews every material fact with page evidence, and gets a deterministic line-by-line audit against the published tariff that actually governed the billing period.
 
@@ -36,6 +36,7 @@ Requirements:
 
 - Python 3.12 or newer
 - Poppler command-line tools (`pdftotext` and `pdfinfo`)
+- Optional for personal PDFs: the [Codex CLI](https://learn.chatgpt.com/docs/auth) and a Codex-enabled ChatGPT account
 
 On Ubuntu/Debian, install the system PDF tools if they are missing:
 
@@ -53,20 +54,17 @@ python -m pip install -r requirements.txt
 make run
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Click **Audit authentic sample**; no API key or network access is required for the complete demo path.
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000). Click **Audit authentic sample**; no sign-in or network access is required for the complete demo path.
 
-To use a different native PG&E/3CE PDF, optionally configure GPT-5.6:
+To extract a different native PDF locally, install the same Codex release pinned by the production image:
 
 ```bash
-read -rsp "OpenAI API key: " OPENAI_API_KEY && printf '\n'
-export OPENAI_API_KEY
-export OPENAI_MODEL="gpt-5.6"
-make run
+npm install --global @openai/codex@0.145.0
 ```
 
-WattProof sends unknown native-PDF text to the OpenAI Responses API with strict Pydantic output and `store=False`. The bundled known fixture is recognized by SHA-256 and stays entirely local.
+Then click **Continue with Codex**. WattProof requests a one-time code from the official [Codex App Server device-login endpoint](https://learn.chatgpt.com/docs/app-server#auth-endpoints); authentication happens on `auth.openai.com`. Unknown native-PDF text is mapped by GPT-5.6 Luna into the strict `BillExtraction` schema. The PDF bytes are not handed to Codex, and the known public fixture is recognized by SHA-256 and stays entirely local.
 
-The public deployment intentionally has no OpenAI API key, so it accepts the known public PDF but returns a controlled extraction-unavailable error for unknown bills. This keeps the judge demo reproducible and prevents an unauthenticated endpoint from spending API credits.
+There is no API-key fallback or unauthenticated shared model endpoint. Personal-PDF model usage belongs to the connected Codex account.
 
 ## CLI proof
 
@@ -96,7 +94,7 @@ make verify
 `make verify` runs pytest, Ruff, strict MyPy with the Pydantic plugin, and Python bytecode compilation. The same gate runs publicly on Python 3.12 and 3.13 through GitHub Actions. The regression suite covers:
 
 - golden PDF extraction and hand-checked audit output;
-- the GPT-5.6 strict-schema contract, `store=False`, and trusted document metadata;
+- the GPT-5.6 strict-schema contract, official Codex device-login boundary, session isolation, and trusted document metadata;
 - tariff snapshot hash integrity and effective-period boundaries;
 - Decimal half-up rounding;
 - the exact `$5.00` synthetic discrepancy without double-counting its subtotal symptom;
@@ -118,7 +116,7 @@ The live app runs from the repository's non-root Docker image behind Caddy-manag
 | Auditable period | 2022-11-08 through 2022-12-08 |
 | Native PDF | Yes; 10 MB and 20-page limits |
 | Known public sample | Fully local and deterministic |
-| Other native bills | GPT-5.6 extraction when configured; audit only if the exact adapter supports them |
+| Other native bills | GPT-5.6 Luna extraction after **Continue with Codex**; audit only if the exact adapter supports them |
 | Scanned PDFs / OCR | Not in the MVP |
 | Plan savings | Refused for this fixture because its aggregate buckets cannot reconstruct other hour windows |
 
@@ -136,18 +134,20 @@ The December 2022 public PG&E/3CE statement is therefore the newest coherent bil
 
 ## Architecture
 
-One Flask process serves a framework-free browser UI and three small JSON endpoints. The browser holds the reviewed extraction; the server keeps no bill database or account state.
+One Flask process serves a framework-free browser UI and small JSON endpoints. The browser holds the reviewed extraction; the server keeps no bill database. A personal-PDF connection gets one short-lived, isolated Codex App Server process tied to an opaque signed browser session.
 
 ```text
-native PDF → hash/native text → strict BillExtraction → user review
-    → hash-verified tariff snapshots → Decimal audit → grounded request
+public sample ───────────────────────────────┐
+personal PDF → native text → Codex/Luna ────┤→ strict BillExtraction → user review
+                                            └→ hashed tariffs → Decimal audit → request
 ```
 
 - `wattproof/extract.py` validates PDFs, recognizes the golden sample, extracts native text, and invokes GPT-5.6 only when needed.
+- `wattproof/codex.py` owns official device login, a deny-by-default Codex profile, strict model output, resource limits, and automatic session destruction.
 - `wattproof/models.py` preserves typed facts, confidence, printed/inferred status, page, and source quote.
 - `wattproof/tariffs.py` refuses to calculate if an archived source hash changes.
 - `wattproof/audit.py` owns all arithmetic, reconciliation, insufficiency, and grounded request facts.
-- `wattproof/app.py` owns the stateless Flask routes.
+- `wattproof/app.py` owns the Flask routes and signed, opaque connection cookie.
 - `fixtures/` contains authentic expected data and the clearly labeled synthetic alteration.
 
 The smallest-architecture rationale is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -156,8 +156,10 @@ The smallest-architecture rationale is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 - Only public anonymized or clearly synthetic sample data is tracked.
 - Uploaded bytes live in a temporary file for extraction and are deleted when that request ends.
-- The app has no accounts, database, background jobs, provider login, payment path, or automatic sending.
-- Unknown native PDFs reach OpenAI only when the operator supplies a key; API response storage is disabled.
+- WattProof has no user database, utility-provider login, payment path, or automatic sending.
+- Codex sign-in happens only on OpenAI's official page. Passwords and tokens never enter the WattProof page or browser storage; production credentials live in a private, memory-backed temporary directory and are deleted on disconnect or expiry.
+- Each connection is isolated, expires after 30 minutes, and runs with no approval prompts, no web search, no tool network, and deny-by-default filesystem access. Pending sign-ins expire after 10 minutes and the service admits at most eight concurrent Codex sessions.
+- The model receives extracted native text, not the uploaded PDF bytes. Instructions inside a bill are treated as untrusted evidence and cannot become model instructions.
 - The request screen always states that user review is required.
 - WattProof asks for clarification or correction; it does not accuse a provider, offer legal advice, or guarantee savings.
 
@@ -165,13 +167,14 @@ The smallest-architecture rationale is in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 Codex was used in one primary build session to inspect and render PDFs, reject misleading fixture paths, locate effective-period sources, hand-check tariff math, define contracts, implement the engine and UI, generate regression cases, diagnose failures, and verify the rendered browser flow.
 
-GPT-5.6 is integrated through schema-constrained Responses API extraction for unknown native PDFs. It may turn document evidence into typed fields; it cannot supply a tariff rate or perform arithmetic. The sample path remains reproducible without an API key.
+GPT-5.6 Luna is integrated through a constrained, ephemeral Codex App Server thread for unknown native PDFs. It may turn untrusted document evidence into typed fields; any tool-using turn is rejected, and it cannot supply a tariff rate or perform the audit arithmetic. The sample path remains reproducible without any sign-in.
 
 [`CODEX_LOG.md`](CODEX_LOG.md) records the important prompts, decisions, rejected approaches, corrections, verification, commits, and the pending primary-session `/feedback` ID.
 
 ## Demo path under three minutes
 
 - Start with the authentic sample and show the evidence review.
+- Briefly show **Continue with Codex** and the official OpenAI one-time-code handoff; avoid recording personal account details.
 - Show the green supported-math verdict and one exact formula with both rate citations.
 - Restart with the labeled synthetic fixture and reveal the `$5.00` discrepancy.
 - Show the honest interval-data requirement instead of imaginary savings.

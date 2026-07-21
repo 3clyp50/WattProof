@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import os
+import secrets
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, Response, jsonify, render_template, request, send_file, session
 from pydantic import BaseModel, ValidationError
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from .audit import UnsupportedBillError, audit_bill
+from .codex import (
+    CODEX_MODEL_LABEL,
+    CodexNotConnectedError,
+    CodexSessionManager,
+    CodexUnavailableError,
+)
 from .extract import (
     MAX_FILE_BYTES,
     ExtractionUnavailableError,
@@ -25,12 +34,27 @@ def _json_model(model: BaseModel) -> dict[str, Any]:
     return model.model_dump(mode="json")
 
 
-def create_app() -> Flask:
+def create_app(codex_manager: CodexSessionManager | None = None) -> Flask:
     app = Flask(__name__)
     app.config.update(
         MAX_CONTENT_LENGTH=MAX_FILE_BYTES,
         SEND_FILE_MAX_AGE_DEFAULT=0,
+        SECRET_KEY=os.getenv("WATTPROOF_SESSION_SECRET") or secrets.token_hex(32),
+        PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=os.getenv("WATTPROOF_SECURE_COOKIES") == "1",
+        SESSION_COOKIE_NAME="wattproof_session",
     )
+    manager = codex_manager or CodexSessionManager()
+    app.extensions["codex_manager"] = manager
+
+    def codex_session_id() -> str | None:
+        value = session.get("codex_session_id")
+        return value if isinstance(value, str) else None
+
+    def same_origin_request() -> bool:
+        return request.headers.get("X-WattProof-Request") == "1"
 
     @app.get("/healthz")
     def health() -> Response:
@@ -57,8 +81,44 @@ def create_app() -> Flask:
         )
         return jsonify(extraction=_json_model(load_sample(sample_kind)))
 
+    @app.post("/api/codex/login")
+    def codex_login() -> Response | tuple[Response, int]:
+        if not same_origin_request():
+            return jsonify(error="The sign-in request could not be verified."), 403
+        session_id = codex_session_id()
+        if session_id is None:
+            session_id = secrets.token_urlsafe(32)
+            session["codex_session_id"] = session_id
+            session.permanent = True
+        login = manager.start_login(session_id)
+        return jsonify(
+            state="pending",
+            verification_url=login.verification_url,
+            user_code=login.user_code,
+            model=CODEX_MODEL_LABEL,
+        )
+
+    @app.get("/api/codex/status")
+    def codex_status() -> Response:
+        status = manager.status(codex_session_id())
+        return jsonify(
+            state=status.state,
+            plan_type=status.plan_type,
+            model=CODEX_MODEL_LABEL,
+        )
+
+    @app.post("/api/codex/logout")
+    def codex_logout() -> Response | tuple[Response, int]:
+        if not same_origin_request():
+            return jsonify(error="The sign-out request could not be verified."), 403
+        manager.logout(codex_session_id())
+        session.pop("codex_session_id", None)
+        return jsonify(state="disconnected")
+
     @app.post("/api/extract")
     def extract() -> Response | tuple[Response, int]:
+        if not same_origin_request():
+            return jsonify(error="The extraction request could not be verified."), 403
         upload = request.files.get("bill")
         if upload is None or not upload.filename:
             return jsonify(error="Choose a PDF bill first."), 400
@@ -69,7 +129,9 @@ def create_app() -> Flask:
         with tempfile.NamedTemporaryFile(suffix=".pdf") as temporary:
             temporary.write(data)
             temporary.flush()
-            extraction = extract_pdf(Path(temporary.name))
+            extraction = extract_pdf(
+                Path(temporary.name), manager.extractor(codex_session_id())
+            )
         return jsonify(extraction=_json_model(extraction))
 
     @app.post("/api/audit")
@@ -104,8 +166,21 @@ def create_app() -> Flask:
     def reviewable_error(error: Exception) -> tuple[Response, int]:
         return jsonify(error=str(error)), 422
 
+    @app.errorhandler(ExtractionUnavailableError)
+    def extraction_login_required(
+        error: ExtractionUnavailableError,
+    ) -> tuple[Response, int]:
+        return jsonify(error=str(error), code="codex_login_required"), 401
+
+    @app.errorhandler(CodexNotConnectedError)
+    def codex_login_required(error: CodexNotConnectedError) -> tuple[Response, int]:
+        return jsonify(error=str(error), code="codex_login_required"), 401
+
+    @app.errorhandler(CodexUnavailableError)
+    def codex_unavailable(error: CodexUnavailableError) -> tuple[Response, int]:
+        return jsonify(error=str(error), code="codex_unavailable"), 503
+
     for error_type in (
-        ExtractionUnavailableError,
         InvalidDocumentError,
         UnsupportedBillError,
         UnsupportedDocumentError,

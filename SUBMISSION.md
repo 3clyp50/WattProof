@@ -15,7 +15,7 @@ This file is the source of truth for the Devpost entry and demo recording. Repla
 - **Devpost project:** https://devpost.com/software/wattproof-xtw6ib
 - **Demo video:** `TODO(submission): public YouTube URL, under three minutes`
 - **Primary Codex feedback Session ID:** `TODO(submission): run /feedback in the main build session`
-- **Judge testing instructions:** Open https://wattproof.tech and click **Audit authentic sample**; no credentials or API key are required for the complete authentic and labeled-synthetic paths. The known public PDF can also be uploaded directly. For local verification, clone the repository, install `poppler-utils`, create a Python 3.12+ virtual environment, install `requirements.txt`, run `make run`, and open `http://127.0.0.1:8000`.
+- **Judge testing instructions:** Open https://wattproof.tech and click **Audit authentic sample**; no sign-in is required for the complete authentic and labeled-synthetic paths. The known public PDF can also be uploaded directly. To try another native PDF, choose **Continue with Codex** and complete OpenAI's official one-time-code sign-in; WattProof never asks for an API key or password. For local verification, clone the repository, install `poppler-utils` and the Codex CLI, create a Python 3.12+ virtual environment, install `requirements.txt`, run `make run`, and open `http://127.0.0.1:8000`.
 
 ## Live Devpost requirements
 
@@ -38,13 +38,15 @@ WattProof turns a bill into a reviewable evidence record, then checks supported 
 
 The MVP deliberately handles one public anonymized PG&E delivery and Central Coast Community Energy generation statement exceptionally well. The authentic statement reconciles against its 2022 sources. A separate fixture is clearly labeled synthetic and changes one auditable peak charge by exactly $5.00, proving that the engine detects a known discrepancy without suggesting it occurred on a real customer's bill.
 
-The complete flow is upload, evidence review, deterministic audit, honest plan-comparison sufficiency, and an editable review request grounded only in audit facts. Uploaded files are temporary, the app stores no customer data, and it never contacts a provider or sends the request automatically.
+The complete flow is upload, evidence review, deterministic audit, honest plan-comparison sufficiency, and an editable review request grounded only in audit facts. Uploaded files are temporary, the app has no bill database, and it never contacts a provider or sends the request automatically. The public samples run locally. A personal native PDF can use the visitor's own Codex access through OpenAI's official device-code sign-in—no API-key field, copied token, or shared unauthenticated model endpoint.
 
 ## How it was built
 
 WattProof is a small Python application: Flask serves a framework-free responsive interface; Pydantic defines the versioned extraction, evidence, tariff, audit, comparison, and review-request contracts; and Python `Decimal` code performs all money arithmetic with explicit half-up rounding. Official source snapshots are committed with retrieval metadata and SHA-256 hashes, and the engine refuses to calculate if a source changes.
 
-GPT-5.6 uses schema-constrained OpenAI Responses API output to map unknown native-PDF text into typed evidence. It does not choose rates, calculate charges, or invent missing data. The bundled public sample is recognized by hash and runs entirely locally without an API key. A focused regression proves the model, strict Pydantic schema, disabled API storage, and trusted document-metadata boundary.
+For unfamiliar native PDFs, WattProof starts an isolated Codex App Server process and uses its official `chatgptDeviceCode` flow. Authentication stays on `auth.openai.com`; the page receives only connection status, while temporary server-side credentials are deleted on disconnect or expiry. The connected GPT-5.6 Luna thread maps native bill text into strict Pydantic evidence with quoted page support. Any tool-using turn is rejected, and the model cannot choose rates, calculate charges, or invent missing monetary values. The bundled public sample is recognized by hash and runs entirely locally without sign-in.
+
+This is deliberately not a general remote coding agent. Codex runs under a deny-by-default filesystem profile in an empty read-only workspace, with approvals, web search, tool networking, apps, hooks, and memories disabled. Pending login and connected-session lifetimes are bounded, production temporary storage is memory-backed, and deterministic typed code remains the only authority over money.
 
 Codex drove the primary build session: it rendered and inspected the supplied documents, rejected unsuitable sample paths, researched matching effective-period sources, independently checked tariff math, designed the smallest architecture, implemented the engine and five-step UI, created golden and synthetic regression fixtures, diagnosed browser failures, and verified the final flow. `CODEX_LOG.md` preserves prompts, decisions, failures, corrections, verification results, and milestone commits.
 
@@ -52,6 +54,7 @@ Codex drove the primary build session: it rendered and inspected the supplied do
 
 - **Effective-period truth:** a newer tariff is not treated as better when it did not govern the bill.
 - **Evidence before automation:** users can correct extracted facts before any conclusion is calculated.
+- **Codex as a product primitive:** visitors can bring their own official Codex access into a narrow consumer workflow without pasting credentials into WattProof.
 - **Deterministic money:** GPT-5.6 reads evidence; typed code owns arithmetic.
 - **Visible uncertainty:** unsupported riders and insufficient interval data remain explicit limitations.
 - **Action without overclaiming:** the final request asks for review and cites the exact lines and sources involved.
@@ -62,9 +65,9 @@ The hardest problem was not PDF parsing or interface polish. It was establishing
 
 That constraint shaped the product: provenance is executable, arithmetic is reproducible, uncertainty survives extraction, and the comparison step refuses to annualize one aggregate month or reconstruct time windows it cannot observe.
 
-## Demo script — target 2:45
+## Demo script — target 2:55
 
-The quoted lines are a speaking guide, not something to recite mechanically. Keep the human pauses; rehearse toward **2:35–2:45** so YouTube processing cannot push the result over three minutes.
+The quoted lines are a speaking guide, not something to recite mechanically. Keep the human pauses, but rehearse toward **2:45–2:55** so YouTube processing cannot push the result over three minutes.
 
 ### 0:00–0:10 — Start with the question
 
@@ -72,49 +75,55 @@ The quoted lines are a speaking guide, not something to recite mechanically. Kee
 
 > Most bill apps tell you what you paid. WattProof asks a harder question: was the bill calculated correctly?
 
-### 0:10–0:32 — The discovery that shaped the product
+### 0:10–0:30 — The discovery that shaped the product
 
 *Keep the public-sample card and its December 2022 label visible.*
 
 > Before I wrote the calculator, Codex caught a real audit trap: the supplied pricing sheet is from 2026, while the complete public statement is from 2022. No newer public sample I found had the full matching evidence. WattProof therefore uses the newest coherent bill-and-tariff pair—because current is not the same as correct.
 
-### 0:32–0:58 — Evidence before conclusions
+### 0:30–0:55 — Evidence before conclusions
 
 *Click **Audit authentic sample**. Move slowly across the service dates, E-TOU-C schedule, providers, confidence, page number, and printed quote.*
 
 > This is a public anonymized PG&E and Central Coast Community Energy statement. Before math runs, WattProof creates a reviewable evidence record. Dates, schedule, providers, usage, and charges keep their confidence, page number, and printed quote. The user can correct any field. AI does not get the last word.
 
-### 0:58–1:25 — Show the arithmetic, including its boundary
+### 0:55–1:20 — Show the arithmetic, including its boundary
 
 *Click **Confirm & run audit**. Show the green verdict, then expand the PG&E peak-energy calculation so the rate, formula, effective dates, and source are readable.*
 
 > Once confirmed, typed Decimal code takes over. The authentic bill reconciles wherever archived sources support a calculation: fourteen checks verified, with inputs, full-precision rates, formulas, rounding, and effective dates visible line by line. Six lines remain cannot verify because the exact rule or required evidence is unavailable. WattProof never forces them to match.
 
-### 1:25–1:43 — Let an honest “no” be a feature
+### 1:20–1:35 — Let an honest “no” be a feature
 
 *Click **Check plan fit** and hold on “More data needed” and the Green Button requirement.*
 
 > The same honesty applies to savings. This bill only reports aggregate peak and off-peak usage, so it cannot reconstruct another plan's hours. Instead of inventing a dollar figure, WattProof asks for interval data. If the evidence stops, the claim stops.
 
-### 1:43–2:08 — Prove discrepancy detection
+### 1:35–1:58 — Prove discrepancy detection
 
 *Restart, choose **Detect a labeled $5 synthetic error**, keep the synthetic warning visible, and continue to its red audit verdict.*
 
 > Now I’ll switch to the clearly labeled synthetic fixture. It changes one printed peak charge from thirty-six dollars and forty-four cents to forty-one dollars and forty-four cents. WattProof finds exactly the five-dollar error. The subtotal mismatch confirms the alteration, but is not double-counted. This never appeared on a real bill; it exists to prove the detector works.
 
-### 2:08–2:25 — Turn proof into a useful next step
+### 1:58–2:14 — Turn proof into a useful next step
 
 *Continue to **Prepare review request**. Show the editable message and claim ledger; do not linger on every sentence.*
 
 > Finally, WattProof turns evidence into a calm review request. It asks the provider to confirm missing components, maps each claim back to the audit, and never sends anything automatically.
 
-### 2:25–2:42 — Explain the collaboration clearly
+### 2:14–2:34 — Show Codex inside the product
+
+*Return to Upload, click **Continue with Codex**, and show the one-time code and `auth.openai.com` button. Do not record an account page, email address, or live reusable code; cut to the connected state.*
+
+> For a personal bill, there is no hidden API-key box. Continue with Codex opens OpenAI's official one-time-code sign-in and gives WattProof a temporary, tightly constrained GPT-5.6 Luna extraction session. The browser never stores the token, the session expires, and code—not the model—still owns every dollar.
+
+### 2:34–2:49 — Explain the build collaboration clearly
 
 *Show a prepared terminal with the green `make verify` result, then `CODEX_LOG.md` or the README's “Codex and GPT-5.6” section.*
 
-> I built WattProof with Codex and GPT-5.6. Codex helped inspect the source documents, expose the date mismatch, implement and debug the product, and create the regression evidence. GPT-5.6 maps unfamiliar PDF text into a strict schema. It never chooses rates or calculates money; deterministic code does that.
+> Codex also helped inspect the source documents, expose the date mismatch, implement and debug the product, and create the regression evidence. The green verification gate covers extraction boundaries, tariff math, uncertainty, and this login lifecycle.
 
-### 2:42–2:48 — Close on the principle
+### 2:49–2:55 — Close on the principle
 
 *Return to the result or hold on the WattProof mark.*
 
