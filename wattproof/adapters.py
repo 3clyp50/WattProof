@@ -12,6 +12,7 @@ from .audit import (
     validate_pge_3ce_bill,
     validate_pge_3ce_identity,
 )
+from .legacy import translate_legacy_bill
 from .models import (
     AuditLine,
     AuditResult,
@@ -30,6 +31,7 @@ from .numeric import (
     subtract_exact,
     sum_exact,
 )
+from .reconcile import reconcile_document
 from .tariffs import RateRule, TariffBundle, load_tariff_bundle
 from .utility_models import (
     AuditScope,
@@ -81,6 +83,11 @@ _PERCENT_RATE_CHARGE_IDS = frozenset(
 )
 _UNCITED_PRINTED_MATH_CHARGE_IDS = frozenset(
     {"cca_nov_uut", "cca_dec_uut"}
+)
+_PRINTED_MATH_TARIFF_LIMITATION = (
+    "WattProof checked arithmetic using the percentage rate and base amounts "
+    "printed on this statement; no independently archived source establishes "
+    "that rate as the governing tariff."
 )
 _ARCHIVED_PRINTED_RATE_CHARGE_IDS = _QUANTITY_RATE_CHARGE_IDS
 _NO_PRINTED_OPERAND_CHARGE_IDS = frozenset(
@@ -147,7 +154,7 @@ _EXPECTED_VERSION = TariffVersion(
     retrieved_on=date(2026, 7, 19),
     citations=tuple(_EXPECTED_CITATIONS.values()),
 )
-_EXPECTED_RULES = {
+_EXPECTED_PUBLISHED_RULES = {
     "pge_peak_energy": RateRule(
         kind="quantity_times_rate",
         rate=Decimal("0.39193"),
@@ -187,16 +194,6 @@ _EXPECTED_RULES = {
         kind="quantity_times_rate",
         rate=Decimal("0.09000"),
         citations=("3ce",),
-    ),
-    "cca_nov_uut": RateRule(
-        kind="percent_of_lines",
-        rate=Decimal("0.01000"),
-        line_ids=("cca_nov_peak", "cca_nov_off_peak"),
-    ),
-    "cca_dec_uut": RateRule(
-        kind="percent_of_lines",
-        rate=Decimal("0.01000"),
-        line_ids=("cca_dec_peak", "cca_dec_off_peak"),
     ),
 }
 _EXPECTED_LIMITATIONS = {
@@ -238,22 +235,26 @@ def _bundle_has_expected_structure(bundle: TariffBundle) -> bool:
     if (
         bundle.version != _EXPECTED_VERSION
         or bundle.citation_map != _EXPECTED_CITATIONS
-        or set(bundle.rules) != set(_EXPECTED_RULES)
-        or bundle.limitations != _EXPECTED_LIMITATIONS
     ):
         return False
-    for line_id, expected in _EXPECTED_RULES.items():
-        actual = bundle.rules[line_id]
-        if line_id in _UNCITED_PRINTED_MATH_CHARGE_IDS:
-            if (
-                actual.kind != expected.kind
-                or actual.line_ids != expected.line_ids
-                or actual.citations
-            ):
-                return False
-        elif actual != expected:
-            return False
-    return True
+    return all(
+        bundle.rules.get(line_id) == expected
+        for line_id, expected in _EXPECTED_PUBLISHED_RULES.items()
+    )
+
+
+def _published_tariff_bundle(bundle: TariffBundle) -> TariffBundle:
+    """Return only independently cited rules used by the exact adapter."""
+
+    return TariffBundle(
+        version=bundle.version,
+        citation_map=bundle.citation_map,
+        rules={
+            line_id: bundle.rules[line_id]
+            for line_id in _EXPECTED_PUBLISHED_RULES
+        },
+        limitations=dict(_EXPECTED_LIMITATIONS),
+    )
 
 
 def _charge_has_supported_operands(charge: ChargeLine) -> bool:
@@ -295,16 +296,6 @@ def _bill_has_expected_structure(
         return False
     if any(not _charge_has_supported_operands(charge) for charge in bill.charges):
         return False
-    seen_charge_ids: set[str] = set()
-    for charge in bill.charges:
-        rule = _EXPECTED_RULES.get(charge.id)
-        if (
-            rule is not None
-            and rule.kind == "percent_of_lines"
-            and not set(rule.line_ids) <= seen_charge_ids
-        ):
-            return False
-        seen_charge_ids.add(charge.id)
     for charge_id in _ARCHIVED_PRINTED_RATE_CHARGE_IDS:
         printed_rate = charges_by_id[charge_id].rate
         rule = bundle.rules[charge_id]
@@ -405,33 +396,39 @@ def _evidence(line: AuditLine, fact: EvidenceBase | None) -> EvidenceRef:
     )
 
 
-def _fact_evidence(fact: EvidenceBase) -> EvidenceRef:
-    return EvidenceRef(
-        page=fact.source_page,
-        text=fact.source_text,
-        confidence=fact.confidence,
-        provenance="rendered_page",
-    )
-
-
-def _mapped_evidence(
+def _document_printed_math(
     bill: BillExtraction,
-    line: AuditLine,
-    fact: EvidenceBase | None,
-) -> tuple[EvidenceRef, ...]:
-    evidence = [_evidence(line, fact)]
-    if line.id not in _UNCITED_PRINTED_MATH_CHARGE_IDS:
-        return tuple(evidence)
+) -> tuple[
+    dict[str, UtilityAuditLine],
+    dict[str, tuple[str, ...]],
+]:
+    """Read uncited arithmetic only from the translated document contract."""
 
-    charges = {charge.id: charge for charge in bill.charges}
-    charge = charges[line.id]
-    if charge.rate is not None:
-        evidence.append(_fact_evidence(charge.rate))
-    evidence.extend(
-        _fact_evidence(charges[base_id].billed_amount)
-        for base_id in _EXPECTED_RULES[line.id].line_ids
-    )
-    return tuple(evidence)
+    document = translate_legacy_bill(bill)
+    reconciled = reconcile_document(document)
+    reconciled_lines = {line.id: line for line in reconciled.lines}
+    lines: dict[str, UtilityAuditLine] = {}
+    dependencies: dict[str, tuple[str, ...]] = {}
+    for section in document.sections:
+        for charge in section.charges:
+            if charge.id not in _UNCITED_PRINTED_MATH_CHARGE_IDS:
+                continue
+            calculation = charge.calculation
+            if calculation is None or calculation.kind != "percent_of_charges":
+                raise ValueError(
+                    f"Missing declared printed-math relationship for {charge.id}"
+                )
+            generic_id = f"charge::{charge.id}"
+            lines[charge.id] = reconciled_lines[generic_id].model_copy(
+                update={
+                    "id": charge.id,
+                    "limitation": _PRINTED_MATH_TARIFF_LIMITATION,
+                }
+            )
+            dependencies[charge.id] = calculation.charge_ids
+    if set(lines) != _UNCITED_PRINTED_MATH_CHARGE_IDS:
+        raise ValueError("Translated document omitted reviewed printed-math lines")
+    return lines, dependencies
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,6 +445,8 @@ def _money_reconciles(billed: Decimal, expected: Decimal) -> bool:
 def _root_causes(
     bill: BillExtraction,
     result: AuditResult,
+    printed_math_lines: dict[str, UtilityAuditLine],
+    printed_math_dependencies: dict[str, tuple[str, ...]],
 ) -> dict[str, str]:
     legacy_lines = {line.id: line for line in result.lines}
     roots: dict[str, str] = {}
@@ -457,78 +456,90 @@ def _root_causes(
         ("cca_generation", "generation_subtotal", bill.generation_subtotal.value),
     )
     for section_id, subtotal_id, billed_subtotal in section_subtotals:
-        charge_values: list[_ReconciledValue] = []
+        section_charges = tuple(
+            charge for charge in bill.charges if charge.section == section_id
+        )
         corrected_by_id: dict[str, _ReconciledValue] = {}
-        for charge in bill.charges:
-            if charge.section != section_id:
+        for charge in section_charges:
+            if charge.id in printed_math_dependencies:
                 continue
             line = legacy_lines[charge.id]
-            if charge.id in _UNCITED_PRINTED_MATH_CHARGE_IDS:
-                rule = _EXPECTED_RULES[charge.id]
-                dependencies = tuple(
-                    corrected_by_id.get(base_id) for base_id in rule.line_ids
-                )
-                provable = charge.rate is not None and all(
-                    dependency is not None and dependency.provable
-                    for dependency in dependencies
-                )
-                dependency_values = tuple(
-                    dependency
-                    for dependency in dependencies
-                    if dependency is not None
-                )
-                dependency_roots = set().union(
-                    *(value.root_ids for value in dependency_values)
-                )
-                if provable and dependency_roots and charge.rate is not None:
-                    corrected_base = sum_exact(
-                        tuple(value.amount for value in dependency_values)
-                    )
-                    corrected_amount = round_money(
-                        multiply_exact(corrected_base, charge.rate.value)
-                    )
-                    if line.status == "discrepancy":
-                        if (
-                            len(dependency_roots) == 1
-                            and _money_reconciles(
-                                charge.billed_amount.value,
-                                corrected_amount,
-                            )
-                        ):
-                            roots[line.id] = next(iter(dependency_roots))
-                        else:
-                            dependency_roots.add(line.id)
-                    value = _ReconciledValue(
-                        corrected_amount,
-                        frozenset(dependency_roots),
-                        True,
-                    )
-                elif line.status == "discrepancy" and line.expected_amount is not None:
-                    value = _ReconciledValue(
-                        line.expected_amount,
-                        frozenset((line.id,)),
-                        True,
-                    )
-                else:
-                    value = _ReconciledValue(
-                        charge.billed_amount.value,
-                        frozenset(),
-                        provable,
-                    )
-            elif line.status == "discrepancy" and line.expected_amount is not None:
-                value = _ReconciledValue(
+            if line.status == "discrepancy" and line.expected_amount is not None:
+                corrected_by_id[charge.id] = _ReconciledValue(
                     line.expected_amount,
                     frozenset((line.id,)),
+                    True,
+                )
+            else:
+                corrected_by_id[charge.id] = _ReconciledValue(
+                    charge.billed_amount.value,
+                    frozenset(),
+                    True,
+                )
+
+        for charge in section_charges:
+            dependency_ids = printed_math_dependencies.get(charge.id)
+            if dependency_ids is None:
+                continue
+            printed_line = printed_math_lines[charge.id]
+            dependencies = tuple(
+                corrected_by_id.get(base_id) for base_id in dependency_ids
+            )
+            provable = charge.rate is not None and all(
+                dependency is not None and dependency.provable
+                for dependency in dependencies
+            )
+            dependency_values = tuple(
+                dependency
+                for dependency in dependencies
+                if dependency is not None
+            )
+            dependency_roots = set().union(
+                *(value.root_ids for value in dependency_values)
+            )
+            if provable and dependency_roots and charge.rate is not None:
+                corrected_base = sum_exact(
+                    tuple(value.amount for value in dependency_values)
+                )
+                corrected_amount = round_money(
+                    multiply_exact(corrected_base, charge.rate.value)
+                )
+                if printed_line.status == "discrepancy":
+                    if (
+                        len(dependency_roots) == 1
+                        and _money_reconciles(
+                            charge.billed_amount.value,
+                            corrected_amount,
+                        )
+                    ):
+                        roots[printed_line.id] = next(iter(dependency_roots))
+                    else:
+                        dependency_roots.add(printed_line.id)
+                value = _ReconciledValue(
+                    corrected_amount,
+                    frozenset(dependency_roots),
+                    True,
+                )
+            elif (
+                printed_line.status == "discrepancy"
+                and printed_line.expected_amount is not None
+            ):
+                value = _ReconciledValue(
+                    printed_line.expected_amount,
+                    frozenset((printed_line.id,)),
                     True,
                 )
             else:
                 value = _ReconciledValue(
                     charge.billed_amount.value,
                     frozenset(),
-                    True,
+                    provable,
                 )
-            charge_values.append(value)
             corrected_by_id[charge.id] = value
+
+        charge_values = tuple(
+            corrected_by_id[charge.id] for charge in section_charges
+        )
 
         corrected_subtotal = sum_exact(tuple(value.amount for value in charge_values))
         root_ids = set().union(*(value.root_ids for value in charge_values))
@@ -622,12 +633,48 @@ def _issue_detail(line: AuditLine) -> str:
     return detail
 
 
+def _utility_issue_detail(line: UtilityAuditLine) -> str:
+    if (
+        line.status == "discrepancy"
+        and line.billed_amount is not None
+        and line.expected_amount is not None
+        and line.delta is not None
+    ):
+        detail = (
+            f"- {line.label}: the statement shows {_currency(line.billed_amount)}; "
+            f"the recomputed value is {_currency(line.expected_amount)}; "
+            f"the difference is {_currency(abs_exact(line.delta))}.\n"
+            f"  Calculation: {line.formula}."
+        )
+    elif line.status == "needs_review":
+        detail = (
+            f"- {line.label}: the reported operands need review before WattProof "
+            "can reach a conclusion."
+        )
+    else:
+        detail = f"- {line.label}: this issue needs calculation detail."
+    if line.evidence:
+        detail += (
+            "\n  Rendered-page evidence is recorded on page "
+            f"{line.evidence[0].page}."
+        )
+    if line.citations:
+        sources = "; ".join(
+            f"{citation.label}: {citation.source_url}"
+            for citation in line.citations
+        )
+        detail += f"\n  Archived sources: {sources}."
+    if line.limitation:
+        detail += f"\n  Limit: {line.limitation}"
+    return detail
+
+
 def _generated_issue_request_body(
     bill: BillExtraction,
     provider: str,
-    lines: tuple[AuditLine, ...],
+    lines: tuple[UtilityAuditLine, ...],
 ) -> str:
-    details = tuple(_issue_detail(line) for line in lines)
+    details = tuple(_utility_issue_detail(line) for line in lines)
     synthetic_notice = (
         "This is a synthetic demo request; no real customer bill contained "
         "these errors.\n\n"
@@ -659,7 +706,7 @@ def _validated_grounding(
 def _clean_provider_request(
     bill: BillExtraction,
     provider: str,
-    lines: tuple[AuditLine, ...],
+    lines: tuple[UtilityAuditLine, ...],
 ) -> ProviderReviewRequest:
     details: list[str] = []
     for line in lines:
@@ -729,9 +776,9 @@ def _draft_issue_lines(
 
 def _consolidated_issue_request(
     bill: BillExtraction,
-    lines: tuple[AuditLine, ...],
+    lines: tuple[UtilityAuditLine, ...],
 ) -> ProviderReviewRequest:
-    details = "\n".join(_issue_detail(line) for line in lines)
+    details = "\n".join(_utility_issue_detail(line) for line in lines)
     synthetic_notice = (
         "This is a synthetic demo request; no real customer bill contained "
         "these errors.\n\n"
@@ -760,6 +807,7 @@ def _provider_review_requests(
     mapped_lines: tuple[UtilityAuditLine, ...],
 ) -> tuple[ProviderReviewRequest, ...]:
     line_ids = {line.id for line in mapped_lines}
+    mapped_by_id = {line.id: line for line in mapped_lines}
     section_by_id = _section_by_line_id(bill)
     provider_sections = (
         ("pge_delivery", bill.delivery_provider.value),
@@ -772,13 +820,12 @@ def _provider_review_requests(
             review.grounded_audit_line_ids,
             line_ids,
         )
-        result_lines = {line.id: line for line in result.lines}
         clean_requests = tuple(
             _clean_provider_request(
                 bill,
                 provider,
                 tuple(
-                    result_lines[line_id]
+                    mapped_by_id[line_id]
                     for line_id in grounded
                     if section_by_id.get(line_id) == section_id
                 ),
@@ -798,7 +845,6 @@ def _provider_review_requests(
         return clean_requests
 
     requests: list[ProviderReviewRequest] = []
-    result_lines = {line.id: line for line in result.lines}
     legacy_review = result.review_request
     for section_id, provider in provider_sections:
         provider_issue_lines = tuple(
@@ -812,7 +858,7 @@ def _provider_review_requests(
             tuple(line.id for line in provider_issue_lines),
             line_ids,
         )
-        provider_lines = tuple(result_lines[line_id] for line_id in grounded)
+        provider_lines = tuple(mapped_by_id[line_id] for line_id in grounded)
         if grounded == legacy_review.grounded_audit_line_ids:
             subject = legacy_review.subject
             body = legacy_review.body
@@ -843,7 +889,7 @@ def _provider_review_requests(
         requests.append(
             _consolidated_issue_request(
                 bill,
-                tuple(result_lines[line_id] for line_id in neutral_grounded)
+                tuple(mapped_by_id[line_id] for line_id in neutral_grounded)
             )
         )
     issue_ids = tuple(line.id for line in issue_lines)
@@ -860,32 +906,50 @@ def _provider_review_requests(
 def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult:
     facts = _facts_by_line_id(bill)
     sections = _section_by_line_id(bill)
-    root_causes = _root_causes(bill, result)
-    mapped_lines = tuple(
-        UtilityAuditLine(
-            id=line.id,
-            section_id=sections.get(line.id),
-            label=line.label,
-            scope=_mapped_scope(line),
-            unit=line.unit,
-            billed_amount=line.billed_amount,
-            billed_status=facts[line.id].status if line.id in facts else None,
-            billed_original_value=(
-                facts[line.id].original_value if line.id in facts else None
-            ),
-            expected_amount=line.expected_amount,
-            delta=line.delta,
-            formula=line.formula,
-            inputs=line.inputs,
-            evidence=_mapped_evidence(bill, line, facts.get(line.id)),
-            citations=line.citations,
-            status=_mapped_status(line.status),
-            limitation=line.limitation,
-            root_cause_id=root_causes.get(line.id),
-        )
-        for line in result.lines
+    printed_math_lines, printed_math_dependencies = _document_printed_math(bill)
+    root_causes = _root_causes(
+        bill,
+        result,
+        printed_math_lines,
+        printed_math_dependencies,
     )
-    review_requests = _provider_review_requests(bill, result, mapped_lines)
+    mapped: list[UtilityAuditLine] = []
+    for line in result.lines:
+        printed_math_line = printed_math_lines.get(line.id)
+        if printed_math_line is not None:
+            mapped.append(
+                printed_math_line.model_copy(
+                    update={"root_cause_id": root_causes.get(line.id)}
+                )
+            )
+            continue
+        mapped.append(
+            UtilityAuditLine(
+                id=line.id,
+                section_id=sections.get(line.id),
+                label=line.label,
+                scope=_mapped_scope(line),
+                unit=line.unit,
+                billed_amount=line.billed_amount,
+                billed_status=facts[line.id].status if line.id in facts else None,
+                billed_original_value=(
+                    facts[line.id].original_value if line.id in facts else None
+                ),
+                expected_amount=line.expected_amount,
+                delta=line.delta,
+                formula=line.formula,
+                inputs=line.inputs,
+                evidence=(_evidence(line, facts.get(line.id)),),
+                citations=line.citations,
+                status=_mapped_status(line.status),
+                limitation=line.limitation,
+                root_cause_id=root_causes.get(line.id),
+            )
+        )
+    mapped_lines = tuple(mapped)
+    discrepancy_lines = tuple(
+        line for line in mapped_lines if line.status == "discrepancy"
+    )
     discrepancy_total = round_money(
         sum_exact(
             tuple(
@@ -899,14 +963,20 @@ def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult
         )
     )
     headline = result.headline
-    if result.verdict == "possible_discrepancy":
+    verdict = result.verdict
+    if discrepancy_lines:
+        verdict = "possible_discrepancy"
         headline = (
             f"Possible {_currency(discrepancy_total)} source-supported discrepancy"
         )
+    elif any(line.status == "needs_review" for line in mapped_lines):
+        verdict = "needs_review"
+        headline = "Statement math needs review"
+    review_requests = _provider_review_requests(bill, result, mapped_lines)
     return UtilityAuditResult(
         schema_version="2.0",
         fixture_kind=result.fixture_kind,
-        verdict=result.verdict,
+        verdict=verdict,
         verification_level="tariff_verified",
         headline=headline,
         discrepancy_total=discrepancy_total,
@@ -938,7 +1008,7 @@ class Pge3ceAdapter:
             return None
         if not _supports_tariff_application(bill, verified_bundle):
             return None
-        return verified_bundle
+        return _published_tariff_bundle(verified_bundle)
 
     def matches(self, bill: BillExtraction) -> bool:
         return self._verified_bundle_if_supported(bill) is not None

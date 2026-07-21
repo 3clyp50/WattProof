@@ -5,7 +5,7 @@ This file is the source of truth for the Devpost entry and demo recording. Repla
 ## Devpost fields
 
 - **Project name:** WattProof
-- **Tagline:** Upload an electricity bill to WattProof. GPT-5.6 extracts evidence, while deterministic code checks each charge against the tariff in effect, flags errors, and drafts a review request.
+- **Tagline:** Review electric, gas, water, and sanitation bills from rendered-page evidence. Deterministic code checks printed math, and exact adapters verify published tariffs only where archived sources support them.
 - **Submitter type:** Team of Individuals
 - **Team:** Primary submitter and [Chadwick Jones (`@TerminallyLazy`)](https://devpost.com/TerminallyLazy) — invitation accepted; confirmed WattProof teammate
 - **Countries of residence:** Italy; United States (multi-select field)
@@ -15,7 +15,7 @@ This file is the source of truth for the Devpost entry and demo recording. Repla
 - **Devpost project:** https://devpost.com/software/wattproof-xtw6ib
 - **Demo video:** `TODO(submission): public YouTube URL, under three minutes`
 - **Primary Codex feedback Session ID:** `TODO(submission): run /feedback in the main build session`
-- **Judge testing instructions:** Open https://wattproof.tech and click **Audit authentic sample**; no credentials or API key are required for the complete authentic and labeled-synthetic paths. The known public PDF can also be uploaded directly. For local verification, clone the repository, install `poppler-utils`, create a Python 3.12+ virtual environment, install `requirements.txt`, run `make run`, and open `http://127.0.0.1:8000`.
+- **Judge testing instructions:** Open https://wattproof.tech and choose **Audit authentic sample**, **Duke Electric**, **CenterPoint Gas**, or **Bloomington Water**. All five bundled sample paths are deterministic and keyless. Review each statement separately, then add its minimized summary to the temporary Household bundle. For local verification, clone the repository, install `poppler-utils`, create a Python 3.12+ virtual environment, install `requirements.txt`, run `make run`, and open `http://127.0.0.1:8000`.
 
 ## Live Devpost requirements
 
@@ -30,29 +30,31 @@ Verified and refreshed through the connected Devpost source on July 19, 2026:
 
 ## Project description
 
-Electricity bills combine meter data, time-of-use buckets, delivery rates, generation rates, credits, taxes, and riders into a document most households cannot independently check. Generic bill summaries can restate the total, but they rarely prove whether a charge follows the tariff that governed that exact billing period.
+Households receive separate electric, gas, water, wastewater, stormwater, and sanitation statements. Each uses different units, conversions, tiers, taxes, riders, and subtotal relationships. Generic summaries can restate the amount due, but they rarely preserve enough visible evidence to prove the printed arithmetic—or distinguish that internal check from an independently sourced tariff claim.
 
 The problem is both personal and widespread. A nationally representative [Consumer Reports survey](https://advocacy.consumerreports.org/press_release/new-survey-from-consumer-reports-finds-majority-of-households-strained-by-energy-bills-concerned-over-data-centerss-impact-on-bills/) of 2,146 U.S. adults found that 68% said home energy costs strained their household finances to some degree. [PG&E says](https://www.pge.com/en/about/company-information/company-profile.html) its gas and electric service reaches approximately 16 million people. Dedicated tariff-audit products exist for organizations; WattProof brings that line-by-line discipline into a consumer-readable flow.
 
-WattProof turns a bill into a reviewable evidence record, then checks supported charges with deterministic arithmetic. A user uploads a native PDF, confirms every material extracted fact beside its page and printed quote, and receives a line-by-line reconciliation against archived official rate sources. Every supported result exposes its inputs, full-precision rate, formula, rounding rule, effective dates, and source. When WattProof lacks a governing rule or sufficient usage detail, it says `cannot verify` instead of inventing a rate or savings estimate.
+WattProof renders accepted PDF pages and turns visible page evidence into a reviewable, provider-neutral record. A user confirms each material fact beside its page and printed quote, then deterministic `Decimal` code checks declared meter differences, conversions, rates, percentages, subtotals, and totals. Each line says whether it is **Printed math**, **Statement reconciliation**, or **Published tariff**. Published-tariff scope requires an exact provider, jurisdiction, schedule, period, archived citation, and matching source hash; otherwise the result remains an internal check or `cannot verify`.
 
-The MVP deliberately handles one public anonymized PG&E delivery and Central Coast Community Energy generation statement exceptionally well. The authentic statement reconciles against its 2022 sources. A separate fixture is clearly labeled synthetic and changes one auditable peak charge by exactly $5.00, proving that the engine detects a known discrepancy without suggesting it occurred on a real customer's bill.
+The provider-neutral fixtures cover an illustrative Duke electricity guide, a CenterPoint gas statement with CCF-to-therm conversion, and a raster Bloomington water/city-services statement. They reconcile visible printed math without making Indiana or nationwide tariff claims. The narrower exact adapter covers one public anonymized 2022 PG&E delivery and Central Coast Community Energy generation statement. A clearly labeled synthetic version changes one cited peak charge by exactly $5.00 to prove root-cause detection without suggesting it occurred on a real customer's bill.
 
-The complete flow is upload, evidence review, deterministic audit, honest plan-comparison sufficiency, and an editable review request grounded only in audit facts. Uploaded files are temporary, the app stores no customer data, and it never contacts a provider or sends the request automatically.
+The complete flow is upload, evidence review, deterministic audit, a temporary Household bundle, and editable provider review requests grounded only in audit facts. Bills are processed sequentially. Only minimized summaries are retained in page memory for the bundle; raw extractions and PDFs are discarded, nothing is written to local or session storage, and refresh clears the bundle. WattProof never contacts a provider or sends a request automatically.
 
 ## How it was built
 
 WattProof is a small Python application: Flask serves a framework-free responsive interface; Pydantic defines the versioned extraction, evidence, tariff, audit, comparison, and review-request contracts; and Python `Decimal` code performs all money arithmetic with explicit half-up rounding. Official source snapshots are committed with retrieval metadata and SHA-256 hashes, and the engine refuses to calculate if a source changes.
 
-GPT-5.6 uses schema-constrained OpenAI Responses API output to map unknown native-PDF text into typed evidence. It does not choose rates, calculate charges, or invent missing data. The bundled public sample is recognized by hash and runs entirely locally without an API key. A focused regression proves the model, strict Pydantic schema, disabled API storage, and trusted document-metadata boundary.
+For an unknown accepted document, WattProof renders every bounded page before GPT-5.6 uses schema-constrained OpenAI Responses API output to map the visible page images into typed evidence. Rendered pixels are authoritative; embedded PDF text is only an explicitly untrusted hint and cannot become evidence by itself. GPT-5.6 does not choose rates, calculate charges, or invent missing data, and API storage is disabled. Hash-known public fixtures run locally without a key.
 
 Codex drove the primary build session: it rendered and inspected the supplied documents, rejected unsuitable sample paths, researched matching effective-period sources, independently checked tariff math, designed the smallest architecture, implemented the engine and five-step UI, created golden and synthetic regression fixtures, diagnosed browser failures, and verified the final flow. `CODEX_LOG.md` preserves prompts, decisions, failures, corrections, verification results, and milestone commits.
 
 ## What makes it different
 
 - **Effective-period truth:** a newer tariff is not treated as better when it did not govern the bill.
+- **Provider-neutral evidence:** electric, gas, water, and city-service sections share one typed contract without pretending their tariffs are interchangeable.
 - **Evidence before automation:** users can correct extracted facts before any conclusion is calculated.
 - **Deterministic money:** GPT-5.6 reads evidence; typed code owns arithmetic.
+- **Private sequential bundle:** page-memory summaries combine reviewed bills without retaining raw documents or surviving refresh.
 - **Visible uncertainty:** unsupported riders and insufficient interval data remain explicit limitations.
 - **Action without overclaiming:** the final request asks for review and cites the exact lines and sources involved.
 
@@ -70,13 +72,13 @@ The quoted lines are a speaking guide, not something to recite mechanically. Kee
 
 *Show the WattProof landing page. Let the name and promise settle before clicking.*
 
-> Most bill apps tell you what you paid. WattProof asks a harder question: was the bill calculated correctly?
+> Most bill apps tell you what you paid. WattProof asks a harder question across electric, gas, water, and city services: what can this statement actually prove?
 
 ### 0:10–0:32 — The discovery that shaped the product
 
-*Keep the public-sample card and its December 2022 label visible.*
+*Show the electric, gas, and water public-sample choices, then keep the PG&E sample's December 2022 label visible.*
 
-> Before I wrote the calculator, Codex caught a real audit trap: the supplied pricing sheet is from 2026, while the complete public statement is from 2022. No newer public sample I found had the full matching evidence. WattProof therefore uses the newest coherent bill-and-tariff pair—because current is not the same as correct.
+> The same evidence contract reviews electric, gas, water, and sanitation statements, but tariff coverage is deliberately narrower. Codex caught a real audit trap: the complete PG&E sample is from 2022, so WattProof uses its matching historical sources instead of a newer, inapplicable rate sheet.
 
 ### 0:32–0:58 — Evidence before conclusions
 
@@ -88,7 +90,7 @@ The quoted lines are a speaking guide, not something to recite mechanically. Kee
 
 *Click **Confirm & run audit**. Show the green verdict, then expand the PG&E peak-energy calculation so the rate, formula, effective dates, and source are readable.*
 
-> Once confirmed, typed Decimal code takes over. The authentic bill reconciles wherever archived sources support a calculation: fourteen checks verified, with inputs, full-precision rates, formulas, rounding, and effective dates visible line by line. Six lines remain cannot verify because the exact rule or required evidence is unavailable. WattProof never forces them to match.
+> Once confirmed, typed Decimal code takes over. Eight charge lines match attached published sources, two utility-tax lines agree only as printed math, and four statement totals reconcile. Six lines remain cannot verify. The ledger keeps those scopes separate, so one exact adapter never turns an uncited rate into tariff truth.
 
 ### 1:25–1:43 — Let an honest “no” be a feature
 
@@ -102,17 +104,17 @@ The quoted lines are a speaking guide, not something to recite mechanically. Kee
 
 > Now I’ll switch to the clearly labeled synthetic fixture. It changes one printed peak charge from thirty-six dollars and forty-four cents to forty-one dollars and forty-four cents. WattProof finds exactly the five-dollar error. The subtotal mismatch confirms the alteration, but is not double-counted. This never appeared on a real bill; it exists to prove the detector works.
 
-### 2:08–2:25 — Turn proof into a useful next step
+### 2:08–2:25 — Build a private household view
 
-*Continue to **Prepare review request**. Show the editable message and claim ledger; do not linger on every sentence.*
+*Add the reviewed result to Household and show the prepared multi-utility bundle screenshot or a second reviewed sample summary.*
 
-> Finally, WattProof turns evidence into a calm review request. It asks the provider to confirm missing components, maps each claim back to the audit, and never sends anything automatically.
+> Bills are reviewed one at a time, then only minimized summaries enter this temporary household view. Raw bills are not stored, refresh clears everything, and compatible overlapping amounts are combined only when the currency and service periods support it. Provider requests remain editable and are never sent automatically.
 
 ### 2:25–2:42 — Explain the collaboration clearly
 
 *Show a prepared terminal with the green `make verify` result, then `CODEX_LOG.md` or the README's “Codex and GPT-5.6” section.*
 
-> I built WattProof with Codex and GPT-5.6. Codex helped inspect the source documents, expose the date mismatch, implement and debug the product, and create the regression evidence. GPT-5.6 maps unfamiliar PDF text into a strict schema. It never chooses rates or calculates money; deterministic code does that.
+> I built WattProof with Codex and GPT-5.6. Codex helped inspect the source documents, expose hidden-text and date traps, implement and debug the product, and capture seven reproducible desktop and mobile screenshots. GPT-5.6 maps rendered pages into a strict schema. It never chooses rates or calculates money; deterministic code does that.
 
 ### 2:42–2:48 — Close on the principle
 
@@ -125,6 +127,7 @@ The quoted lines are a speaking guide, not something to recite mechanically. Kee
 - [ ] Replace the remaining `TODO(submission)` fields above.
 - [x] Run `make verify` in a fresh environment.
 - [x] Confirm the authentic and synthetic demo paths in Chromium.
+- [x] Preserve the seven real-app desktop/mobile captures and reproduction steps in `docs/screenshots/`.
 - [ ] Record at 1080p with readable text and no private tabs, keys, or notifications.
 - [ ] Keep the final video under 3:00 after YouTube processing, with audio covering both Codex and GPT-5.6.
 - [ ] Open the processed YouTube URL in an incognito window and confirm it plays without authentication.

@@ -532,11 +532,18 @@ def test_all_audit_outputs_are_invariant_to_ambient_decimal_context() -> None:
     assert synthetic["discrepancy_total"] == "5.00"
     roots = {line["id"]: line["root_cause_id"] for line in synthetic["lines"]}
     assert roots["delivery_subtotal"] == "pge_peak_energy"
-    percentage_formulas = [
-        line["formula"] for line in schema_one_hostile["authentic"]["lines"]
-        if "%" in line["formula"]
-    ]
-    assert percentage_formulas == [
-        "$25.50 taxable generation × 1.00000%",
-        "$8.40 taxable generation × 1.00000%",
-    ]
+    percentage_formulas = {
+        line["id"]: line["formula"]
+        for line in schema_one_hostile["authentic"]["lines"]
+        if line["id"] in {"cca_nov_uut", "cca_dec_uut"}
+    }
+    assert percentage_formulas == {
+        "cca_nov_uut": (
+            "0.01000 fraction [printed] × "
+            "(9.23 USD [printed] + 16.27 USD [printed]) = 0.26 USD [recomputed]"
+        ),
+        "cca_dec_uut": (
+            "0.01000 fraction [printed] × "
+            "(3.60 USD [printed] + 4.80 USD [printed]) = 0.08 USD [recomputed]"
+        ),
+    }

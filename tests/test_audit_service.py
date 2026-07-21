@@ -16,7 +16,12 @@ from wattproof.audit import UnsupportedBillError, audit_bill
 from wattproof.audit_service import audit_extraction
 from wattproof.fixtures import load_sample
 from wattproof.models import BillExtraction, TextFact
-from wattproof.tariffs import SourceIntegrityError, TariffBundle, load_tariff_bundle
+from wattproof.tariffs import (
+    RateRule,
+    SourceIntegrityError,
+    TariffBundle,
+    load_tariff_bundle,
+)
 from wattproof.utility_fixtures import load_utility_sample
 from wattproof.utility_models import UtilityAuditResult
 
@@ -155,7 +160,10 @@ def test_exact_pg_and_e_bill_keeps_tariff_verified_result() -> None:
         line_id
         for request in result.review_requests
         for line_id in request.grounded_audit_line_ids
-    } == set(legacy.review_request.grounded_audit_line_ids)
+    } == set(legacy.review_request.grounded_audit_line_ids) | {
+        "cca_nov_uut",
+        "cca_dec_uut",
+    }
 
 
 @pytest.mark.parametrize("fixture_kind", ["authentic", "synthetic"])
@@ -225,7 +233,7 @@ def test_uncited_uut_uses_printed_rate_without_disabling_cited_tariff_adapter() 
     assert uut.status == "discrepancy"
     assert uut.expected_amount == Decimal("0.51")
     assert uut.delta == Decimal("-0.25")
-    assert uut.inputs["printed_tax_rate"] == "0.02000"
+    assert uut.inputs["rate"] == "0.02000 fraction [printed]"
     assert uut.citations == ()
     assert result.discrepancy_total == Decimal("0.25")
     assert tuple(
@@ -233,6 +241,94 @@ def test_uncited_uut_uses_printed_rate_without_disabling_cited_tariff_adapter() 
     ) == (("cca_nov_uut",),)
     assert "printed" in result.review_requests[0].body.lower()
     assert "published rate" not in result.review_requests[0].body.lower()
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        "remove_nov_uut",
+        "remove_dec_uut",
+        "mutate_uut_rate",
+        "mutate_uut_kind",
+        "mutate_uut_dependencies",
+        "inject_uut_citation",
+        "add_uncited_pge_uut",
+        "add_arbitrary_uncited_rule",
+    ],
+)
+def test_uncited_bundle_rules_cannot_affect_exact_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    bill = load_sample("authentic")
+    baseline = audit_extraction(bill)
+    bundle = load_tariff_bundle(verify_sources=False)
+    rules = dict(bundle.rules)
+
+    if drift == "remove_nov_uut":
+        rules.pop("cca_nov_uut")
+    elif drift == "remove_dec_uut":
+        rules.pop("cca_dec_uut")
+    elif drift == "mutate_uut_rate":
+        rules["cca_nov_uut"] = replace(
+            rules["cca_nov_uut"],
+            rate=Decimal("999"),
+        )
+    elif drift == "mutate_uut_kind":
+        rules["cca_dec_uut"] = replace(
+            rules["cca_dec_uut"],
+            kind="quantity_times_rate",
+        )
+    elif drift == "mutate_uut_dependencies":
+        rules["cca_nov_uut"] = replace(
+            rules["cca_nov_uut"],
+            line_ids=("pge_peak_energy",),
+        )
+    elif drift == "inject_uut_citation":
+        rules["cca_nov_uut"] = replace(
+            rules["cca_nov_uut"],
+            citations=("3ce",),
+        )
+    elif drift == "add_uncited_pge_uut":
+        rules["pge_uut"] = RateRule(
+            kind="percent_of_lines",
+            rate=Decimal("999"),
+            line_ids=("pge_peak_energy",),
+        )
+    else:
+        rules["unrelated_internal_math"] = RateRule(
+            kind="quantity_times_rate",
+            rate=Decimal("999"),
+        )
+    drifted = replace(bundle, rules=rules)
+
+    def load_drifted_bundle(*, verify_sources: bool = True) -> TariffBundle:
+        assert verify_sources is True
+        return drifted
+
+    monkeypatch.setattr(adapters, "load_tariff_bundle", load_drifted_bundle)
+
+    result = audit_extraction(bill)
+
+    assert result == baseline
+    assert result.verification_level == "tariff_verified"
+    pge_uut = next(line for line in result.lines if line.id == "pge_uut")
+    assert pge_uut.scope != "published_tariff"
+    assert pge_uut.expected_amount is None
+    assert pge_uut.citations == ()
+
+
+def test_uncited_uut_line_comes_from_declared_printed_document_math() -> None:
+    result = audit_extraction(load_sample("authentic"))
+    uut = next(line for line in result.lines if line.id == "cca_nov_uut")
+
+    assert uut.scope == "printed_math"
+    assert "0.01000 fraction [printed]" in uut.formula
+    assert "9.23 USD [printed]" in uut.formula
+    assert "16.27 USD [printed]" in uut.formula
+    assert uut.inputs["rate"] == "0.01000 fraction [printed]"
+    assert "printed_tax_rate" not in uut.inputs
+    assert uut.citations == ()
 
 
 def test_synthetic_error_remains_exactly_five_dollars() -> None:
@@ -543,8 +639,9 @@ def test_archived_snapshot_metadata_drift_fails_closed(
     assert result.tariff is None
 
 
-def test_percentage_rule_dependencies_must_precede_dependent_charge() -> None:
+def test_printed_percentage_relationship_does_not_depend_on_charge_order() -> None:
     bill = load_sample("authentic")
+    baseline = audit_extraction(bill)
     charges = list(bill.charges)
     uut = next(charge for charge in charges if charge.id == "cca_nov_uut")
     charges.remove(uut)
@@ -553,7 +650,35 @@ def test_percentage_rule_dependencies_must_precede_dependent_charge() -> None:
     )
     charges.insert(insert_at, uut)
 
-    _assert_internal_fallback(bill.model_copy(update={"charges": tuple(charges)}))
+    reordered_bill = bill.model_copy(update={"charges": tuple(charges)})
+    reordered = audit_extraction(reordered_bill)
+
+    assert reordered.verification_level == "tariff_verified"
+    assert reordered.tariff == baseline.tariff
+    baseline_lines = {line.id: line for line in baseline.lines}
+    reordered_lines = {line.id: line for line in reordered.lines}
+    assert reordered_lines["cca_nov_uut"] == baseline_lines["cca_nov_uut"]
+    assert {
+        line_id: line
+        for line_id, line in reordered_lines.items()
+        if line.scope == "published_tariff"
+    } == {
+        line_id: line
+        for line_id, line in baseline_lines.items()
+        if line.scope == "published_tariff"
+    }
+
+    rooted = audit_extraction(
+        _changed_charge_amount(
+            reordered_bill,
+            "cca_nov_peak",
+            Decimal("3.00"),
+        )
+    )
+    rooted_lines = {line.id: line for line in rooted.lines}
+    assert rooted_lines["cca_nov_uut"].root_cause_id == "cca_nov_peak"
+    assert rooted_lines["generation_subtotal"].root_cause_id == "cca_nov_peak"
+    assert rooted.discrepancy_total == Decimal("3.00")
 
 
 @pytest.mark.parametrize(
