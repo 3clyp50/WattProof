@@ -1,13 +1,16 @@
 # Screenshot evidence
 
 These seven PNGs are direct viewport captures of the real Flask application. Each
-manifest row records its exact source commit. Five captures remain from
+manifest row records its exact source commit. Four captures remain from
 `9a5611880a0f9ee0e4fdfe6cb04a706304c4905c` (`Refresh bundle summaries and release
 previews`). The Duke and CenterPoint results were refreshed from
 `6b5ace1339a1c0c60ed59cc9f386c320d6356977` (`Deduplicate multi-root audit
 dependencies`) to show the precise boundary covering printed operands and explicitly
 labeled inferred operands, plus the current usage, tier, and multi-root reconciliation
-behavior. No production UI or backend file differed from the source commit listed for
+behavior. The PG&E/3CE result was refreshed from
+`374953162f61e1d67b312c07cbd00944990b73f7` (`Enforce root-before-dependent ledger
+order`) to capture the honest partial tariff-coverage level and current cited ledger
+boundary. No production UI or backend file differed from the source commit listed for
 an image during its capture.
 
 Every image was produced by Chromium from the real Flask application on a loopback
@@ -21,7 +24,7 @@ were used; no upload, account identity, private bill, or personal data appears.
 | File | Exact viewport | Public sample(s) | Navigation and frame position | Visible verification level | Capture source | Real-app and no-PII confirmation |
 | --- | --- | --- | --- | --- | --- | --- |
 | `multi-utility-upload-desktop.png` | `1440 × 1000` | None selected; all public fixture controls visible | Open `/`; keep Upload at `scrollY=0` | N/A — Upload | `9a5611880a0f9ee0e4fdfe6cb04a706304c4905c` | Real Flask/Chrome viewport; public controls only; no PII |
-| `pge-tariff-verified-desktop.png` | `1440 × 1000` | Public anonymized PG&E/3CE authentic fixture | Upload → **Audit authentic sample** → Review → **Confirm & run checks**; capture the top of Verify | **Tariff verified** | `9a5611880a0f9ee0e4fdfe6cb04a706304c4905c` | Real Flask/Chrome clicks; anonymized public fixture; no PII |
+| `pge-tariff-verified-desktop.png` | `1440 × 1000` | Public anonymized PG&E/3CE authentic fixture | Upload → **Audit authentic sample** → Review → **Confirm & run checks**; capture the top of Verify | **Tariff verified** | `374953162f61e1d67b312c07cbd00944990b73f7` | Real Flask/Chrome clicks; anonymized public fixture; partial tariff coverage with cited governing lines; no PII; SHA-256 `1d1042415641743bfccdf08aeda9027b2ff2e8ea54b2186f06440f280c851eca` |
 | `duke-internal-reconciliation-desktop.png` | `1440 × 1000` | Public illustrative Duke electricity fixture | Upload → **Duke Electric** → Review → **Confirm & run checks**; capture the top of Verify | **Internally reconciled** | `6b5ace1339a1c0c60ed59cc9f386c320d6356977` | Real Flask/Chrome clicks; public illustrative fixture; bounded internal-only result; no PII; SHA-256 `d7143baf5b7fb5cc2555e84059bffe8bbf9560e86011dac0985d5b9045518a52` |
 | `centerpoint-gas-desktop.png` | `1440 × 1000` | Public CenterPoint gas fixture | Upload → **CenterPoint Gas** → Review → **Confirm & run checks**; capture the top of Verify | **Internally reconciled** | `6b5ace1339a1c0c60ed59cc9f386c320d6356977` | Real Flask/Chrome clicks; rendered public values only; bounded internal-only result; no PII; SHA-256 `29ec19e1cbcf7e65d20f7b287b7d37df5e7984d84682975ecc74a724b67cdbfe` |
 | `household-bundle-desktop.png` | `1440 × 1000` | Duke → CenterPoint → Bloomington | Complete Duke → **Add another bill** → complete CenterPoint → **Add another bill** → complete Bloomington → **Finish household review**; capture Household at the top | **Internally reconciled** on all three retained cards | `9a5611880a0f9ee0e4fdfe6cb04a706304c4905c` | Real sequential Flask/Chrome flow; three public fixtures; no PII |
