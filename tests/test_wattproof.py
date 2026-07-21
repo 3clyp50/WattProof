@@ -267,7 +267,7 @@ def test_cli_happy_path_and_error(capsys: pytest.CaptureFixture[str]) -> None:
     assert "does not exist" in output.err
 
 
-def test_cli_reports_temporary_provider_neutral_routing_boundary(
+def test_cli_audits_provider_neutral_extraction(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -276,10 +276,11 @@ def test_cli_reports_temporary_provider_neutral_routing_boundary(
         lambda _path: load_utility_sample("duke"),
     )
 
-    assert main(["--file", "unknown.pdf"]) == 2
+    assert main(["--file", "unknown.pdf"]) == 0
     output = capsys.readouterr()
-    assert "provider-neutral CLI audit routing is not available yet" in output.err
-    assert "AttributeError" not in output.err
+    assert "Verification level: Internally reconciled" in output.out
+    assert "tariff verified" not in output.out.lower()
+    assert output.err == ""
 
 
 def test_web_flow_exposes_all_five_steps() -> None:
@@ -312,7 +313,7 @@ def test_web_sample_review_to_audit_api() -> None:
     assert audit_response.status_code == 200
     assert result["verdict"] == "reconciled"
     assert result["comparison"]["status"] == "cannot_verify"
-    assert result["review_request"]["requires_user_review"] is True
+    assert result["review_requests"][0]["requires_user_review"] is True
 
 
 def test_web_upload_uses_known_public_fixture_without_api_key() -> None:
@@ -328,7 +329,7 @@ def test_web_upload_uses_known_public_fixture_without_api_key() -> None:
     assert response.get_json()["extraction"]["delivery_schedule"]["value"] == "E-TOU-C"
 
 
-def test_web_upload_reports_temporary_provider_neutral_routing_boundary(
+def test_web_upload_returns_provider_neutral_extraction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -341,10 +342,10 @@ def test_web_upload_reports_temporary_provider_neutral_routing_boundary(
         content_type="multipart/form-data",
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 200
     payload = response.get_json()
-    assert "provider-neutral CLI audit routing is not available yet" in payload["error"]
-    assert "extraction" not in payload
+    assert payload["extraction"]["schema_version"] == "2.0"
+    assert payload["extraction"]["fixture_kind"] == "duke"
 
 
 def test_web_validation_returns_reviewable_field() -> None:

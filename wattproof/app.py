@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
 from pydantic import BaseModel, ValidationError
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from .audit import UnsupportedBillError, audit_bill
+from .audit import UnsupportedBillError
+from .audit_service import audit_extraction
 from .extract import (
     MAX_FILE_BYTES,
     ExtractionUnavailableError,
@@ -19,6 +20,7 @@ from .extract import (
 from .fixtures import PROJECT_ROOT, load_sample
 from .models import BillExtraction
 from .tariffs import SourceIntegrityError
+from .utility_fixtures import load_utility_sample
 from .utility_models import UtilityDocument
 
 
@@ -51,12 +53,25 @@ def create_app() -> Flask:
 
     @app.get("/api/sample/<kind>")
     def sample(kind: str) -> Response | tuple[Response, int]:
-        if kind not in {"authentic", "synthetic"}:
-            return jsonify(error="Choose the authentic or synthetic sample."), 404
-        sample_kind: Literal["authentic", "synthetic"] = (
-            "authentic" if kind == "authentic" else "synthetic"
-        )
-        return jsonify(extraction=_json_model(load_sample(sample_kind)))
+        extraction: BillExtraction | UtilityDocument
+        if kind == "authentic":
+            extraction = load_sample("authentic")
+        elif kind == "synthetic":
+            extraction = load_sample("synthetic")
+        elif kind == "duke":
+            extraction = load_utility_sample("duke")
+        elif kind == "centerpoint":
+            extraction = load_utility_sample("centerpoint")
+        elif kind == "bloomington":
+            extraction = load_utility_sample("bloomington")
+        else:
+            return jsonify(
+                error=(
+                    "Choose one of: authentic, synthetic, duke, centerpoint, "
+                    "bloomington."
+                )
+            ), 404
+        return jsonify(extraction=_json_model(extraction))
 
     @app.post("/api/extract")
     def extract() -> Response | tuple[Response, int]:
@@ -71,11 +86,6 @@ def create_app() -> Flask:
             temporary.write(data)
             temporary.flush()
             extraction = extract_pdf(Path(temporary.name))
-        if isinstance(extraction, UtilityDocument):
-            raise UnsupportedDocumentError(
-                "This utility document was extracted, but provider-neutral CLI audit "
-                "routing is not available yet."
-            )
         return jsonify(extraction=_json_model(extraction))
 
     @app.post("/api/audit")
@@ -83,8 +93,17 @@ def create_app() -> Flask:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return jsonify(error="The reviewed extraction is missing."), 400
-        extraction = BillExtraction.model_validate(payload)
-        return jsonify(audit=_json_model(audit_bill(extraction)))
+        schema_version = payload.get("schema_version")
+        extraction: BillExtraction | UtilityDocument
+        if schema_version == "1.0":
+            extraction = BillExtraction.model_validate(payload)
+        elif schema_version == "2.0":
+            extraction = UtilityDocument.model_validate(payload)
+        else:
+            return jsonify(
+                error="Review schema_version: expected '1.0' or '2.0'."
+            ), 422
+        return jsonify(audit=_json_model(audit_extraction(extraction)))
 
     @app.errorhandler(RequestEntityTooLarge)
     def too_large(_error: RequestEntityTooLarge) -> tuple[Response, int]:
@@ -93,8 +112,13 @@ def create_app() -> Flask:
     @app.errorhandler(ValidationError)
     def validation_error(error: ValidationError) -> tuple[Response, int]:
         first = error.errors(include_url=False)[0]
-        location = ".".join(str(part) for part in first["loc"])
-        return jsonify(error=f"Review {location}: {first['msg']}"), 422
+        location = ".".join(str(part) for part in first["loc"]) or "document"
+        message = str(first["msg"])
+        if "percent_of_charges references unknown charge ID:" in message:
+            message = (
+                "Value error, percent_of_charges references an unknown charge ID"
+            )
+        return jsonify(error=f"Review {location}: {message}"), 422
 
     def reviewable_error(error: Exception) -> tuple[Response, int]:
         return jsonify(error=str(error)), 422
