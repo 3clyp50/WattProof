@@ -1081,7 +1081,7 @@ function hasCurrentDocument() {
     || state.reviewMode !== null;
 }
 
-function clearCurrentDocument() {
+function clearCurrentDocument({ resetUpload = true } = {}) {
   invalidatePendingOperation();
   releasePreview();
   state.extraction = null;
@@ -1091,8 +1091,10 @@ function clearCurrentDocument() {
   state.extractionRevision += 1;
   state.auditRevision = 0;
   state.currentBundleAuditRevision = null;
-  byId("upload-form").reset();
-  byId("file-label").textContent = "Choose a utility bill";
+  if (resetUpload) {
+    byId("upload-form").reset();
+    byId("file-label").textContent = "Choose a utility bill";
+  }
   byId("synthetic-preview").hidden = true;
   for (const id of (
     [
@@ -1122,8 +1124,8 @@ function resetReplacementIdentity() {
   state.replacementArmed = false;
 }
 
-function prepareForNewDocument() {
-  clearCurrentDocument();
+function prepareForNewDocument(options) {
+  clearCurrentDocument(options);
   resetCurrentBundleIdentity();
   if (!state.replacementArmed) resetReplacementIdentity();
 }
@@ -1207,8 +1209,10 @@ byId("centerpoint-sample").addEventListener("click", (event) => loadSample("cent
 byId("bloomington-sample").addEventListener("click", (event) => loadSample("bloomington", event.currentTarget));
 
 byId("bill-file").addEventListener("change", (event) => {
-  invalidatePendingOperation();
-  state.audit = null;
+  const returnToUpload = document.querySelector('[data-step="1"]')?.hidden;
+  prepareForNewDocument({ resetUpload: false });
+  if (returnToUpload) showStep(1);
+  else showMessage();
   byId("file-label").textContent = event.target.files[0]?.name || "Choose a utility bill";
 });
 

@@ -734,6 +734,216 @@ async function main() {
       pageErrors: [...window.__wattproofBrowserErrors],
     })`);
 
+    await navigateHome();
+    await evaluate(`(async () => {
+      const nativeFetch = window.fetch.bind(window);
+      const [pdfResponse, staleResponse] = await Promise.all([
+        nativeFetch("/sample.pdf"),
+        nativeFetch("/api/sample/duke"),
+      ]);
+      const source = await pdfResponse.blob();
+      const stalePayload = await staleResponse.json();
+      stalePayload.extraction.sections[0].provider.value = "STALE PRIVATE RESPONSE";
+
+      const retained = {
+        id: "pending-replacement-id",
+        providers: ["Retained Utility"],
+        serviceTypes: ["electricity"],
+        periodStart: "2025-01-01",
+        periodEnd: "2025-01-31",
+        period: "2025-01-01 – 2025-01-31",
+        usageSummaries: [{ serviceType: "electricity", value: "10", unit: "kWh" }],
+        amountDue: "42.00",
+        currency: "USD",
+        verificationLevel: "evidence_extracted",
+        discrepancyTotal: "0",
+        issueCount: 0,
+        reviewRequests: [],
+      };
+      state.bundle = [retained];
+      state.currentBundleId = retained.id;
+      state.replacementBundleId = retained.id;
+      state.replacementArmed = true;
+      state.extraction = stalePayload.extraction;
+      state.audit = { private: true };
+      state.reviewMode = "uploaded";
+      renderHousehold();
+      document.getElementById("service-review-sections").innerHTML = "PRIVATE RAW REVIEW";
+      document.getElementById("audit-lines").innerHTML = "PRIVATE AUDIT";
+      document.getElementById("verification-level").innerHTML = "PRIVATE VERIFICATION";
+
+      window.__wattproofPendingCreatedPreviews = [];
+      window.__wattproofPendingRevokedPreviews = [];
+      const nativeCreate = URL.createObjectURL.bind(URL);
+      const nativeRevoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (value) => {
+        const url = nativeCreate(value);
+        window.__wattproofPendingCreatedPreviews.push(String(url));
+        return url;
+      };
+      URL.revokeObjectURL = (url) => {
+        window.__wattproofPendingRevokedPreviews.push(String(url));
+        return nativeRevoke(url);
+      };
+
+      window.__wattproofPendingStaleExtraction = stalePayload.extraction;
+      window.__wattproofPendingNativeFetch = nativeFetch;
+      window.__wattproofPendingIntercepted = false;
+      window.fetch = (input, options = {}) => {
+        const url = typeof input === "string" ? input : input.url;
+        if (url === "/api/extract" && !window.__wattproofPendingIntercepted) {
+          window.__wattproofPendingIntercepted = true;
+          window.__wattproofPendingSignal = options.signal;
+          return new Promise((resolve) => {
+            window.__wattproofResolvePendingUpload = () => resolve({
+              ok: true,
+              json: async () => {
+                window.__wattproofPendingJsonRead = true;
+                return { extraction: window.__wattproofPendingStaleExtraction };
+              },
+            });
+          });
+        }
+        return nativeFetch(input, options);
+      };
+
+      const firstTransfer = new DataTransfer();
+      firstTransfer.items.add(new File([source], "private-first.pdf", {
+        type: "application/pdf",
+      }));
+      const replacementFile = new File([source], "replacement.pdf", {
+        type: "application/pdf",
+      });
+      window.__wattproofPendingReplacementFile = replacementFile;
+      const input = document.getElementById("bill-file");
+      input.files = firstTransfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector('#upload-form button[type="submit"]').click();
+      return true;
+    })()`);
+    await waitFor(`Boolean(window.__wattproofPendingSignal)
+      && state.previewUrl?.startsWith("blob:")`);
+    const pendingFirstPreviewUrl = await evaluate(`state.previewUrl`);
+    await evaluate(`(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(window.__wattproofPendingReplacementFile);
+      const input = document.getElementById("bill-file");
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    await delay(50);
+    const pendingReselectCheckpoint = await evaluate(`({
+      previewUrl: state.previewUrl,
+      activeOperation: state.activeOperation === null ? null : {
+        token: state.activeOperation?.token,
+        aborted: state.activeOperation?.controller?.signal?.aborted,
+      },
+      signalAborted: window.__wattproofPendingSignal?.aborted,
+      fileName: document.getElementById("bill-file").files[0]?.name || null,
+      fileLabel: document.getElementById("file-label").textContent,
+      pageErrors: [...window.__wattproofBrowserErrors],
+    })`);
+    if (pendingReselectCheckpoint.previewUrl !== null
+        || pendingReselectCheckpoint.activeOperation !== null) {
+      throw new Error(`Pending reselect did not clear: ${JSON.stringify(
+        pendingReselectCheckpoint,
+      )}`);
+    }
+    const pendingAfterReselect = await evaluate(`({
+      signalAborted: window.__wattproofPendingSignal.aborted,
+      previewUrl: state.previewUrl,
+      extractionCleared: state.extraction === null,
+      auditCleared: state.audit === null,
+      currentBundleId: state.currentBundleId,
+      replacementBundleId: state.replacementBundleId,
+      replacementArmed: state.replacementArmed,
+      bundleLength: state.bundle.length,
+      retainedId: state.bundle[0]?.id,
+      retainedCardCount: document.querySelectorAll(".household-bill-card").length,
+      fileName: document.getElementById("bill-file").files[0]?.name || null,
+      fileLabel: document.getElementById("file-label").textContent,
+      reviewCleared: document.getElementById("service-review-sections").innerHTML === "",
+      auditDomCleared: document.getElementById("audit-lines").innerHTML === "",
+      verificationCleared: document.getElementById("verification-level").innerHTML === "",
+      iframeHasSource: document.getElementById("pdf-preview").hasAttribute("src"),
+      revokedUrls: [...window.__wattproofPendingRevokedPreviews],
+      uploadVisible: !document.querySelector('[data-step="1"]').hidden,
+    })`);
+    await evaluate(`window.__wattproofResolvePendingUpload(); true`);
+    await waitFor(`window.__wattproofPendingJsonRead === true`);
+    await delay(50);
+    const pendingAfterStaleCompletion = await evaluate(`({
+      previewUrl: state.previewUrl,
+      extractionCleared: state.extraction === null,
+      reviewCleared: document.getElementById("service-review-sections").innerHTML === "",
+      staleRendered: document.body.innerText.includes("STALE PRIVATE RESPONSE"),
+      revokedUrls: [...window.__wattproofPendingRevokedPreviews],
+    })`);
+    await evaluate(
+      `document.querySelector('#upload-form button[type="submit"]').click(); true`,
+    );
+    await waitFor(`!document.querySelector('[data-step="2"]').hidden
+      && state.previewUrl?.startsWith("blob:")
+      && state.extraction !== null`, 30000);
+    const pendingReplacementPreviewUrl = await evaluate(`state.previewUrl`);
+    const pendingAfterReplacementUpload = await evaluate(`({
+      previewUrl: state.previewUrl,
+      extractionLoaded: state.extraction !== null,
+      currentBundleId: state.currentBundleId,
+      replacementBundleId: state.replacementBundleId,
+      replacementArmed: state.replacementArmed,
+      bundleLength: state.bundle.length,
+      fileName: document.getElementById("bill-file").files[0]?.name || null,
+      staleRendered: document.body.innerText.includes("STALE PRIVATE RESPONSE"),
+      revokedUrls: [...window.__wattproofPendingRevokedPreviews],
+    })`);
+    await evaluate(`(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(window.__wattproofPendingReplacementFile);
+      const input = document.getElementById("bill-file");
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    const pendingAfterSameFileChanges = await evaluate(`({
+      previewUrl: state.previewUrl,
+      extractionCleared: state.extraction === null,
+      fileName: document.getElementById("bill-file").files[0]?.name || null,
+      revokedUrls: [...window.__wattproofPendingRevokedPreviews],
+    })`);
+    await evaluate(`(() => {
+      const input = document.getElementById("bill-file");
+      input.files = new DataTransfer().files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector('#upload-form button[type="submit"]').click();
+      window.fetch = window.__wattproofPendingNativeFetch;
+      return true;
+    })()`);
+    await waitFor(`document.getElementById("global-message").textContent
+      === "Choose a PDF bill first."`);
+    const pendingUploadReselect = await evaluate(`({
+      firstPreviewUrl: ${JSON.stringify(pendingFirstPreviewUrl)},
+      replacementPreviewUrl: ${JSON.stringify(pendingReplacementPreviewUrl)},
+      afterReselect: ${JSON.stringify(pendingAfterReselect)},
+      afterStaleCompletion: ${JSON.stringify(pendingAfterStaleCompletion)},
+      afterReplacementUpload: ${JSON.stringify(pendingAfterReplacementUpload)},
+      afterSameFileChanges: ${JSON.stringify(pendingAfterSameFileChanges)},
+      final: {
+        previewUrl: state.previewUrl,
+        extractionCleared: state.extraction === null,
+        auditCleared: state.audit === null,
+        fileCount: document.getElementById("bill-file").files.length,
+        fileLabel: document.getElementById("file-label").textContent,
+        message: document.getElementById("global-message").textContent,
+        createdUrls: [...window.__wattproofPendingCreatedPreviews],
+        revokedUrls: [...window.__wattproofPendingRevokedPreviews],
+        pageErrors: [...window.__wattproofBrowserErrors],
+      },
+    })`);
+
     const previewBeforeDiscard = await evaluate(`(async () => {
       window.__wattproofRevokedPreviews = [];
       const nativeRevoke = URL.revokeObjectURL.bind(URL);
@@ -964,6 +1174,7 @@ async function main() {
       editedDraft,
       laterFailure,
       refreshClears,
+      pendingUploadReselect,
       previewDiscard,
       previewFinish,
       exactBundleRendering,
@@ -1073,6 +1284,8 @@ const document = {
   execCommand: () => true,
   getElementById: element,
   querySelector(selector) {
+    const panelMatch = selector.match(/^\[data-step="(\d)"\]$/);
+    if (panelMatch) return stepPanels.find((panel) => panel.dataset.step === panelMatch[1]);
     const headingMatch = selector.match(/^\[data-step="(\d)"\] h1$/);
     if (headingMatch) return stepHeadings.get(headingMatch[1]);
     return null;
@@ -1220,6 +1433,115 @@ async function run() {
       sampleDisabled: element("duke-sample").disabled,
       createdUrls,
       revokedUrls,
+    };
+  }
+
+  if (payload.scenario === "upload_file_change_race") {
+    const form = element("upload-form");
+    const input = element("bill-file");
+    const namedPdf = (name, marker) => {
+      const file = new Blob([`%PDF-${marker}`], { type: "application/pdf" });
+      Object.defineProperty(file, "name", { value: name });
+      return file;
+    };
+    const firstFile = namedPdf("private-first.pdf", "first");
+    const replacementFile = namedPdf("replacement.pdf", "replacement");
+    const changeFiles = (files) => {
+      input.files = files;
+      input.listeners.change({ currentTarget: input, target: input });
+    };
+    const documentSnapshot = () => ({
+      state: currentState(),
+      revokedUrls: [...revokedUrls],
+      fileCount: input.files.length,
+      fileName: input.files[0]?.name || null,
+      fileLabel: element("file-label").textContent,
+      uploadResetCount: form.resetCount,
+      uploadDisabled: element("upload-form-submit").disabled,
+      reviewHtml: element("service-review-sections").innerHTML,
+      auditHtml: element("audit-lines").innerHTML,
+      verificationHtml: element("verification-level").innerHTML,
+      previewSrc: element("pdf-preview").src,
+      previewHidden: element("pdf-preview").hidden,
+      uploadHidden: element("step-1").hidden,
+      reviewHidden: element("step-2").hidden,
+      retainedHouseholdHtml: element("household-bills").innerHTML,
+      message: element("global-message").textContent,
+      fileInvalid: input.attributes["aria-invalid"] || null,
+    });
+
+    invoke(`
+      state.bundle = structuredClone(payload.retainedBundle);
+      state.currentBundleId = payload.replacementId;
+      state.replacementBundleId = payload.replacementId;
+      state.replacementArmed = true;
+      state.extraction = payload.extractionA;
+      state.audit = payload.auditA;
+      state.reviewMode = "uploaded";
+      byId("service-review-sections").innerHTML = "PRIVATE RAW REVIEW";
+      byId("audit-lines").innerHTML = "PRIVATE AUDIT";
+      byId("verification-level").innerHTML = "PRIVATE VERIFICATION";
+      byId("household-bills").innerHTML = "RETAINED MINIMIZED BUNDLE";
+      showStep(2);
+    `);
+
+    changeFiles([firstFile]);
+    const firstUpload = form.listeners.submit({ preventDefault() {}, currentTarget: form });
+    const firstPreviewUrl = currentState().previewUrl;
+    changeFiles([replacementFile]);
+    const afterReselect = {
+      ...documentSnapshot(),
+      abortSignaled: requests[0].options.signal.aborted,
+    };
+
+    if (!requests[0].settled) {
+      settle("/api/extract", { extraction: payload.extractionA });
+    }
+    await firstUpload;
+    const afterStaleCompletion = documentSnapshot();
+
+    const replacementUpload = form.listeners.submit({
+      preventDefault() {},
+      currentTarget: form,
+    });
+    const replacementPreviewUrl = currentState().previewUrl;
+    settle("/api/extract", { extraction: payload.extractionB });
+    await replacementUpload;
+    const afterReplacementUpload = documentSnapshot();
+
+    changeFiles([replacementFile]);
+    const afterSameFileReselect = documentSnapshot();
+    changeFiles([replacementFile]);
+    const afterRepeatedSameFileChange = documentSnapshot();
+
+    const sameFileUpload = form.listeners.submit({
+      preventDefault() {},
+      currentTarget: form,
+    });
+    const sameFilePreviewUrl = currentState().previewUrl;
+    settle("/api/extract", { extraction: payload.extractionB });
+    await sameFileUpload;
+
+    changeFiles([]);
+    const afterEmptyChange = documentSnapshot();
+    changeFiles([]);
+    await form.listeners.submit({ preventDefault() {}, currentTarget: form });
+    const afterRepeatedEmptyAndSubmit = documentSnapshot();
+
+    return {
+      firstPreviewUrl,
+      replacementPreviewUrl,
+      sameFilePreviewUrl,
+      afterReselect,
+      afterStaleCompletion,
+      afterReplacementUpload,
+      afterSameFileReselect,
+      afterRepeatedSameFileChange,
+      afterEmptyChange,
+      afterRepeatedEmptyAndSubmit,
+      createdUrls,
+      revokedUrls,
+      requestCount: requests.length,
     };
   }
 
@@ -3412,6 +3734,118 @@ def test_slow_upload_cannot_overwrite_a_later_sample() -> None:
     assert result["revokedUrls"] == ["blob:test-1"]
 
 
+@pytest.mark.parametrize("abort_aware", [False, True])
+def test_file_change_owns_pending_preview_and_ignores_stale_upload(
+    abort_aware: bool,
+) -> None:
+    client = create_app().test_client()
+    authentic = client.get("/api/sample/authentic").get_json()["extraction"]
+    authentic_audit = client.post("/api/audit", json=authentic).get_json()["audit"]
+    duke = client.get("/api/sample/duke").get_json()["extraction"]
+    retained_bundle = [
+        {"id": "first-retained-id", "position": 1},
+        {"id": "retained-bill-id", "position": 2},
+        {"id": "last-retained-id", "position": 3},
+    ]
+
+    result = _exercise_async_state_contract(
+        "upload_file_change_race",
+        extraction_a=authentic,
+        extraction_b=duke,
+        audit_a=authentic_audit,
+        retainedBundle=retained_bundle,
+        replacementId="retained-bill-id",
+        abortAware=abort_aware,
+    )
+
+    assert result["firstPreviewUrl"] == "blob:test-1"
+    after_reselect = result["afterReselect"]
+    assert after_reselect["abortSignaled"] is True
+    assert after_reselect["revokedUrls"] == ["blob:test-1"]
+    assert after_reselect["state"]["previewUrl"] is None
+    assert after_reselect["state"]["extraction"] is None
+    assert after_reselect["state"]["audit"] is None
+    assert after_reselect["state"]["currentBundleId"] is None
+    assert after_reselect["state"]["replacementBundleId"] == "retained-bill-id"
+    assert after_reselect["state"]["replacementArmed"] is True
+    assert after_reselect["state"]["bundle"] == retained_bundle
+    assert after_reselect["fileCount"] == 1
+    assert after_reselect["fileName"] == "replacement.pdf"
+    assert after_reselect["fileLabel"] == "replacement.pdf"
+    assert after_reselect["uploadResetCount"] == 0
+    assert after_reselect["uploadDisabled"] is False
+    assert after_reselect["reviewHtml"] == ""
+    assert after_reselect["auditHtml"] == ""
+    assert after_reselect["verificationHtml"] == ""
+    assert after_reselect["previewSrc"] == ""
+    assert after_reselect["previewHidden"] is True
+    assert after_reselect["uploadHidden"] is False
+    assert after_reselect["reviewHidden"] is True
+    assert after_reselect["retainedHouseholdHtml"] == "RETAINED MINIMIZED BUNDLE"
+
+    after_stale = result["afterStaleCompletion"]
+    assert after_stale["state"]["previewUrl"] is None
+    assert after_stale["state"]["extraction"] is None
+    assert after_stale["state"]["audit"] is None
+    assert after_stale["state"]["replacementBundleId"] == "retained-bill-id"
+    assert after_stale["state"]["replacementArmed"] is True
+    assert after_stale["state"]["bundle"] == retained_bundle
+    assert after_stale["reviewHtml"] == ""
+    assert after_stale["revokedUrls"] == ["blob:test-1"]
+
+    assert result["replacementPreviewUrl"] == "blob:test-2"
+    after_replacement = result["afterReplacementUpload"]
+    assert after_replacement["state"]["previewUrl"] == "blob:test-2"
+    assert after_replacement["state"]["extraction"]["schema_version"] == "2.0"
+    assert after_replacement["state"]["audit"] is None
+    assert after_replacement["state"]["currentBundleId"] == "retained-bill-id"
+    assert after_replacement["state"]["replacementBundleId"] == "retained-bill-id"
+    assert after_replacement["state"]["replacementArmed"] is True
+    assert after_replacement["state"]["bundle"] == retained_bundle
+    assert "Duke Energy" in after_replacement["reviewHtml"]
+    assert "Pacific Gas and Electric" not in after_replacement["reviewHtml"]
+    assert after_replacement["revokedUrls"] == ["blob:test-1"]
+
+    after_same_file = result["afterSameFileReselect"]
+    assert after_same_file["state"]["previewUrl"] is None
+    assert after_same_file["state"]["extraction"] is None
+    assert after_same_file["state"]["currentBundleId"] is None
+    assert after_same_file["state"]["replacementBundleId"] == "retained-bill-id"
+    assert after_same_file["fileName"] == "replacement.pdf"
+    assert after_same_file["uploadResetCount"] == 0
+    assert after_same_file["revokedUrls"] == ["blob:test-1", "blob:test-2"]
+    assert result["afterRepeatedSameFileChange"]["revokedUrls"] == [
+        "blob:test-1",
+        "blob:test-2",
+    ]
+
+    assert result["sameFilePreviewUrl"] == "blob:test-3"
+    after_empty = result["afterEmptyChange"]
+    assert after_empty["state"]["previewUrl"] is None
+    assert after_empty["state"]["extraction"] is None
+    assert after_empty["state"]["audit"] is None
+    assert after_empty["state"]["replacementBundleId"] == "retained-bill-id"
+    assert after_empty["state"]["replacementArmed"] is True
+    assert after_empty["fileCount"] == 0
+    assert after_empty["fileLabel"] == "Choose a utility bill"
+    assert after_empty["uploadResetCount"] == 0
+    assert after_empty["revokedUrls"] == [
+        "blob:test-1",
+        "blob:test-2",
+        "blob:test-3",
+    ]
+    after_empty_submit = result["afterRepeatedEmptyAndSubmit"]
+    assert after_empty_submit["state"]["previewUrl"] is None
+    assert after_empty_submit["revokedUrls"] == after_empty["revokedUrls"]
+    assert after_empty_submit["message"] == "Choose a PDF bill first."
+    assert after_empty_submit["fileInvalid"] == "true"
+
+    assert result["requestCount"] == 3
+    assert result["createdUrls"] == ["blob:test-1", "blob:test-2", "blob:test-3"]
+    assert result["revokedUrls"] == result["createdUrls"]
+    assert len(result["revokedUrls"]) == len(set(result["revokedUrls"]))
+
+
 def test_failed_upload_revokes_preview_and_resets_actionable_document_state() -> None:
     result = _exercise_async_state_contract(
         "upload_failure",
@@ -4025,6 +4459,69 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         "currentBundleId": None,
         "cardCount": 0,
         "requestsCount": 0,
+        "pageErrors": [],
+    }
+    pending_reselect = evidence["pendingUploadReselect"]
+    first_pending_preview = pending_reselect["firstPreviewUrl"]
+    replacement_preview = pending_reselect["replacementPreviewUrl"]
+    assert first_pending_preview.startswith("blob:")
+    assert replacement_preview.startswith("blob:")
+    assert replacement_preview != first_pending_preview
+    pending_after_reselect = pending_reselect["afterReselect"]
+    assert pending_after_reselect == {
+        "signalAborted": True,
+        "previewUrl": None,
+        "extractionCleared": True,
+        "auditCleared": True,
+        "currentBundleId": None,
+        "replacementBundleId": "pending-replacement-id",
+        "replacementArmed": True,
+        "bundleLength": 1,
+        "retainedId": "pending-replacement-id",
+        "retainedCardCount": 1,
+        "fileName": "replacement.pdf",
+        "fileLabel": "replacement.pdf",
+        "reviewCleared": True,
+        "auditDomCleared": True,
+        "verificationCleared": True,
+        "iframeHasSource": False,
+        "revokedUrls": [first_pending_preview],
+        "uploadVisible": True,
+    }
+    assert pending_reselect["afterStaleCompletion"] == {
+        "previewUrl": None,
+        "extractionCleared": True,
+        "reviewCleared": True,
+        "staleRendered": False,
+        "revokedUrls": [first_pending_preview],
+    }
+    pending_after_upload = pending_reselect["afterReplacementUpload"]
+    assert pending_after_upload == {
+        "previewUrl": replacement_preview,
+        "extractionLoaded": True,
+        "currentBundleId": "pending-replacement-id",
+        "replacementBundleId": "pending-replacement-id",
+        "replacementArmed": True,
+        "bundleLength": 1,
+        "fileName": "replacement.pdf",
+        "staleRendered": False,
+        "revokedUrls": [first_pending_preview],
+    }
+    assert pending_reselect["afterSameFileChanges"] == {
+        "previewUrl": None,
+        "extractionCleared": True,
+        "fileName": "replacement.pdf",
+        "revokedUrls": [first_pending_preview, replacement_preview],
+    }
+    assert pending_reselect["final"] == {
+        "previewUrl": None,
+        "extractionCleared": True,
+        "auditCleared": True,
+        "fileCount": 0,
+        "fileLabel": "Choose a utility bill",
+        "message": "Choose a PDF bill first.",
+        "createdUrls": [first_pending_preview, replacement_preview],
+        "revokedUrls": [first_pending_preview, replacement_preview],
         "pageErrors": [],
     }
     preview_discard = evidence["previewDiscard"]
