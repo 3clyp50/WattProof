@@ -446,6 +446,111 @@ def test_mixed_provider_discrepancies_split_provider_requests() -> None:
         )
 
 
+def test_reconciliation_only_amount_due_root_gets_neutral_request() -> None:
+    bill = load_sample("authentic")
+    bill = bill.model_copy(
+        update={
+            "amount_due": bill.amount_due.model_copy(
+                update={"value": bill.amount_due.value + Decimal("2.00")}
+            )
+        }
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert result.verdict == "possible_discrepancy"
+    assert tuple(request.provider for request in result.review_requests) == (
+        "Consolidated statement",
+    )
+    request = result.review_requests[0]
+    assert request.grounded_audit_line_ids == ("amount_due",)
+    assert lines["amount_due"].label in request.body
+    assert "not attributed to a particular provider" in request.body
+    assert "does not allege provider error" in request.body
+    assert "PG&E peak energy" not in request.body
+    assert "3CE November Energy Commission tax" not in request.body
+    assert request.requires_user_review is True
+
+
+def test_tariff_and_independent_statement_roots_both_receive_drafts() -> None:
+    bill = _changed_charge_amount(
+        load_sample("authentic"),
+        "pge_peak_energy",
+        Decimal("5.00"),
+    )
+    bill = _changed_charge_amount(
+        bill,
+        "cca_nov_peak",
+        Decimal("3.00"),
+    )
+    bill = bill.model_copy(
+        update={
+            "amount_due": bill.amount_due.model_copy(
+                update={"value": bill.amount_due.value + Decimal("2.00")}
+            )
+        }
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert result.verdict == "possible_discrepancy"
+    assert tuple(request.provider for request in result.review_requests) == (
+        bill.delivery_provider.value,
+        bill.generation_provider.value,
+        "Consolidated statement",
+    )
+    assert tuple(
+        request.grounded_audit_line_ids for request in result.review_requests
+    ) == (("pge_peak_energy",), ("cca_nov_peak",), ("amount_due",))
+    grounded = tuple(
+        line_id
+        for request in result.review_requests
+        for line_id in request.grounded_audit_line_ids
+    )
+    assert len(grounded) == len(set(grounded))
+    assert "delivery_subtotal" not in grounded
+    assert "generation_subtotal" not in grounded
+    assert lines["delivery_subtotal"].root_cause_id == "pge_peak_energy"
+    assert lines["generation_subtotal"].root_cause_id == "cca_nov_peak"
+    assert lines["amount_due"].label in result.review_requests[2].body
+    assert lines["pge_peak_energy"].label not in result.review_requests[2].body
+    assert lines["cca_nov_peak"].label not in result.review_requests[2].body
+
+
+def test_section_level_reconciliation_root_routes_to_section_provider() -> None:
+    bill = load_sample("authentic")
+    delta = Decimal("2.00")
+    bill = bill.model_copy(
+        update={
+            "delivery_subtotal": bill.delivery_subtotal.model_copy(
+                update={"value": bill.delivery_subtotal.value + delta}
+            ),
+            "current_charges": bill.current_charges.model_copy(
+                update={"value": bill.current_charges.value + delta}
+            ),
+            "amount_due": bill.amount_due.model_copy(
+                update={"value": bill.amount_due.value + delta}
+            ),
+        }
+    )
+
+    result = audit_extraction(bill)
+    lines = {line.id: line for line in result.lines}
+
+    assert result.verdict == "possible_discrepancy"
+    assert tuple(request.provider for request in result.review_requests) == (
+        bill.delivery_provider.value,
+    )
+    request = result.review_requests[0]
+    assert request.grounded_audit_line_ids == ("delivery_subtotal",)
+    assert lines["delivery_subtotal"].root_cause_id is None
+    assert lines["delivery_subtotal"].label in request.body
+    assert bill.delivery_provider.value in request.body
+    assert "3CE generation lines sum to subtotal" not in request.body
+
+
 def test_unrelated_reconciliation_discrepancy_is_not_collapsed_into_tariff_root() -> None:
     bill = load_sample("synthetic")
     amount_due = bill.amount_due.model_copy(

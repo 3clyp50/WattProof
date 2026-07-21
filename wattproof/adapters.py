@@ -335,29 +335,41 @@ def _currency(value: Decimal) -> str:
     return f"{sign}${abs(value):.2f}"
 
 
-def _generated_discrepancy_request_body(
-    bill: BillExtraction,
-    lines: tuple[AuditLine, ...],
-) -> str:
-    details: list[str] = []
-    for line in lines:
-        if line.expected_amount is None or line.delta is None:
-            raise ValueError(
-                f"Discrepant tariff line lacks complete operands: {line.id}"
-            )
+def _issue_detail(line: AuditLine) -> str:
+    if (
+        line.status == "discrepancy"
+        and line.expected_amount is not None
+        and line.delta is not None
+    ):
         detail = (
             f"- {line.label}: the statement shows {_currency(line.billed_amount)}; "
-            f"the published calculation gives {_currency(line.expected_amount)}; "
+            f"the recomputed value is {_currency(line.expected_amount)}; "
             f"the difference is {_currency(abs(line.delta))}.\n"
             f"  Calculation: {line.formula}."
         )
-        if line.citations:
-            sources = "; ".join(
-                f"{citation.label}: {citation.source_url}"
-                for citation in line.citations
-            )
-            detail += f"\n  Rate sources: {sources}."
-        details.append(detail)
+    elif line.status == "needs_review":
+        detail = (
+            f"- {line.label}: the reported operands need review before WattProof "
+            "can reach a conclusion."
+        )
+    else:
+        detail = f"- {line.label}: this issue needs calculation detail."
+    detail += f"\n  Rendered-page evidence is recorded on page {line.source_page}."
+    if line.citations:
+        sources = "; ".join(
+            f"{citation.label}: {citation.source_url}"
+            for citation in line.citations
+        )
+        detail += f"\n  Archived sources: {sources}."
+    return detail
+
+
+def _generated_issue_request_body(
+    bill: BillExtraction,
+    provider: str,
+    lines: tuple[AuditLine, ...],
+) -> str:
+    details = tuple(_issue_detail(line) for line in lines)
     synthetic_notice = (
         "This is a synthetic demo request; no real customer bill contained "
         "these errors.\n\n"
@@ -365,12 +377,11 @@ def _generated_discrepancy_request_body(
         else ""
     )
     return (
-        f"Hello,\n\n{synthetic_notice}Please review these statement charges dated "
-        f"{bill.statement_date.value.isoformat()}:\n"
+        f"Hello,\n\n{synthetic_notice}Please review these {provider} statement "
+        f"relationships dated {bill.statement_date.value.isoformat()}:\n"
         + "\n".join(details)
-        + "\n\nPlease confirm the quantities and rates used and explain or correct "
-        "the charges if appropriate. I will verify my account details before "
-        "sending. Thank you."
+        + "\n\nPlease confirm the reported operands and calculation detail. "
+        "I will verify my account details before sending. Thank you."
     )
 
 
@@ -433,22 +444,54 @@ def _clean_provider_request(
     )
 
 
+def _draft_issue_lines(
+    lines: tuple[UtilityAuditLine, ...],
+) -> tuple[UtilityAuditLine, ...]:
+    candidates = tuple(
+        line for line in lines if line.status in {"discrepancy", "needs_review"}
+    )
+    represented_roots = {
+        line.id for line in candidates if line.root_cause_id is None
+    }
+    return tuple(
+        line
+        for line in candidates
+        if line.root_cause_id is None or line.root_cause_id not in represented_roots
+    )
+
+
+def _consolidated_issue_request(
+    lines: tuple[AuditLine, ...],
+) -> ProviderReviewRequest:
+    details = "\n".join(_issue_detail(line) for line in lines)
+    return ProviderReviewRequest(
+        provider="Consolidated statement",
+        subject="Request to review consolidated statement calculations",
+        body=(
+            "Hello,\n\nPlease review the following cross-section statement "
+            "relationships. This request is not attributed to a particular "
+            "provider and does not allege provider error:\n"
+            f"{details}\n\nPlease confirm the statement roll-forward and calculation "
+            "detail. I will verify my account details before sending. Thank you."
+        ),
+        grounded_audit_line_ids=tuple(line.id for line in lines),
+        requires_user_review=True,
+    )
+
+
 def _provider_review_requests(
     bill: BillExtraction,
     result: AuditResult,
+    mapped_lines: tuple[UtilityAuditLine, ...],
 ) -> tuple[ProviderReviewRequest, ...]:
-    line_ids = {line.id for line in result.lines}
+    line_ids = {line.id for line in mapped_lines}
     section_by_id = _section_by_line_id(bill)
     provider_sections = (
         ("pge_delivery", bill.delivery_provider.value),
         ("cca_generation", bill.generation_provider.value),
     )
-    discrepancies = tuple(
-        line
-        for line in result.lines
-        if line.category == "tariff" and line.status == "discrepancy"
-    )
-    if not discrepancies:
+    issue_lines = _draft_issue_lines(mapped_lines)
+    if not issue_lines:
         review = result.review_request
         grounded = _validated_grounding(
             review.grounded_audit_line_ids,
@@ -480,29 +523,31 @@ def _provider_review_requests(
         return clean_requests
 
     requests: list[ProviderReviewRequest] = []
+    result_lines = {line.id: line for line in result.lines}
     legacy_review = result.review_request
     for section_id, provider in provider_sections:
-        provider_lines = tuple(
+        provider_issue_lines = tuple(
             line
-            for line in discrepancies
-            if section_by_id.get(line.id) == section_id
+            for line in issue_lines
+            if line.section_id == section_id
         )
-        if not provider_lines:
+        if not provider_issue_lines:
             continue
         grounded = _validated_grounding(
-            tuple(line.id for line in provider_lines),
+            tuple(line.id for line in provider_issue_lines),
             line_ids,
         )
+        provider_lines = tuple(result_lines[line_id] for line_id in grounded)
         if grounded == legacy_review.grounded_audit_line_ids:
             subject = legacy_review.subject
             body = legacy_review.body
         else:
-            subject = (
-                f"Request to review {provider_lines[0].label}"
-                if len(provider_lines) == 1
-                else "Request to review electricity charges"
+            subject = f"Request to review {provider} statement calculations"
+            body = _generated_issue_request_body(
+                bill,
+                provider,
+                provider_lines,
             )
-            body = _generated_discrepancy_request_body(bill, provider_lines)
         requests.append(
             ProviderReviewRequest(
                 provider=provider,
@@ -512,8 +557,27 @@ def _provider_review_requests(
                 requires_user_review=True,
             )
         )
-    if not requests:
-        raise ValueError("Discrepant tariff lines have no supported provider section")
+    neutral_issue_lines = tuple(
+        line for line in issue_lines if line.section_id is None
+    )
+    if neutral_issue_lines:
+        neutral_grounded = _validated_grounding(
+            tuple(line.id for line in neutral_issue_lines),
+            line_ids,
+        )
+        requests.append(
+            _consolidated_issue_request(
+                tuple(result_lines[line_id] for line_id in neutral_grounded)
+            )
+        )
+    issue_ids = tuple(line.id for line in issue_lines)
+    partitioned = tuple(
+        line_id
+        for request in requests
+        for line_id in request.grounded_audit_line_ids
+    )
+    if len(partitioned) != len(issue_ids) or set(partitioned) != set(issue_ids):
+        raise ValueError("Issue draft grounding has no supported provider section")
     return tuple(requests)
 
 
@@ -545,7 +609,7 @@ def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult
         )
         for line in result.lines
     )
-    review_requests = _provider_review_requests(bill, result)
+    review_requests = _provider_review_requests(bill, result, mapped_lines)
     return UtilityAuditResult(
         schema_version="2.0",
         fixture_kind=result.fixture_kind,
