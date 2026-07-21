@@ -5,6 +5,7 @@ import pytest
 from pydantic import BaseModel
 
 from wattproof.reconcile import compatible_rate, reconcile_document, round_money
+from wattproof.utility_fixtures import load_utility_sample
 from wattproof.utility_models import (
     CalculationSpec,
     ConversionCheck,
@@ -13,8 +14,10 @@ from wattproof.utility_models import (
     FactStatus,
     MeterCheck,
     MoneyFactV2,
+    QuantitySumCheck,
     ServiceSection,
     TextFactV2,
+    UtilityAuditLine,
     UtilityCharge,
     UtilityDocument,
 )
@@ -179,6 +182,10 @@ def gas_document() -> UtilityDocument:
         current_charges=money_fact("10.00", "Current charges $10.00"),
         amount_due=money_fact("10.00", "Amount due $10.00"),
     )
+
+
+def _line_by_id(document: UtilityDocument, line_id: str) -> UtilityAuditLine:
+    return next(line for line in reconcile_document(document).lines if line.id == line_id)
 
 
 def water_document_with_usage_status(
@@ -1138,3 +1145,251 @@ def test_money_tolerance_uses_exact_delta_and_rollups_sum_printed_amounts() -> N
     assert lines["subtotal::water"].expected_amount == Decimal("19.541")
     assert lines["subtotal::water"].status == "verified"
     assert result.discrepancy_total == Decimal("0.011")
+
+
+def test_duke_headline_usage_must_equal_the_single_compatible_meter_usage() -> None:
+    document = load_utility_sample("duke")
+    section = document.sections[0]
+    assert section.usage is not None
+    assert section.meter is not None
+    changed_section = section.model_copy(
+        update={
+            "usage": section.usage.model_copy(update={"value": Decimal("1002")})
+        }
+    )
+    changed_document = document.model_copy(
+        update={"sections": (changed_section, *document.sections[1:])}
+    )
+
+    result = reconcile_document(changed_document)
+    line = next(line for line in result.lines if line.id == "usage::electricity")
+
+    assert line.billed_amount == Decimal("1002")
+    assert line.expected_amount == Decimal("1001")
+    assert line.delta == Decimal("1")
+    assert line.unit == "kWh"
+    assert line.status == "discrepancy"
+    assert line.root_cause_id is None
+    assert line.billed_status == section.usage.status
+    assert line.evidence == (section.meter.usage.evidence, section.usage.evidence)
+    assert result.verdict == "possible_discrepancy"
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        "usage::electricity",
+    )
+
+
+def test_centerpoint_headline_usage_must_equal_conversion_result() -> None:
+    document = load_utility_sample("centerpoint")
+    section = document.sections[0]
+    assert section.usage is not None
+    changed_section = section.model_copy(
+        update={
+            "usage": section.usage.model_copy(update={"value": Decimal("113.277")})
+        }
+    )
+
+    result = reconcile_document(
+        document.model_copy(update={"sections": (changed_section,)})
+    )
+    line = next(line for line in result.lines if line.id == "usage::gas")
+
+    assert line.billed_amount == Decimal("113.277")
+    assert line.expected_amount == Decimal("112.277")
+    assert line.delta == Decimal("1.000")
+    assert line.unit == "therm"
+    assert line.status == "discrepancy"
+    assert line.root_cause_id is None
+    assert result.verdict == "possible_discrepancy"
+
+
+def test_usage_consistency_is_visible_when_source_is_missing() -> None:
+    document = water_document()
+    section = document.sections[0].model_copy(
+        update={"usage": decimal_fact("2", "kgal", "Total usage: 2 kgal")}
+    )
+
+    line = _line_by_id(
+        document.model_copy(update={"sections": (section,)}),
+        "usage::water",
+    )
+
+    assert section.usage is not None
+    assert line.status == "cannot_verify"
+    assert line.expected_amount is None
+    assert line.evidence == (section.usage.evidence,)
+    assert "source" in (line.limitation or "").lower()
+
+
+def test_usage_consistency_is_visible_when_sources_are_incompatible() -> None:
+    document = gas_document()
+    section = document.sections[0].model_copy(
+        update={"usage": decimal_fact("112.277", "kgal", "Headline usage")}
+    )
+
+    line = _line_by_id(
+        document.model_copy(update={"sections": (section,)}),
+        "usage::gas",
+    )
+
+    assert line.status == "cannot_verify"
+    assert line.expected_amount is None
+    assert {item.text for item in line.evidence} == {
+        "Headline usage",
+        "Printed usage: 108 CCF",
+        "Converted usage: 112.277 therm",
+    }
+    assert "compatible" in (line.limitation or "").lower()
+
+
+def test_usage_consistency_fails_closed_when_compatible_source_is_ambiguous() -> None:
+    document = load_utility_sample("centerpoint")
+    section = document.sections[0]
+    conversion = section.conversions[0]
+    duplicate_source = conversion.model_copy(
+        update={"id": "alternate_therms", "label": "Alternate therm conversion"}
+    )
+    changed_section = section.model_copy(
+        update={"conversions": (*section.conversions, duplicate_source)}
+    )
+
+    line = _line_by_id(
+        document.model_copy(update={"sections": (changed_section,)}),
+        "usage::gas",
+    )
+
+    assert line.status == "cannot_verify"
+    assert line.expected_amount is None
+    assert "more than one" in (line.limitation or "").lower()
+
+
+def test_declared_duke_tiers_must_sum_to_printed_usage_even_when_money_offsets() -> None:
+    document = load_utility_sample("duke")
+    section = document.sections[0]
+    charges = {charge.id: charge for charge in section.charges}
+    tier = charges["energy_tier_3"]
+    assert tier.quantity is not None
+    changed_tier = tier.model_copy(
+        update={
+            "quantity": tier.quantity.model_copy(update={"value": Decimal("2")}),
+            "amount": tier.amount.model_copy(update={"value": Decimal("0.25")}),
+        }
+    )
+    connection = charges["connection_charge"]
+    changed_connection = connection.model_copy(
+        update={
+            "amount": connection.amount.model_copy(update={"value": Decimal("13.57")})
+        }
+    )
+    changed_section = section.model_copy(
+        update={
+            "charges": tuple(
+                changed_tier
+                if charge.id == tier.id
+                else changed_connection
+                if charge.id == connection.id
+                else charge
+                for charge in section.charges
+            )
+        }
+    )
+
+    result = reconcile_document(
+        document.model_copy(
+            update={"sections": (changed_section, *document.sections[1:])}
+        )
+    )
+    lines = {line.id: line for line in result.lines}
+    tier_sum = lines["quantity_sum::electricity::energy_tiers"]
+    tier_one = charges["energy_tier_1"].quantity
+    tier_two = charges["energy_tier_2"].quantity
+    assert tier_one is not None
+    assert tier_two is not None
+    assert changed_tier.quantity is not None
+
+    assert lines["charge::energy_tier_3"].status == "verified"
+    assert lines["subtotal::electricity"].status == "verified"
+    assert tier_sum.billed_amount == Decimal("1001")
+    assert tier_sum.expected_amount == Decimal("1002")
+    assert tier_sum.delta == Decimal("-1")
+    assert tier_sum.unit == "kWh"
+    assert tier_sum.status == "discrepancy"
+    assert tier_sum.root_cause_id is None
+    assert tier_sum.billed_status == "printed"
+    assert tier_sum.evidence == (
+        tier_one.evidence,
+        tier_two.evidence,
+        changed_tier.quantity.evidence,
+        section.quantity_sums[0].target.evidence,
+    )
+    assert result.verdict == "possible_discrepancy"
+    assert result.review_requests[0].grounded_audit_line_ids == (
+        "quantity_sum::electricity::energy_tiers",
+    )
+
+
+def test_quantity_sum_cannot_verify_a_missing_component_quantity() -> None:
+    document = water_document()
+    section = document.sections[0]
+    target = decimal_fact("2", "kgal", "Printed section usage")
+    quantity_sum = QuantitySumCheck(
+        id="usage_components",
+        label="Usage components",
+        charge_ids=("water_usage", "service_charge"),
+        target=target,
+    )
+    changed_section = section.model_copy(update={"quantity_sums": (quantity_sum,)})
+
+    line = _line_by_id(
+        document.model_copy(update={"sections": (changed_section,)}),
+        "quantity_sum::water::usage_components",
+    )
+
+    assert line.status == "cannot_verify"
+    assert line.expected_amount is None
+    assert section.charges[0].quantity is not None
+    assert line.evidence == (
+        section.charges[0].quantity.evidence,
+        target.evidence,
+    )
+    assert "missing" in (line.limitation or "").lower()
+
+
+def test_quantity_sum_cannot_verify_incompatible_component_units() -> None:
+    document = water_document()
+    section = document.sections[0]
+    usage = section.charges[0]
+    assert usage.quantity is not None
+    second = usage.model_copy(
+        update={
+            "id": "water_usage_gallons",
+            "quantity": usage.quantity.model_copy(update={"unit": "gal"}),
+        }
+    )
+    target = decimal_fact("2", "kgal", "Printed section usage")
+    quantity_sum = QuantitySumCheck(
+        id="usage_components",
+        label="Usage components",
+        charge_ids=("water_usage", "water_usage_gallons"),
+        target=target,
+    )
+    changed_section = section.model_copy(
+        update={
+            "charges": (*section.charges, second),
+            "quantity_sums": (quantity_sum,),
+        }
+    )
+
+    line = _line_by_id(
+        document.model_copy(update={"sections": (changed_section,)}),
+        "quantity_sum::water::usage_components",
+    )
+
+    assert line.status == "cannot_verify"
+    assert line.expected_amount is None
+    assert second.quantity is not None
+    assert line.evidence == (
+        usage.quantity.evidence,
+        second.quantity.evidence,
+        target.evidence,
+    )
+    assert "units" in (line.limitation or "").lower()

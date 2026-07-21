@@ -13,6 +13,7 @@ from .utility_models import (
     FactStatus,
     MeterCheck,
     MoneyFactV2,
+    QuantitySumCheck,
     ServiceSection,
     TextFactV2,
     UtilityCharge,
@@ -276,6 +277,7 @@ def _duke_document() -> UtilityDocument:
             "1,001.000 kWh @ $-0.00106400 -1.07",
         ),
     )
+    printed_usage = _decimal_fact("1001", "kWh", 1, "Electric (kWh) 1,001")
     electricity = ServiceSection(
         id="electricity",
         service_type="electricity",
@@ -289,7 +291,7 @@ def _duke_document() -> UtilityDocument:
         ),
         service_start=service_start,
         service_end=service_end,
-        usage=_decimal_fact("1001", "kWh", 1, "Electric (kWh) 1,001"),
+        usage=printed_usage,
         meter=MeterCheck(
             previous=_decimal_fact(
                 "137956",
@@ -304,6 +306,18 @@ def _duke_document() -> UtilityDocument:
                 "Actual reading on Mar 6 138957",
             ),
             usage=_decimal_fact("1001", "kWh", 1, "Energy Used 1,001 kWh"),
+        ),
+        quantity_sums=(
+            QuantitySumCheck(
+                id="energy_tiers",
+                label="Printed energy tier quantities",
+                charge_ids=(
+                    "energy_tier_1",
+                    "energy_tier_2",
+                    "energy_tier_3",
+                ),
+                target=printed_usage,
+            ),
         ),
         charges=pre_tax_charges,
         subtotal=_money_fact(

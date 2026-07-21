@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from wattproof.fixtures import load_sample
 from wattproof.legacy import translate_legacy_bill
 from wattproof.models import BillExtraction, EvidenceBase
+from wattproof.utility_fixtures import load_utility_sample
 from wattproof.utility_models import (
     CalculationSpec,
     DateFactV2,
@@ -18,6 +19,7 @@ from wattproof.utility_models import (
     FactBaseV2,
     IntegerFactV2,
     MoneyFactV2,
+    QuantitySumCheck,
     ServiceSection,
     TextFactV2,
     UtilityAuditLine,
@@ -375,6 +377,59 @@ def test_document_rejects_duplicate_section_ids() -> None:
         UtilityDocument.model_validate(
             bill.model_copy(update={"sections": (bill.sections[0], duplicate)}).model_dump()
         )
+
+
+def test_service_section_rejects_duplicate_conversion_ids() -> None:
+    payload = load_utility_sample("centerpoint").model_dump()
+    conversion = payload["sections"][0]["conversions"][0]
+    payload["sections"][0]["conversions"] += (conversion.copy(),)
+
+    with pytest.raises(ValidationError, match="conversion IDs must be unique"):
+        UtilityDocument.model_validate(payload)
+
+
+def test_service_section_rejects_duplicate_supplemental_fact_ids() -> None:
+    payload = translate_legacy_bill(load_sample("authentic")).model_dump()
+    fact = payload["sections"][0]["supplemental_facts"][0]
+    payload["sections"][0]["supplemental_facts"] += (fact.copy(),)
+
+    with pytest.raises(ValidationError, match="supplemental fact IDs must be unique"):
+        UtilityDocument.model_validate(payload)
+
+
+def test_service_section_rejects_duplicate_quantity_sum_ids() -> None:
+    payload = load_utility_sample("duke").model_dump()
+    quantity_sum = payload["sections"][0]["quantity_sums"][0]
+    payload["sections"][0]["quantity_sums"] += (quantity_sum.copy(),)
+
+    with pytest.raises(ValidationError, match="quantity-sum IDs must be unique"):
+        UtilityDocument.model_validate(payload)
+
+
+def test_quantity_sum_rejects_duplicate_component_charge_ids() -> None:
+    with pytest.raises(ValidationError, match="charge_ids must be unique"):
+        QuantitySumCheck(
+            id="tiers",
+            label="Printed tier quantities",
+            charge_ids=("tier_one", "tier_one"),
+            target=DecimalFactV2(
+                value=Decimal("1001"),
+                unit="kWh",
+                status="printed",
+                evidence=evidence(),
+            ),
+        )
+
+
+def test_service_section_rejects_unknown_quantity_sum_charge_reference() -> None:
+    payload = load_utility_sample("duke").model_dump()
+    payload["sections"][0]["quantity_sums"][0]["charge_ids"] = [
+        "energy_tier_1",
+        "missing_tier",
+    ]
+
+    with pytest.raises(ValidationError, match="unknown charge ID"):
+        UtilityDocument.model_validate(payload)
 
 
 def test_percent_calculation_requires_charge_ids() -> None:

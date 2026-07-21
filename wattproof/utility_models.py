@@ -138,6 +138,27 @@ class ConversionCheck(BaseModel):
     result: DecimalFactV2
 
 
+class QuantitySumCheck(BaseModel):
+    """A declared sum of charge quantities against one printed target.
+
+    Charge IDs make the relationship explicit so reconciliation never guesses from
+    provider-specific labels such as "tier" or "block".
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=r"^[a-z0-9_]+$")
+    label: str = Field(min_length=1)
+    charge_ids: tuple[str, ...] = Field(min_length=1)
+    target: DecimalFactV2
+
+    @model_validator(mode="after")
+    def validate_charge_ids(self) -> Self:
+        if len(self.charge_ids) != len(set(self.charge_ids)):
+            raise ValueError("quantity-sum charge_ids must be unique")
+        return self
+
+
 class ServiceSection(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -152,18 +173,44 @@ class ServiceSection(BaseModel):
     usage: DecimalFactV2 | None = None
     meter: MeterCheck | None = None
     conversions: tuple[ConversionCheck, ...] = ()
+    quantity_sums: tuple[QuantitySumCheck, ...] = ()
     supplemental_facts: tuple[NamedFactV2, ...] = ()
     charges: tuple[UtilityCharge, ...] = Field(min_length=1)
     subtotal: MoneyFactV2
 
     @model_validator(mode="after")
-    def validate_service_dates(self) -> Self:
+    def validate_section_invariants(self) -> Self:
         if (
             self.service_start is not None
             and self.service_end is not None
             and self.service_start.value > self.service_end.value
         ):
             raise ValueError("service_start must be on or before service_end")
+
+        conversion_ids = [conversion.id for conversion in self.conversions]
+        if len(conversion_ids) != len(set(conversion_ids)):
+            raise ValueError("conversion IDs must be unique within a section")
+
+        supplemental_fact_ids = [fact.id for fact in self.supplemental_facts]
+        if len(supplemental_fact_ids) != len(set(supplemental_fact_ids)):
+            raise ValueError("supplemental fact IDs must be unique within a section")
+
+        quantity_sum_ids = [quantity_sum.id for quantity_sum in self.quantity_sums]
+        if len(quantity_sum_ids) != len(set(quantity_sum_ids)):
+            raise ValueError("quantity-sum IDs must be unique within a section")
+
+        known_charge_ids = {charge.id for charge in self.charges}
+        for quantity_sum in self.quantity_sums:
+            unknown_ids = [
+                charge_id
+                for charge_id in quantity_sum.charge_ids
+                if charge_id not in known_charge_ids
+            ]
+            if unknown_ids:
+                raise ValueError(
+                    "quantity-sum references unknown charge ID: "
+                    f"{unknown_ids[0]}"
+                )
         return self
 
 

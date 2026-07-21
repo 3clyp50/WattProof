@@ -5,6 +5,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from .utility_models import (
     AuditStatusV2,
+    DecimalFactV2,
     EvidenceRef,
     FactBaseV2,
     FactStatus,
@@ -623,6 +624,249 @@ def _conversion_lines(section: ServiceSection) -> tuple[UtilityAuditLine, ...]:
     return tuple(lines)
 
 
+def _usage_consistency_line(section: ServiceSection) -> UtilityAuditLine | None:
+    sources: list[tuple[str, DecimalFactV2]] = []
+    if section.meter is not None:
+        sources.append(("meter usage", section.meter.usage))
+    sources.extend(
+        (f"conversion {conversion.id}", conversion.result)
+        for conversion in section.conversions
+    )
+    usage = section.usage
+    if usage is None and not sources:
+        return None
+
+    if usage is None:
+        return UtilityAuditLine(
+            id=f"usage::{section.id}",
+            section_id=section.id,
+            label=f"{section.provider.value} reported usage consistency",
+            scope="printed_math",
+            unit=sources[0][1].unit,
+            billed_amount=None,
+            expected_amount=None,
+            delta=None,
+            formula="Cannot compare usage: no section-level reported usage is available",
+            inputs={
+                source_name: _annotated_value(
+                    source.value,
+                    source.unit,
+                    source,
+                )
+                for source_name, source in sources
+            },
+            evidence=tuple(source.evidence for _, source in sources),
+            status="cannot_verify",
+            limitation=(
+                "A section-level reported usage is required before meter or conversion "
+                "usage can be compared."
+            ),
+        )
+
+    compatible_sources = tuple(
+        (source_name, source)
+        for source_name, source in sources
+        if source.unit == usage.unit
+    )
+    if len(compatible_sources) != 1:
+        if not sources:
+            limitation = (
+                "No meter usage or conversion result is available as an independent "
+                "usage source."
+            )
+        elif not compatible_sources:
+            limitation = (
+                "No compatible meter usage or conversion result has the exact same "
+                "unit as the section-level reported usage."
+            )
+        else:
+            limitation = (
+                "More than one meter or conversion source has the exact reported "
+                "usage unit, so the intended relationship is ambiguous."
+            )
+        line = UtilityAuditLine(
+            id=f"usage::{section.id}",
+            section_id=section.id,
+            label=f"{section.provider.value} reported usage consistency",
+            scope="printed_math",
+            unit=usage.unit,
+            billed_amount=usage.value,
+            expected_amount=None,
+            delta=None,
+            formula="Cannot compare reported usage to one unambiguous compatible source",
+            inputs={
+                **{
+                    source_name: _annotated_value(
+                        source.value,
+                        source.unit,
+                        source,
+                    )
+                    for source_name, source in sources
+                },
+                "reported_usage": _annotated_value(
+                    usage.value,
+                    usage.unit,
+                    usage,
+                ),
+            },
+            evidence=(
+                *(source.evidence for _, source in sources),
+                usage.evidence,
+            ),
+            status="cannot_verify",
+            limitation=limitation,
+        )
+        return _with_billed_provenance(line, usage)
+
+    source_name, source = compatible_sources[0]
+    delta = usage.value - source.value
+    return _with_billed_provenance(
+        UtilityAuditLine(
+            id=f"usage::{section.id}",
+            section_id=section.id,
+            label=f"{section.provider.value} reported usage consistency",
+            scope="printed_math",
+            unit=usage.unit,
+            billed_amount=usage.value,
+            expected_amount=source.value,
+            delta=delta,
+            formula=(
+                f"{_annotated_value(source.value, source.unit, source)} "
+                f"= {_annotated_value(usage.value, usage.unit, usage)}"
+            ),
+            inputs={
+                source_name: _annotated_value(
+                    source.value,
+                    source.unit,
+                    source,
+                ),
+                "reported_usage": _annotated_value(
+                    usage.value,
+                    usage.unit,
+                    usage,
+                ),
+            },
+            evidence=(source.evidence, usage.evidence),
+            status="verified" if usage.value == source.value else "discrepancy",
+        ),
+        usage,
+    )
+
+
+def _quantity_sum_lines(section: ServiceSection) -> tuple[UtilityAuditLine, ...]:
+    charges_by_id = {charge.id: charge for charge in section.charges}
+    lines: list[UtilityAuditLine] = []
+    for quantity_sum in section.quantity_sums:
+        components = tuple(
+            charges_by_id[charge_id] for charge_id in quantity_sum.charge_ids
+        )
+        quantities = tuple(
+            charge.quantity for charge in components if charge.quantity is not None
+        )
+        missing_ids = tuple(
+            charge.id for charge in components if charge.quantity is None
+        )
+        target = quantity_sum.target
+        inputs = {
+            **{
+                f"charge::{charge.id}": _annotated_value(
+                    charge.quantity.value,
+                    charge.quantity.unit,
+                    charge.quantity,
+                )
+                for charge in components
+                if charge.quantity is not None
+            },
+            "reported_usage": _annotated_value(
+                target.value,
+                target.unit,
+                target,
+            ),
+        }
+        evidence = (
+            *(quantity.evidence for quantity in quantities),
+            target.evidence,
+        )
+        if missing_ids:
+            line = UtilityAuditLine(
+                id=f"quantity_sum::{section.id}::{quantity_sum.id}",
+                section_id=section.id,
+                label=quantity_sum.label,
+                scope="printed_math",
+                unit=target.unit,
+                billed_amount=target.value,
+                expected_amount=None,
+                delta=None,
+                formula="Cannot sum declared quantities: a component quantity is missing",
+                inputs={
+                    **inputs,
+                    "missing_quantity_charge_ids": ", ".join(missing_ids),
+                },
+                evidence=evidence,
+                status="cannot_verify",
+                limitation=(
+                    "The declared relationship has missing charge quantity operands: "
+                    + ", ".join(missing_ids)
+                    + "."
+                ),
+            )
+            lines.append(_with_billed_provenance(line, target))
+            continue
+
+        if any(quantity.unit != target.unit for quantity in quantities):
+            line = UtilityAuditLine(
+                id=f"quantity_sum::{section.id}::{quantity_sum.id}",
+                section_id=section.id,
+                label=quantity_sum.label,
+                scope="printed_math",
+                unit=target.unit,
+                billed_amount=target.value,
+                expected_amount=None,
+                delta=None,
+                formula="Cannot sum declared quantities with incompatible exact units",
+                inputs=inputs,
+                evidence=evidence,
+                status="cannot_verify",
+                limitation=(
+                    "All declared component quantity units must exactly match the "
+                    "printed target unit."
+                ),
+            )
+            lines.append(_with_billed_provenance(line, target))
+            continue
+
+        expected = sum((quantity.value for quantity in quantities), Decimal("0"))
+        delta = target.value - expected
+        component_trace = " + ".join(
+            _annotated_value(quantity.value, quantity.unit, quantity)
+            for quantity in quantities
+        )
+        lines.append(
+            _with_billed_provenance(
+                UtilityAuditLine(
+                    id=f"quantity_sum::{section.id}::{quantity_sum.id}",
+                    section_id=section.id,
+                    label=quantity_sum.label,
+                    scope="printed_math",
+                    unit=target.unit,
+                    billed_amount=target.value,
+                    expected_amount=expected,
+                    delta=delta,
+                    formula=(
+                        f"{component_trace} = {expected} {target.unit} [recomputed]"
+                    ),
+                    inputs=inputs,
+                    evidence=evidence,
+                    status=(
+                        "verified" if target.value == expected else "discrepancy"
+                    ),
+                ),
+                target,
+            )
+        )
+    return tuple(lines)
+
+
 def _subtotal_line(
     section: ServiceSection,
     currency: str,
@@ -974,6 +1218,7 @@ _NON_OPERAND_INPUT_KEYS = frozenset(
         "required_factor_unit",
         "referenced_charge_ids",
         "missing_charge_ids",
+        "missing_quantity_charge_ids",
     }
 )
 
@@ -1148,6 +1393,10 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
         if meter_line is not None:
             lines.append(meter_line)
         lines.extend(_conversion_lines(section))
+        usage_line = _usage_consistency_line(section)
+        if usage_line is not None:
+            lines.append(usage_line)
+        lines.extend(_quantity_sum_lines(section))
         subtotal_indexes.append(len(lines))
         lines.append(_subtotal_line(section, document.currency))
 
@@ -1206,7 +1455,9 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
             and line.root_cause_id is None
             and line.delta is not None
             and line.unit == document.currency
-            and not line.id.startswith(("meter::", "conversion::"))
+            and not line.id.startswith(
+                ("meter::", "conversion::", "usage::", "quantity_sum::")
+            )
         ),
         Decimal("0"),
     )
