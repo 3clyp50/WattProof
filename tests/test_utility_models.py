@@ -197,6 +197,82 @@ def test_audit_result_rejects_missing_or_out_of_order_root_dependencies() -> Non
         audit_result_with_lines(root_a, root_b, out_of_order)
 
 
+def test_audit_result_rejects_single_root_listed_after_its_dependent() -> None:
+    root = UtilityAuditLine(**discrepancy_line_payload("root"))
+    dependent = UtilityAuditLine(
+        **discrepancy_line_payload("dependent"),
+        root_cause_id="root",
+    )
+
+    with pytest.raises(ValidationError, match="before the dependent audit line"):
+        audit_result_with_lines(dependent, root)
+
+
+def test_audit_result_rejects_multi_root_when_one_root_is_listed_later() -> None:
+    root_a = UtilityAuditLine(**discrepancy_line_payload("root_a"))
+    root_b = UtilityAuditLine(**discrepancy_line_payload("root_b"))
+    dependent = UtilityAuditLine(
+        **discrepancy_line_payload("dependent"),
+        root_cause_ids=("root_a", "root_b"),
+    )
+
+    with pytest.raises(ValidationError, match="before the dependent audit line"):
+        audit_result_with_lines(root_a, dependent, root_b)
+
+
+def test_audit_result_rejects_cycle_with_controlled_ordering_error() -> None:
+    cycle_a = UtilityAuditLine(
+        **discrepancy_line_payload("cycle_a"),
+        root_cause_id="cycle_b",
+    )
+    cycle_b = UtilityAuditLine(
+        **discrepancy_line_payload("cycle_b"),
+        root_cause_id="cycle_a",
+    )
+
+    with pytest.raises(ValidationError, match="before the dependent audit line"):
+        audit_result_with_lines(cycle_a, cycle_b)
+
+
+def test_audit_result_rejects_dependency_chain_as_non_independent() -> None:
+    root = UtilityAuditLine(**discrepancy_line_payload("root"))
+    middle = UtilityAuditLine(
+        **discrepancy_line_payload("middle"),
+        root_cause_id="root",
+    )
+    tail = UtilityAuditLine(
+        **discrepancy_line_payload("tail"),
+        root_cause_id="middle",
+    )
+
+    with pytest.raises(ValidationError, match="independent discrepancy lines"):
+        audit_result_with_lines(root, middle, tail)
+
+
+@pytest.mark.parametrize(
+    "root_ids",
+    [
+        ("root_a",),
+        ("root_a", "root_b"),
+    ],
+)
+def test_audit_result_accepts_roots_in_valid_earlier_ledger_order(
+    root_ids: tuple[str, ...],
+) -> None:
+    roots = tuple(
+        UtilityAuditLine(**discrepancy_line_payload(root_id))
+        for root_id in root_ids
+    )
+    dependent = UtilityAuditLine(
+        **discrepancy_line_payload("dependent"),
+        root_cause_ids=root_ids,
+    )
+
+    result = audit_result_with_lines(*roots, dependent)
+
+    assert result.lines[-1].root_cause_ids == root_ids
+
+
 def test_audit_result_rejects_review_grounding_to_a_dependent_symptom() -> None:
     root = UtilityAuditLine(**discrepancy_line_payload("root"))
     dependent = UtilityAuditLine(

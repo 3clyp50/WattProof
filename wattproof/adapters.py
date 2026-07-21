@@ -40,6 +40,7 @@ from .utility_models import (
     ProviderReviewRequest,
     UtilityAuditLine,
     UtilityAuditResult,
+    order_audit_lines_by_dependencies,
     ordered_root_cause_ids,
     root_cause_ids_for,
     root_cause_update,
@@ -951,7 +952,7 @@ def _map_result(bill: BillExtraction, result: AuditResult) -> UtilityAuditResult
                 **root_cause_update(root_causes.get(line.id, ())),
             )
         )
-    mapped_lines = tuple(mapped)
+    mapped_lines = order_audit_lines_by_dependencies(mapped)
     discrepancy_lines = tuple(
         line for line in mapped_lines if line.status == "discrepancy"
     )

@@ -38,7 +38,7 @@ end-to-end software.
 No database, account system, persistence layer, nationwide tariff table, or Duke tariff
 adapter is added.
 
-Run all commands from `/Users/lazy/Documents/wattproof` with:
+Run all commands from the repository root with:
 
 ```bash
 PATH="$PWD/.venv/bin:$PATH" make verify

@@ -106,8 +106,8 @@ the declared bill boundary. Downstream percentage, subtotal, current-charge, and
 amount-due symptoms carry every independent root that exactly explains them, in stable
 audit-line order, so amounts are not double-counted. `root_cause_ids` is the canonical
 dependency set; `root_cause_id` remains populated for a single dependency so existing
-consumers keep working. Dependencies must reference present, distinct, independent
-discrepancy lines and may never reference the dependent line itself.
+consumers keep working. Dependencies must reference present, distinct, earlier,
+independent discrepancy lines and may never reference the dependent line itself.
 
 The highest cumulative verification level is one of `evidence_extracted`,
 `internally_reconciled`, or `tariff_verified`. A printed rate can establish only

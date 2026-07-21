@@ -783,6 +783,8 @@ def test_printed_percentage_relationship_does_not_depend_on_charge_order() -> No
         )
     )
     rooted_lines = {line.id: line for line in rooted.lines}
+    rooted_order = tuple(line.id for line in rooted.lines)
+    assert rooted_order.index("cca_nov_peak") < rooted_order.index("cca_nov_uut")
     assert rooted_lines["cca_nov_uut"].root_cause_id == "cca_nov_peak"
     assert rooted_lines["generation_subtotal"].root_cause_id == "cca_nov_peak"
     assert rooted.discrepancy_total == Decimal("3.00")

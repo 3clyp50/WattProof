@@ -412,6 +412,45 @@ def root_cause_update(root_ids: Iterable[str]) -> dict[str, object]:
     }
 
 
+def order_audit_lines_by_dependencies(
+    lines: Iterable[UtilityAuditLine],
+) -> tuple[UtilityAuditLine, ...]:
+    """Keep producer order stable while moving dependents behind every root."""
+
+    original = tuple(lines)
+    original_order = {line.id: index for index, line in enumerate(original)}
+    canonical = tuple(
+        line.model_copy(
+            update=root_cause_update(
+                sorted(
+                    root_cause_ids_for(line),
+                    key=lambda root_id: original_order.get(root_id, len(original)),
+                )
+            )
+        )
+        if root_cause_ids_for(line)
+        else line
+        for line in original
+    )
+
+    ordered: list[UtilityAuditLine] = []
+    emitted_ids: set[str] = set()
+    pending = list(canonical)
+    while pending:
+        for index, line in enumerate(pending):
+            if all(root_id in emitted_ids for root_id in root_cause_ids_for(line)):
+                ready = pending.pop(index)
+                ordered.append(ready)
+                emitted_ids.add(ready.id)
+                break
+        else:
+            # Leave malformed missing/cyclic dependencies for result validation to
+            # reject with its controlled schema error.
+            ordered.extend(pending)
+            break
+    return tuple(ordered)
+
+
 class ProviderReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -459,6 +498,16 @@ class UtilityAuditResult(BaseModel):
             if missing:
                 raise ValueError(
                     f"root cause dependency references missing audit line: {missing[0]}"
+                )
+            later_roots = tuple(
+                root_id
+                for root_id in root_ids
+                if line_order[root_id] >= line_order[line.id]
+            )
+            if later_roots:
+                raise ValueError(
+                    "root cause dependency must appear before the dependent "
+                    f"audit line: {later_roots[0]}"
                 )
             expected_order = tuple(
                 sorted(root_ids, key=line_order.__getitem__)

@@ -25,6 +25,7 @@ from .utility_models import (
     UtilityAuditResult,
     UtilityCharge,
     UtilityDocument,
+    order_audit_lines_by_dependencies,
     ordered_root_cause_ids,
     root_cause_ids_for,
     root_cause_update,
@@ -1479,7 +1480,7 @@ def reconcile_document(document: UtilityDocument) -> UtilityAuditResult:
         if any(line.expected_amount is not None for line in lines)
         else "evidence_extracted"
     )
-    line_tuple = tuple(lines)
+    line_tuple = order_audit_lines_by_dependencies(lines)
     discrepancy_total = sum_exact(
         tuple(
             abs_exact(line.delta)
