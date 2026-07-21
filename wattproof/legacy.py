@@ -3,14 +3,24 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import cast
 
-from .models import BillExtraction, ChargeLine, DateFact, DecimalFact, EvidenceBase, TextFact
+from .models import (
+    BillExtraction,
+    ChargeLine,
+    DateFact,
+    DecimalFact,
+    EvidenceBase,
+    IntegerFact,
+    TextFact,
+)
 from .utility_models import (
     CalculationSpec,
     DateFactV2,
     DecimalFactV2,
     EvidenceRef,
     FactStatus,
+    IntegerFactV2,
     MoneyFactV2,
+    NamedFactV2,
     ServiceSection,
     TextFactV2,
     UtilityCharge,
@@ -40,10 +50,7 @@ def _status(fact: EvidenceBase) -> FactStatus:
 
 
 def _original_value(fact: EvidenceBase) -> str | None:
-    original_value = getattr(fact, "original_value", None)
-    if original_value is None:
-        return None
-    return str(original_value)
+    return fact.original_value
 
 
 def _text_fact(fact: TextFact) -> TextFactV2:
@@ -66,6 +73,16 @@ def _date_fact(fact: DateFact) -> DateFactV2:
 
 def _decimal_fact(fact: DecimalFact) -> DecimalFactV2:
     return DecimalFactV2(
+        value=fact.value,
+        unit=fact.unit,
+        status=_status(fact),
+        evidence=_evidence(fact),
+        original_value=_original_value(fact),
+    )
+
+
+def _integer_fact(fact: IntegerFact) -> IntegerFactV2:
+    return IntegerFactV2(
         value=fact.value,
         unit=fact.unit,
         status=_status(fact),
@@ -97,11 +114,36 @@ def _charge(line: ChargeLine) -> UtilityCharge:
     return UtilityCharge(
         id=line.id,
         label=line.label,
+        period=line.period,
         quantity=_decimal_fact(line.quantity) if line.quantity is not None else None,
         rate=_decimal_fact(line.rate) if line.rate is not None else None,
         amount=_money_fact(line.billed_amount),
         calculation=_calculation(line),
     )
+
+
+def _supplemental_facts(bill: BillExtraction) -> tuple[NamedFactV2, ...]:
+    facts = [
+        NamedFactV2(id="billing_days", fact=_integer_fact(bill.billing_days)),
+        NamedFactV2(id="peak_usage", fact=_decimal_fact(bill.peak_usage)),
+        NamedFactV2(id="off_peak_usage", fact=_decimal_fact(bill.off_peak_usage)),
+        NamedFactV2(id="baseline_territory", fact=_text_fact(bill.baseline_territory)),
+        NamedFactV2(id="heat_source", fact=_text_fact(bill.heat_source)),
+        NamedFactV2(
+            id="baseline_allowance", fact=_decimal_fact(bill.baseline_allowance)
+        ),
+        NamedFactV2(
+            id="daily_baseline_quantity",
+            fact=_decimal_fact(bill.daily_baseline_quantity),
+        ),
+    ]
+    if bill.meter_read_status is not None:
+        facts.append(
+            NamedFactV2(
+                id="meter_read_status", fact=_text_fact(bill.meter_read_status)
+            )
+        )
+    return tuple(facts)
 
 
 def _evidence_facts(bill: BillExtraction) -> tuple[EvidenceBase, ...]:
@@ -156,6 +198,7 @@ def translate_legacy_bill(bill: BillExtraction) -> UtilityDocument:
             service_start=_date_fact(bill.service_start),
             service_end=_date_fact(bill.service_end),
             usage=_decimal_fact(bill.total_usage),
+            supplemental_facts=_supplemental_facts(bill),
             charges=delivery_charges,
             subtotal=_money_fact(bill.delivery_subtotal),
         ),

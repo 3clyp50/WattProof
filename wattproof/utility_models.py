@@ -61,6 +61,11 @@ class DateFactV2(FactBaseV2):
     value: date
 
 
+class IntegerFactV2(FactBaseV2):
+    value: int
+    unit: str | None = None
+
+
 class DecimalFactV2(FactBaseV2):
     value: Decimal
     unit: str = Field(min_length=1)
@@ -69,6 +74,13 @@ class DecimalFactV2(FactBaseV2):
 class MoneyFactV2(FactBaseV2):
     value: Decimal
     currency: str = Field(pattern=r"^[A-Z]{3}$")
+
+
+class NamedFactV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=r"^[a-z0-9_]+$")
+    fact: TextFactV2 | IntegerFactV2 | DecimalFactV2
 
 
 class CalculationSpec(BaseModel):
@@ -91,6 +103,7 @@ class UtilityCharge(BaseModel):
 
     id: str = Field(pattern=r"^[a-z0-9_]+$")
     label: str = Field(min_length=1)
+    period: str | None = None
     quantity: DecimalFactV2 | None = None
     rate: DecimalFactV2 | None = None
     amount: MoneyFactV2
@@ -129,6 +142,7 @@ class ServiceSection(BaseModel):
     usage: DecimalFactV2 | None = None
     meter: MeterCheck | None = None
     conversions: tuple[ConversionCheck, ...] = ()
+    supplemental_facts: tuple[NamedFactV2, ...] = ()
     charges: tuple[UtilityCharge, ...] = Field(min_length=1)
     subtotal: MoneyFactV2
 

@@ -8,10 +8,13 @@ from pydantic import ValidationError
 
 from wattproof.fixtures import load_sample
 from wattproof.legacy import translate_legacy_bill
+from wattproof.models import BillExtraction, EvidenceBase
 from wattproof.utility_models import (
     CalculationSpec,
     DateFactV2,
     EvidenceRef,
+    FactBaseV2,
+    IntegerFactV2,
     MoneyFactV2,
     ServiceSection,
     TextFactV2,
@@ -110,22 +113,112 @@ def test_legacy_translation_preserves_charge_math_and_evidence() -> None:
     )
 
 
-def test_legacy_translation_preserves_user_correction_provenance_if_present() -> None:
+def assert_legacy_fact_preserved(
+    source: EvidenceBase, translated: FactBaseV2
+) -> None:
+    assert getattr(translated, "value") == getattr(source, "value")
+    assert getattr(translated, "unit", None) == getattr(source, "unit", None)
+    assert translated.status == source.status
+    assert translated.original_value == source.original_value
+    assert translated.evidence.page == source.source_page
+    assert translated.evidence.text == source.source_text
+    assert translated.evidence.confidence == Decimal(str(source.confidence))
+    assert translated.evidence.provenance == "rendered_page"
+
+
+def test_legacy_translation_preserves_all_material_facts_and_charge_periods() -> None:
     legacy = load_sample("authentic")
-    corrected_provider = legacy.delivery_provider.model_copy(
-        update={
-            "value": "PG&E",
-            "status": "user_corrected",
-            "original_value": legacy.delivery_provider.value,
-        }
+    translated = translate_legacy_bill(legacy)
+    delivery = translated.sections[0]
+    translated_facts = {
+        named_fact.id: named_fact.fact for named_fact in delivery.supplemental_facts
+    }
+    legacy_facts = {
+        "billing_days": legacy.billing_days,
+        "peak_usage": legacy.peak_usage,
+        "off_peak_usage": legacy.off_peak_usage,
+        "baseline_territory": legacy.baseline_territory,
+        "heat_source": legacy.heat_source,
+        "baseline_allowance": legacy.baseline_allowance,
+        "daily_baseline_quantity": legacy.daily_baseline_quantity,
+    }
+
+    assert translated_facts.keys() == legacy_facts.keys()
+    assert isinstance(translated_facts["billing_days"], IntegerFactV2)
+    for fact_id, source in legacy_facts.items():
+        assert_legacy_fact_preserved(source, translated_facts[fact_id])
+
+    translated_periods = {
+        charge.id: charge.period
+        for section in translated.sections
+        for charge in section.charges
+    }
+    assert translated_periods == {line.id: line.period for line in legacy.charges}
+
+
+def test_legacy_translation_preserves_meter_read_status_when_present() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload["meter_read_status"] = {
+        **payload["heat_source"],
+        "value": "Estimated read",
+        "source_text": "Meter read status: Estimated",
+    }
+    legacy = BillExtraction.model_validate(payload)
+
+    translated = translate_legacy_bill(legacy)
+    translated_facts = {
+        named_fact.id: named_fact.fact
+        for named_fact in translated.sections[0].supplemental_facts
+    }
+
+    assert legacy.meter_read_status is not None
+    assert_legacy_fact_preserved(
+        legacy.meter_read_status, translated_facts["meter_read_status"]
     )
-    corrected_bill = legacy.model_copy(update={"delivery_provider": corrected_provider})
+
+
+def test_legacy_translation_preserves_user_correction_provenance_if_present() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    original_value = payload["delivery_provider"]["value"]
+    payload["delivery_provider"].update(
+        value="PG&E",
+        status="user_corrected",
+        original_value=original_value,
+    )
+    corrected_bill = BillExtraction.model_validate(payload)
 
     translated = translate_legacy_bill(corrected_bill)
+    revalidated = UtilityDocument.model_validate_json(translated.model_dump_json())
+    provider = revalidated.sections[0].provider
 
-    assert translated.sections[0].provider.status == "user_corrected"
-    assert translated.sections[0].provider.value == "PG&E"
-    assert translated.sections[0].provider.original_value == legacy.delivery_provider.value
+    assert provider.status == "user_corrected"
+    assert provider.value == "PG&E"
+    assert provider.original_value == original_value
+    assert provider.evidence.page == corrected_bill.delivery_provider.source_page
+    assert provider.evidence.text == corrected_bill.delivery_provider.source_text
+    assert provider.evidence.confidence == Decimal(
+        str(corrected_bill.delivery_provider.confidence)
+    )
+
+
+def test_legacy_user_correction_requires_original_value() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload["delivery_provider"]["status"] = "user_corrected"
+
+    with pytest.raises(ValidationError, match="original_value"):
+        BillExtraction.model_validate(payload)
+
+
+@pytest.mark.parametrize("status", ["printed", "inferred"])
+def test_legacy_non_corrected_fact_rejects_original_value(status: str) -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload["delivery_provider"].update(
+        status=status,
+        original_value="Original Utility",
+    )
+
+    with pytest.raises(ValidationError, match="original_value"):
+        BillExtraction.model_validate(payload)
 
 
 def test_document_rejects_duplicate_charge_ids() -> None:
@@ -139,6 +232,16 @@ def test_document_rejects_duplicate_charge_ids() -> None:
     with pytest.raises(ValidationError, match="charge IDs must be unique"):
         UtilityDocument.model_validate(
             bill.model_copy(update={"sections": (changed, bill.sections[1])}).model_dump()
+        )
+
+
+def test_document_rejects_duplicate_section_ids() -> None:
+    bill = translate_legacy_bill(load_sample("authentic"))
+    duplicate = bill.sections[1].model_copy(update={"id": bill.sections[0].id})
+
+    with pytest.raises(ValidationError, match="section IDs must be unique"):
+        UtilityDocument.model_validate(
+            bill.model_copy(update={"sections": (bill.sections[0], duplicate)}).model_dump()
         )
 
 

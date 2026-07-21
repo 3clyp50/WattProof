@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-EvidenceStatus = Literal["printed", "inferred"]
+EvidenceStatus = Literal["printed", "inferred", "user_corrected"]
 AuditStatus = Literal[
     "verified", "discrepancy", "estimated", "cannot_verify", "needs_review"
 ]
@@ -19,6 +19,17 @@ class EvidenceBase(BaseModel):
     source_text: str = Field(min_length=1)
     confidence: float = Field(ge=0, le=1)
     status: EvidenceStatus
+    original_value: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @model_validator(mode="after")
+    def validate_correction(self) -> Self:
+        if self.status == "user_corrected" and self.original_value is None:
+            raise ValueError("user-corrected facts require original_value")
+        if self.status != "user_corrected" and self.original_value is not None:
+            raise ValueError("original_value is only valid for user-corrected facts")
+        return self
 
 
 class TextFact(EvidenceBase):
