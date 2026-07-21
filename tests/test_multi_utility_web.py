@@ -31,6 +31,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_JAVASCRIPT = PROJECT_ROOT / "wattproof" / "static" / "app.js"
 REVIEW_SCREENSHOT_SPECS = {
     "multi-utility-upload-desktop.png": (1440, 1000),
+    "anchored-no-file-error-desktop.png": (1440, 1000),
     "pge-tariff-verified-desktop.png": (1440, 1000),
     "duke-internal-reconciliation-desktop.png": (1440, 1000),
     "centerpoint-gas-desktop.png": (1440, 1000),
@@ -465,6 +466,11 @@ async function main() {
       await evaluate(`window.scrollTo(0, 0); true`);
       await delay(250);
       await captureViewport("multi-utility-upload-desktop.png");
+      await evaluate(`document.querySelector('#upload-form button[type="submit"]').click(); true`);
+      await waitFor(`document.getElementById("global-message-text").textContent
+        === "Choose a PDF bill first."
+        && document.activeElement?.id === "bill-file"`);
+      await captureViewport("anchored-no-file-error-desktop.png");
       await captureSampleResult("authentic", "pge-tariff-verified-desktop.png");
       await captureSampleResult("duke", "duke-internal-reconciliation-desktop.png");
       await captureSampleResult("centerpoint", "centerpoint-gas-desktop.png");

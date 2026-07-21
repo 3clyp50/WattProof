@@ -1,12 +1,14 @@
 # Screenshot evidence
 
-These seven PNGs are direct viewport captures of the real Flask application at merged
+These eight PNGs are direct viewport captures of the real Flask application at merged
 application source commit
-`af5f2dd147872b6e484ea5c72690df6d57060210` (`Merge origin/main into provider-neutral
-multi-utility`). No production UI or backend file differed from that commit during
-capture. The complete set therefore shows the merged WattProof logo and accessibility
-contract alongside the provider-neutral multi-utility flow; it is review evidence, not
-a claim of WAVE or other third-party certification.
+`2031700c1d9ca12ad39caeb7f8343cbce410bd4d` (`Merge current main into
+provider-neutral audit`). No production UI or backend file differed from that commit
+during capture. The evidence-only browser harness adds the anchored validation frame
+to the exact artifact set. The complete set therefore shows the merged WattProof logo,
+Codex-aware disconnected header, and accessibility contract alongside the
+provider-neutral multi-utility flow; it is review evidence, not a claim of WAVE or
+other third-party certification.
 
 Every image was produced by Chromium from the real Flask application on a loopback
 test server after activating the visible application controls. The manual procedure
@@ -18,17 +20,24 @@ were used; no upload, account identity, private bill, or personal data appears.
 
 | File | Exact viewport | Public sample(s) | Navigation and frame position | Visible verification level | Capture source | SHA-256 | Real-app and no-PII confirmation |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `multi-utility-upload-desktop.png` | `1440 × 1000` | None selected; all public fixture controls visible | Open `/`; keep Upload at `scrollY=0` | N/A — Upload | `af5f2dd147872b6e484ea5c72690df6d57060210` | `9b97956c7b7497240cba3aab061f94e941857d5f072144ccf2f5a44e14d971b6` | Real Flask/Chrome viewport; merged logo and public controls only; no PII |
-| `pge-tariff-verified-desktop.png` | `1440 × 1000` | Public anonymized PG&E/3CE authentic fixture | Upload → **Audit authentic sample** → Review → **Confirm & run checks**; capture the top of Verify | **Tariff verified** — partial, period-bound coverage only | `af5f2dd147872b6e484ea5c72690df6d57060210` | `963a3610debc00fb91f32f79cc7c59321ef451c815d3f13327be646f251fab49` | Real Flask/Chrome clicks; cited tariff lines and UUT printed-math limitation verified in the same browser run; no PII |
-| `duke-internal-reconciliation-desktop.png` | `1440 × 1000` | Public illustrative Duke electricity fixture | Upload → **Duke Electric** → Review → **Confirm & run checks**; capture the top of Verify | **Internally reconciled** only | `af5f2dd147872b6e484ea5c72690df6d57060210` | `bfaeefdba41da32bb7edcf4fd15938b87f95dcc4f023d527d276817d4039af27` | Real Flask/Chrome clicks; printed or explicitly labeled inferred operands only; no tariff claim; no PII |
-| `centerpoint-gas-desktop.png` | `1440 × 1000` | Public CenterPoint gas fixture | Upload → **CenterPoint Gas** → Review → **Confirm & run checks**; capture the top of Verify | **Internally reconciled** only | `af5f2dd147872b6e484ea5c72690df6d57060210` | `27270e9689f0ee9f70316b987e0ba404f1778d1907d00a25ad61392972f8476c` | Real Flask/Chrome clicks; rendered public values only; excluded hidden text-layer values remain absent; no PII |
-| `household-bundle-desktop.png` | `1440 × 1000` | Duke → CenterPoint → Bloomington | Complete Duke → **Add another bill** → complete CenterPoint → **Add another bill** → complete Bloomington → **Finish household review**; capture Household at the top | **Internally reconciled** on all three retained cards | `af5f2dd147872b6e484ea5c72690df6d57060210` | `4188dcc663394b6da4bb4df32ec51778669efe4acf124ac6a4b55cf336998527` | Real sequential Flask/Chrome flow; three minimized public summaries; no PII |
-| `water-review-mobile.png` | `390 × 844` | Public Bloomington water/city-services fixture | Upload → **Bloomington Water**; wait for Review, return to a settled `scrollY=0`, and capture | N/A — Review | `af5f2dd147872b6e484ea5c72690df6d57060210` | `e6a617832438a5195d1d60e7855cf002e2c37f98a754df6d2ec5753f9b9d371c` | Real responsive Flask/Chrome viewport; public raster fixture; no sideways overflow or PII |
-| `household-result-mobile.png` | `390 × 844` | Duke → CenterPoint → Bloomington | Repeat the sequential household flow; after the responsive layout settles, align the first Duke card with `scrollIntoView({block: "start"})` and scroll back 12 px | **Internally reconciled** visibly shown on Duke and CenterPoint cards | `af5f2dd147872b6e484ea5c72690df6d57060210` | `40c9fc37228206e7b2c103b862bc83ed7a1306abd007c5b3e679d087d289905d` | Real responsive Flask/Chrome viewport; public minimized summaries; no sideways overflow or PII |
+| `multi-utility-upload-desktop.png` | `1440 × 1000` | None selected; all public fixture controls visible | Open `/`; keep Upload at `scrollY=0` | N/A — Upload | `2031700c1d9ca12ad39caeb7f8343cbce410bd4d` | `752297eb49aa50a9b275c778841aad9bd3e02c744c42274e54351f9c99d1c809` | Real Flask/Chrome viewport; disconnected Codex header and public controls only; no PII |
+| `anchored-no-file-error-desktop.png` | `1440 × 1000` | None selected | Open `/` → **Extract visible bill facts** without choosing a file; capture the settled source-anchored callout | N/A — local validation | `2031700c1d9ca12ad39caeb7f8343cbce410bd4d` | `1362facd925387feb6a5901ca78cf94eec29da143279929b4004093cf60d9ee1` | Real Flask/Chrome click; callout remains anchored to the file target and the file input receives invalid/focus semantics; no PII |
+| `pge-tariff-verified-desktop.png` | `1440 × 1000` | Public anonymized PG&E/3CE authentic fixture | Upload → **Audit authentic sample** → Review → **Confirm & run checks**; capture the top of Verify | **Tariff verified** — partial, period-bound coverage only | `2031700c1d9ca12ad39caeb7f8343cbce410bd4d` | `504b745d11def280d651e1598a99d0b2b388c1a62503b2a835f957ce745a4b94` | Real Flask/Chrome clicks; cited tariff lines and UUT printed-math limitation verified in the same browser run; no PII |
+| `duke-internal-reconciliation-desktop.png` | `1440 × 1000` | Public illustrative Duke electricity fixture | Upload → **Duke Electric** → Review → **Confirm & run checks**; capture the top of Verify | **Internally reconciled** only | `2031700c1d9ca12ad39caeb7f8343cbce410bd4d` | `13c7a779cfa658ea4b00df080372e638cb7ab8bf0dce6c50c404b7f88a0a2d12` | Real Flask/Chrome clicks; printed or explicitly labeled inferred operands only; no tariff claim; no PII |
+| `centerpoint-gas-desktop.png` | `1440 × 1000` | Public CenterPoint gas fixture | Upload → **CenterPoint Gas** → Review → **Confirm & run checks**; capture the top of Verify | **Internally reconciled** only | `2031700c1d9ca12ad39caeb7f8343cbce410bd4d` | `252ab4413ab621a86d1d2a0502432aa29c6460bd35b4055588ae869def359463` | Real Flask/Chrome clicks; rendered public values only; excluded hidden text-layer values remain absent; no PII |
+| `household-bundle-desktop.png` | `1440 × 1000` | Duke → CenterPoint → Bloomington | Complete Duke → **Add another bill** → complete CenterPoint → **Add another bill** → complete Bloomington → **Finish household review**; capture Household at the top | **Internally reconciled** on all three retained cards | `2031700c1d9ca12ad39caeb7f8343cbce410bd4d` | `bf8137731c95d0d7a5e5881cda3e130ca659c8f49762794752d867783fc16202` | Real sequential Flask/in-app Chrome flow; three minimized public summaries and the disconnected Codex header are visibly complete; no PII |
+| `water-review-mobile.png` | `390 × 844` | Public Bloomington water/city-services fixture | Upload → **Bloomington Water**; wait for Review, return to a settled `scrollY=0`, and capture | N/A — Review | `2031700c1d9ca12ad39caeb7f8343cbce410bd4d` | `63783c6001c53e858e5e16d32326c0a6a35ba25a601cb86063591a75afb97221` | Real responsive Flask/Chrome viewport; public raster fixture and responsive Codex header; no sideways overflow or PII |
+| `household-result-mobile.png` | `390 × 844` | Duke → CenterPoint → Bloomington | Repeat the sequential household flow; after the responsive layout settles, align the first Duke card with `scrollIntoView({block: "start"})` and scroll back 12 px | **Internally reconciled** visibly shown on Duke and CenterPoint cards | `2031700c1d9ca12ad39caeb7f8343cbce410bd4d` | `5c04158b986616dfefaf522833f61eca328d1245730f02c8acb5dd07b60af37a` | Real responsive Flask/Chrome viewport; public minimized summaries; no sideways overflow or PII |
 
 The mobile household capture is intentionally a scrolled viewport, not a crop: its
 native PNG remains exactly `390 × 844` and shows complete result cards with their
 verification badges.
+
+During the bounded recapture pass, headless Chromium intermittently omitted only the
+Codex header's glyph layer while its DOM, dimensions, and computed styles remained
+correct. The final household desktop frame was therefore recaptured through the same
+real in-app Chromium session, source commit, viewport, and exact visible sequence; no
+page state or pixels were edited after capture.
 
 ## Reproduce the captures
 
@@ -57,8 +66,8 @@ match the recorded source commit, then reproduce the exact PNG set and browser
 regression together:
 
 ```bash
-git diff --exit-code af5f2dd147872b6e484ea5c72690df6d57060210 -- \
-  wattproof run.py tests/test_multi_utility_web.py
+git diff --exit-code 2031700c1d9ca12ad39caeb7f8343cbce410bd4d -- \
+  wattproof run.py
 WATTPROOF_REAL_BROWSER=1 WATTPROOF_SCREENSHOT_DIR="$PWD/docs/screenshots" \
   .venv/bin/python -m pytest \
   tests/test_multi_utility_web.py::test_real_chromium_sample_review_and_audit_flows -q
@@ -68,7 +77,7 @@ Set `AGENT_BROWSER_BIN` only if Chrome/Chromium/Edge is not discovered automatic
 When `WATTPROOF_SCREENSHOT_DIR` is present, the harness uses Chromium's DevTools
 `Page.captureScreenshot` with `format: "png"` after fonts and two animation frames
 settle. Chrome writes only to a temporary sibling staging directory, never directly
-to these tracked PNG paths. The harness requires the exact seven filenames, validates
+to these tracked PNG paths. The harness requires the exact eight filenames, validates
 every PNG signature, byte size, and viewport dimensions, and only then publishes each
 file with atomic replacement. Incomplete or interrupted captures publish nothing;
 publication errors roll back prior replacements; staging is always removed. The
@@ -78,10 +87,13 @@ The smoke test verifies the same five sample paths, the exact sequential househo
 order, step-heading focus, the `1440 × 1000` desktop capture, the `390 × 844` mobile
 contract, no sideways overflow, no page errors, and no external browser requests.
 
-The post-capture interactive pass also exercised forward and reverse keyboard focus,
+The post-capture interactive pass also exercised step-heading and source-error focus,
 the loading button's `aria-busy` lifecycle, the polite copy confirmation, and reduced-
-motion media emulation before resetting the browser preference. The corresponding
-static shell and script contracts can be rerun with:
+motion media emulation before resetting the browser preference. The disconnected Codex
+header was checked throughout the flow. Its modal was exercised with a session-only
+intercepted `TEST-ONLY` response so no live device code, account, token, browser storage,
+or external OpenAI navigation was involved; the modal is intentionally not a screenshot
+artifact. The corresponding static shell and script contracts can be rerun with:
 
 ```bash
 .venv/bin/python -m pytest \
@@ -116,7 +128,7 @@ for image in sorted(Path("docs/screenshots").glob("*.png")):
 PY
 ```
 
-Expected: five desktop files at `1440x1000`, two mobile files at `390x844`, and every
+Expected: six desktop files at `1440x1000`, two mobile files at `390x844`, and every
 file larger than 10,000 bytes.
 
 Compare the generated checksums with the manifest:
