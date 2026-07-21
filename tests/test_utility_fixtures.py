@@ -290,13 +290,8 @@ def test_bloomington_fixture_reconciles_each_visible_service_section() -> None:
         kind="quantity_times_rate"
     )
     sales_tax = charges["sales_tax"]
-    assert sales_tax.rate is not None
-    assert sales_tax.rate.value == Decimal("0.07")
-    assert sales_tax.rate.unit == "fraction"
-    assert sales_tax.calculation == CalculationSpec(
-        kind="percent_of_charges",
-        charge_ids=("water_usage", "water_service", "fire_protection"),
-    )
+    assert sales_tax.rate is None
+    assert sales_tax.calculation is None
     assert [section.subtotal.value for section in document.sections] == [
         Decimal("19.53"),
         Decimal("23.47"),
@@ -310,7 +305,10 @@ def test_bloomington_fixture_reconciles_each_visible_service_section() -> None:
     lines = {line.id: line for line in result.lines}
     assert {f"charge::{charge_id}" for charge_id in billed_amounts} <= lines.keys()
     assert lines["charge::water_usage"].expected_amount == Decimal("7.46")
-    assert lines["charge::sales_tax"].expected_amount == Decimal("1.28")
+    assert lines["charge::sales_tax"].billed_amount == Decimal("1.28")
+    assert lines["charge::sales_tax"].expected_amount is None
+    assert lines["charge::sales_tax"].delta is None
+    assert lines["charge::sales_tax"].status == "cannot_verify"
     assert lines["charge::wastewater_usage"].expected_amount == Decimal("15.52")
     for fixed_id in (
         "water_service",

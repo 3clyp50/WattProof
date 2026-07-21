@@ -516,15 +516,12 @@ def _bloomington_document() -> UtilityDocument:
         1,
         "Fire Protection $2.93",
     )
-    sales_tax = UtilityCharge(
-        id="sales_tax",
-        label="Sales Tax",
-        rate=_decimal_fact("0.07", "fraction", 1, "Sales Tax $1.28"),
-        amount=_money_fact("1.28", 1, "Sales Tax $1.28"),
-        calculation=CalculationSpec(
-            kind="percent_of_charges",
-            charge_ids=(water_usage.id, water_service.id, fire_protection.id),
-        ),
+    sales_tax = _fixed_charge(
+        "sales_tax",
+        "Sales Tax",
+        "1.28",
+        1,
+        "Sales Tax $1.28",
     )
     water = ServiceSection(
         id="water",
