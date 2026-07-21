@@ -247,6 +247,7 @@ def test_excess_page_count_is_rejected(
 ) -> None:
     file = tmp_path / "too-many-pages.pdf"
     file.write_bytes(b"%PDF-placeholder")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     def page_count(_path: Path) -> int:
         return MAX_PAGES + 1
@@ -325,6 +326,25 @@ def test_web_upload_uses_known_public_fixture_without_api_key() -> None:
 
     assert response.status_code == 200
     assert response.get_json()["extraction"]["delivery_schedule"]["value"] == "E-TOU-C"
+
+
+def test_web_upload_reports_temporary_provider_neutral_routing_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "wattproof.app.extract_pdf",
+        lambda _path: load_utility_sample("duke"),
+    )
+    response = create_app().test_client().post(
+        "/api/extract",
+        data={"bill": (BytesIO(b"%PDF-placeholder"), "duke.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 422
+    payload = response.get_json()
+    assert "provider-neutral CLI audit routing is not available yet" in payload["error"]
+    assert "extraction" not in payload
 
 
 def test_web_validation_returns_reviewable_field() -> None:

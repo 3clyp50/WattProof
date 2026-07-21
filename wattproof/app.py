@@ -19,6 +19,7 @@ from .extract import (
 from .fixtures import PROJECT_ROOT, load_sample
 from .models import BillExtraction
 from .tariffs import SourceIntegrityError
+from .utility_models import UtilityDocument
 
 
 def _json_model(model: BaseModel) -> dict[str, Any]:
@@ -70,6 +71,11 @@ def create_app() -> Flask:
             temporary.write(data)
             temporary.flush()
             extraction = extract_pdf(Path(temporary.name))
+        if isinstance(extraction, UtilityDocument):
+            raise UnsupportedDocumentError(
+                "This utility document was extracted, but provider-neutral CLI audit "
+                "routing is not available yet."
+            )
         return jsonify(extraction=_json_model(extraction))
 
     @app.post("/api/audit")
