@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="WattProof checks residential electricity bill math against period-matched published tariffs.">
-    <title>WattProof — Check the math on your power bill</title>
+    <meta name="description" content="WattProof reviews utility-bill evidence, reconciles printed math, and verifies supported published tariffs without overstating coverage.">
+    <title>WattProof — Check the math on your utility bill</title>
     <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
@@ -16,17 +16,17 @@
         <span class="brand-mark" aria-hidden="true"><span></span></span>
         <span>WattProof</span>
       </a>
-      <p class="header-proof"><span></span> Local sample mode · deterministic math</p>
+      <p class="header-proof"><span></span> Public sample mode · deterministic math</p>
     </header>
 
     <main id="workspace">
-      <nav class="stepper" aria-label="Bill audit progress">
+      <nav class="stepper" aria-label="Utility bill review progress">
         <ol>
           <li class="active" data-step-indicator="1" aria-current="step"><span>1</span><b>Upload</b></li>
           <li data-step-indicator="2"><span>2</span><b>Review</b></li>
-          <li data-step-indicator="3"><span>3</span><b>Audit</b></li>
-          <li data-step-indicator="4"><span>4</span><b>Compare</b></li>
-          <li data-step-indicator="5"><span>5</span><b>Act</b></li>
+          <li data-step-indicator="3"><span>3</span><b>Verify</b></li>
+          <li data-step-indicator="4"><span>4</span><b>Household</b></li>
+          <li data-step-indicator="5"><span>5</span><b>Next steps</b></li>
         </ol>
       </nav>
 
@@ -35,114 +35,120 @@
 
       <section class="step-panel upload-panel" data-step="1" aria-labelledby="upload-title">
         <div class="hero-copy">
-          <p class="eyebrow">A receipt checker for electricity</p>
-          <h1 id="upload-title">Your power bill has a formula.<br><em>WattProof shows its work.</em></h1>
-          <p class="lede">Review what was read, recompute supported charges against the tariff that actually governed the bill, and leave with a calm evidence-backed request.</p>
+          <p class="eyebrow">A receipt checker for utility bills</p>
+          <h1 id="upload-title">Your utility bill has a formula.<br><em>WattProof shows its work.</em></h1>
+          <p class="lede">Review what was read, reproduce supported meter, unit, rate, tax, and subtotal math, and see exactly where published-tariff coverage begins and ends.</p>
           <ul class="trust-list">
-            <li><span>01</span><strong>Evidence first</strong><small>Every material fact keeps its page and printed text.</small></li>
-            <li><span>02</span><strong>Code calculates</strong><small>GPT-5.6 may read; Decimal arithmetic handles money.</small></li>
-            <li><span>03</span><strong>No invented savings</strong><small>Missing interval data becomes an honest limitation.</small></li>
+            <li><span>01</span><strong>Evidence first</strong><small>Every material fact keeps its rendered page and printed text.</small></li>
+            <li><span>02</span><strong>Code calculates</strong><small>Structured reading may extract; Decimal arithmetic handles money.</small></li>
+            <li><span>03</span><strong>No invented savings</strong><small>Unsupported rates and comparisons remain explicit limitations.</small></li>
           </ul>
         </div>
 
         <div class="upload-card">
-          <div class="card-kicker">Start an audit</div>
-          <h2>Try the verified public sample</h2>
-          <p>PG&E delivery + 3CE generation · E-TOU-C · Dec 2022</p>
+          <div class="card-kicker">Start a review</div>
+          <h2>Begin with a public bill</h2>
+          <p>PG&amp;E delivery + 3CE generation · E-TOU-C · Dec 2022</p>
           <button class="button primary wide" id="authentic-sample" type="button">
-            Audit authentic sample <span aria-hidden="true">→</span>
+            <b>Audit</b> authentic sample <span aria-hidden="true">→</span>
           </button>
           <button class="button secondary wide" id="synthetic-sample" type="button">
             Detect a labeled $5 synthetic error
           </button>
 
-          <div class="or"><span>or use a native PDF</span></div>
+          <div class="sample-divider"><span>More public samples</span></div>
+          <div class="utility-samples" aria-label="Provider-neutral public samples">
+            <button class="sample-button" id="duke-sample" type="button"><strong>Duke Electric</strong><small>kWh · internal reconciliation</small></button>
+            <button class="sample-button" id="centerpoint-sample" type="button"><strong>CenterPoint Gas</strong><small>CCF + therm · internal reconciliation</small></button>
+            <button class="sample-button" id="bloomington-sample" type="button"><strong>Bloomington Water</strong><small>Water + city services</small></button>
+          </div>
+
+          <div class="or"><span>or upload a PDF</span></div>
           <form id="upload-form" enctype="multipart/form-data">
             <label class="file-target" for="bill-file">
               <span class="file-icon" aria-hidden="true">PDF</span>
-              <strong id="file-label">Choose a PG&E bill</strong>
-              <small>Native PDF · up to 10 MB · 20 pages</small>
+              <strong id="file-label">Choose a utility bill</strong>
+              <small>PDF · up to 10 MB · 20 pages</small>
               <input id="bill-file" name="bill" type="file" accept="application/pdf,.pdf">
             </label>
-            <button class="button dark wide" type="submit">Extract bill facts</button>
+            <button class="button dark wide" type="submit">Extract visible bill facts</button>
           </form>
-          <p class="privacy"><strong>Privacy:</strong> uploads are processed in a temporary file and deleted immediately. Unknown native PDFs use GPT-5.6 only when an API key is configured; API storage is disabled.</p>
+          <p class="privacy"><strong>How reading works:</strong> known public fixtures run deterministically and keyless. GPT-5.6 may read other PDFs only when an operator configures the structured visual reader. Uploads use a temporary file that is deleted after processing.</p>
         </div>
       </section>
 
       <section class="step-panel" data-step="2" aria-labelledby="review-title" hidden>
         <div class="section-heading">
           <div><p class="eyebrow">Before conclusions</p><h1 id="review-title" tabindex="-1">Review what WattProof read</h1></div>
-          <p>Printed facts and inferred metadata stay visibly distinct. Correct anything before code runs the tariff math.</p>
+          <p>Printed and inferred facts stay visibly distinct. Each service keeps its own provider, units, period, charges, and rendered-page evidence.</p>
         </div>
         <div class="review-layout">
           <div class="document-card">
             <div class="document-header"><strong>Source document</strong><span id="document-mode">Public sample</span></div>
-            <iframe id="pdf-preview" title="Electricity bill preview" hidden></iframe>
+            <iframe id="pdf-preview" title="Utility bill preview" hidden></iframe>
             <div id="synthetic-preview" class="synthetic-preview" hidden>
-              <span aria-hidden="true">±</span>
-              <h3>Structured synthetic fixture</h3>
-              <p>The authentic public PDF is unchanged. Only the extracted peak-charge value is altered for this detection test.</p>
+              <span id="document-placeholder-mark" aria-hidden="true">±</span>
+              <h3 id="document-placeholder-title">Structured synthetic fixture</h3>
+              <p id="document-placeholder-copy">The authentic public PDF is unchanged. Only the extracted peak-charge value is altered for this detection test.</p>
             </div>
           </div>
           <form id="review-form" class="facts-card">
-            <div class="facts-header"><div><span class="card-kicker">Evidence ledger</span><h2>Material bill facts</h2></div><span id="fact-count" class="fact-count"></span></div>
-            <div id="fact-fields" class="fact-fields"></div>
-            <div class="charge-review">
-              <h3>Printed charge lines</h3>
-              <div class="table-scroll"><table><thead><tr><th>Charge</th><th>Usage</th><th>Rate</th><th>Billed</th><th>Evidence</th></tr></thead><tbody id="charge-fields"></tbody></table></div>
-            </div>
-            <div class="form-actions"><button class="button text" type="button" data-back="1">← Start over</button><button class="button primary" type="submit">Confirm &amp; run audit <span aria-hidden="true">→</span></button></div>
+            <div class="facts-header"><div><span class="card-kicker">Evidence ledger</span><h2>Facts by service</h2></div><span id="fact-count" class="fact-count"></span></div>
+            <div id="service-review-sections" class="service-review-sections"></div>
+            <div class="form-actions"><button class="button text" type="button" data-back="1">← Start over</button><button class="button primary" type="submit">Confirm &amp; run checks <span aria-hidden="true">→</span></button></div>
           </form>
         </div>
       </section>
 
-      <section class="step-panel" data-step="3" aria-labelledby="audit-title" hidden>
+      <section class="step-panel" data-step="3" aria-labelledby="verify-title" hidden>
         <div class="section-heading result-heading">
-          <div><p class="eyebrow">Deterministic result</p><h1 id="audit-title" tabindex="-1">Audit result</h1></div>
-          <p>Expected amounts use archived, hash-verified rate snapshots. Unsupported components remain visible and unclaimed.</p>
+          <div><p class="eyebrow">Evidence-bound result</p><h1 id="verify-title" tabindex="-1">Verification result</h1></div>
+          <p>Internal reconciliation reproduces printed math. <b>Compare</b> plans only when an exact provider, jurisdiction, schedule, and billing-period tariff adapter applies.</p>
         </div>
+        <div id="verification-level" class="verification-level" aria-live="polite"></div>
         <div id="verdict-card" class="verdict-card"></div>
-        <div id="audit-metrics" class="metric-grid"></div>
+        <div id="service-results" class="service-results" aria-label="Service results"></div>
+        <section class="priority-card" aria-labelledby="priority-title">
+          <div class="results-header"><div><span class="card-kicker">Read first</span><h2 id="priority-title">Discrepancies and review needs</h2></div></div>
+          <div id="priority-findings"></div>
+        </section>
         <div class="results-card">
-          <div class="results-header"><div><span class="card-kicker">Calculation ledger</span><h2>Every check, line by line</h2></div><button class="button text" type="button" id="show-all-lines">Show all checks</button></div>
-          <div class="table-scroll"><table class="audit-table"><thead><tr><th>Status</th><th>Line</th><th>Billed</th><th>Expected</th><th>Delta</th><th>Trace &amp; evidence</th></tr></thead><tbody id="audit-lines"></tbody></table></div>
+          <details id="calculation-ledger">
+            <summary><span><span class="card-kicker">Calculation ledger</span><strong>Every check, line by line</strong></span><span>Expand ledger</span></summary>
+            <div class="ledger-toolbar"><button class="button text" type="button" id="show-all-lines">Show all checks</button></div>
+            <div class="table-scroll"><table class="audit-table"><thead><tr><th>Status</th><th>Line</th><th>Scope</th><th>Billed</th><th>Expected</th><th>Delta</th><th>Trace &amp; evidence</th></tr></thead><tbody id="audit-lines"></tbody></table></div>
+          </details>
         </div>
-        <div class="form-actions"><button class="button text" type="button" data-back="2">← Review facts</button><button class="button primary" type="button" data-next="4">Check plan fit <span aria-hidden="true">→</span></button></div>
+        <section id="optional-comparison" class="optional-comparison" aria-labelledby="comparison-title" hidden></section>
+        <div class="form-actions result-actions">
+          <button class="button text" type="button" data-back="2">← Review facts</button>
+          <div><button class="button secondary" type="button" id="add-another-bill">Add another bill</button><button class="button primary" type="button" id="finish-household-review">Finish household review <span aria-hidden="true">→</span></button></div>
+        </div>
       </section>
 
-      <section class="step-panel" data-step="4" aria-labelledby="compare-title" hidden>
+      <section class="step-panel" data-step="4" aria-labelledby="household-title" hidden>
         <div class="section-heading">
-          <div><p class="eyebrow">No guesswork</p><h1 id="compare-title" tabindex="-1">Can another plan be compared?</h1></div>
-          <p>A confident “not yet” is more useful than a fabricated savings number.</p>
+          <div><p class="eyebrow">Current review</p><h1 id="household-title" tabindex="-1">Household</h1></div>
+          <p>Household summaries stay only in this browser page. Persistent multi-bill state is outside this review-screen increment.</p>
         </div>
-        <div class="comparison-card">
-          <div class="insufficiency-mark" aria-hidden="true"><span>?</span></div>
-          <div><span class="status-pill cannot_verify">More data needed</span><h2 id="comparison-headline"></h2><p id="comparison-explanation"></p></div>
-          <div class="needed-data"><h3>What unlocks a real comparison</h3><ul id="comparison-data"></ul><p>Download Green Button interval data from the utility account, then compare schedules over a representative period.</p></div>
+        <div class="household-placeholder">
+          <span class="card-kicker">One completed bill</span>
+          <h2>Continue to provider-specific next steps</h2>
+          <p>The current result remains available when you go back. No account identity or document contents are stored here.</p>
         </div>
-        <div class="principle-strip"><span>WattProof principle 04</span><strong>If the evidence stops, the claim stops.</strong></div>
-        <div class="form-actions"><button class="button text" type="button" data-back="3">← Audit result</button><button class="button primary" type="button" data-next="5">Prepare review request <span aria-hidden="true">→</span></button></div>
+        <div class="form-actions"><button class="button text" type="button" data-back="3">← Verification result</button><button class="button primary" type="button" data-next="5">Review next steps <span aria-hidden="true">→</span></button></div>
       </section>
 
-      <section class="step-panel" data-step="5" aria-labelledby="action-title" hidden>
+      <section class="step-panel" data-step="5" aria-labelledby="next-steps-title" hidden>
         <div class="section-heading">
-          <div><p class="eyebrow">Evidence into action</p><h1 id="action-title" tabindex="-1">Ask for a review, not a fight</h1></div>
-          <p>The request is grounded only in audit lines above. Edit it, add account-safe details, and review every word before using it.</p>
+          <div><p class="eyebrow"><b>Act</b> on evidence</p><h1 id="next-steps-title" tabindex="-1">Provider review requests</h1></div>
+          <p>Each draft is grounded to its provider and audit lines. Review every word and add account-safe details yourself; WattProof never sends a message.</p>
         </div>
-        <div class="action-layout">
-          <div class="letter-card">
-            <label for="letter-subject">Subject</label><input id="letter-subject" type="text">
-            <label for="letter-body">Message</label><textarea id="letter-body" rows="16"></textarea>
-            <div class="letter-actions"><button id="copy-letter" class="button primary" type="button">Copy request</button><button id="download-letter" class="button secondary" type="button">Download .txt</button></div>
-            <p class="review-note"><span aria-hidden="true">!</span><strong>User review required.</strong> WattProof never sends messages or adds account details automatically.</p>
-          </div>
-          <aside class="grounding-card"><span class="card-kicker">Claim ledger</span><h2>Why this wording is safe</h2><ul><li>No accusation or invented cause</li><li>Every material statement maps to an audit line</li><li>Missing source evidence is requested, not invented</li><li>Asks the provider to confirm or correct</li></ul><div id="grounded-lines"></div></aside>
-        </div>
-        <div class="form-actions"><button class="button text" type="button" data-back="4">← Plan fit</button><button class="button dark" type="button" id="restart">Audit another bill</button></div>
+        <div id="provider-review-requests" class="provider-review-requests"></div>
+        <div class="form-actions"><button class="button text" type="button" data-back="4">← Household</button><button class="button dark" type="button" id="restart">Start over</button></div>
       </section>
     </main>
 
-    <footer><span>WattProof · PG&E-first tariff verification</span><span>GPT-5.6 maps evidence. Decimal code calculates.</span></footer>
+    <footer><span>WattProof · evidence-first utility bill review</span><span>Rendered evidence is extracted. Decimal code calculates.</span></footer>
   </body>
 </html>
