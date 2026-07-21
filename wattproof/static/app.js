@@ -9,6 +9,8 @@ const state = {
   extractionRevision: 0,
   operationToken: 0,
   activeOperation: null,
+  bundle: [],
+  currentBundleId: null,
 };
 
 const legacyFactDefinitions = [
@@ -160,6 +162,7 @@ function finishOperation(operation) {
 function replaceExtraction(extraction, mode) {
   state.extraction = extraction;
   state.audit = null;
+  state.currentBundleId = null;
   state.reviewMode = mode;
   state.extractionRevision += 1;
 }
@@ -181,9 +184,7 @@ function showStep(step) {
   banner.hidden = !(notice && step > 1);
   showMessage();
   window.scrollTo({ top: 0, behavior: "auto" });
-  if (step > 1) {
-    document.querySelector(`[data-step="${step}"] h1`)?.focus({ preventScroll: true });
-  }
+  document.querySelector(`[data-step="${step}"] h1`)?.focus({ preventScroll: true });
 }
 
 function setLoading(button, loading, label) {
@@ -492,6 +493,252 @@ function auditValue(value, unit, currency) {
   return escapeHtml(formatted);
 }
 
+function summaryNumber(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function serviceBounds(sections) {
+  const starts = sections
+    .map((section) => section.service_start?.value)
+    .filter(Boolean)
+    .sort();
+  const ends = sections
+    .map((section) => section.service_end?.value)
+    .filter(Boolean)
+    .sort();
+  return {
+    start: starts.length ? starts[0] : null,
+    end: ends.length ? ends.at(-1) : null,
+  };
+}
+
+function rootIssueCount(lines) {
+  const rootIds = new Set();
+  lines.forEach((line, index) => {
+    if (!["discrepancy", "needs_review"].includes(line.status)) return;
+    rootIds.add(String(line.root_cause_id || line.id || `issue-${index}`));
+  });
+  return rootIds.size;
+}
+
+function reviewRequestDrafts(result) {
+  if (!Array.isArray(result?.review_requests)) return [];
+  return result.review_requests.map((request) => ({
+    provider: String(request?.provider || "Provider"),
+    subject: String(request?.subject || "Utility bill review request"),
+    body: String(request?.body || ""),
+  }));
+}
+
+function summarizeCurrentBill() {
+  const extraction = state.extraction;
+  const result = state.audit;
+  if (!extraction || !result) return null;
+  const utility = isUtilityDocument(extraction);
+  const sections = utility && Array.isArray(extraction.sections)
+    ? extraction.sections
+    : [];
+  const bounds = utility
+    ? serviceBounds(sections)
+    : {
+      start: extraction.service_start?.value || null,
+      end: extraction.service_end?.value || null,
+    };
+  const providers = utility
+    ? sections.map((section) => section.provider?.value)
+    : [extraction.delivery_provider?.value, extraction.generation_provider?.value];
+  const usageSummaries = utility
+    ? sections
+      .filter((section) => section.usage)
+      .map((section) => ({
+        serviceType: String(section.service_type || "other"),
+        value: summaryNumber(section.usage.value),
+        unit: String(section.usage.unit || ""),
+      }))
+      .filter((usage) => usage.value !== null)
+    : [{
+      serviceType: "electricity",
+      value: summaryNumber(extraction.total_usage?.value),
+      unit: String(extraction.total_usage?.unit || "kWh"),
+    }].filter((usage) => usage.value !== null);
+  const periodStart = bounds.start ? String(bounds.start) : null;
+  const periodEnd = bounds.end ? String(bounds.end) : null;
+  return {
+    id: crypto.randomUUID(),
+    providers: [...new Set(providers.filter(Boolean).map(String))],
+    serviceTypes: [...new Set((utility
+      ? sections.map((section) => section.service_type)
+      : ["electricity"]
+    ).filter(Boolean).map(String))],
+    periodStart,
+    periodEnd,
+    period: periodStart && periodEnd
+      ? `${periodStart} – ${periodEnd}`
+      : "Period not printed",
+    usageSummaries,
+    amountDue: summaryNumber(extraction.amount_due?.value),
+    currency: String((utility ? extraction.currency : result.currency || "USD") || ""),
+    verificationLevel: String(result.verification_level || "evidence_extracted"),
+    discrepancyTotal: summaryNumber(result.discrepancy_total) ?? 0,
+    issueCount: rootIssueCount(Array.isArray(result.lines) ? result.lines : []),
+    reviewRequests: reviewRequestDrafts(result),
+  };
+}
+
+function appendCurrentBillOnce() {
+  if (state.currentBundleId !== null) {
+    return state.bundle.find((summary) => summary.id === state.currentBundleId) || null;
+  }
+  const summary = summarizeCurrentBill();
+  if (!summary) return null;
+  state.bundle.push(summary);
+  state.currentBundleId = summary.id;
+  return summary;
+}
+
+function completeOverlappingPeriods(summaries) {
+  if (!summaries.length) return false;
+  const periods = summaries.map((summary) => {
+    const start = Date.parse(`${summary.periodStart || ""}T00:00:00Z`);
+    const end = Date.parse(`${summary.periodEnd || ""}T00:00:00Z`);
+    return { start, end };
+  });
+  if (periods.some(({ start, end }) => (
+    !Number.isFinite(start) || !Number.isFinite(end) || start > end
+  ))) return false;
+  const latestStart = Math.max(...periods.map(({ start }) => start));
+  const earliestEnd = Math.min(...periods.map(({ end }) => end));
+  return latestStart <= earliestEnd;
+}
+
+function combinedBundleAmount() {
+  if (state.bundle.length < 2 || !completeOverlappingPeriods(state.bundle)) return null;
+  const currencyValues = state.bundle.map((summary) => summary.currency);
+  if (currencyValues.some((currency) => (
+    typeof currency !== "string" || currency.trim() === ""
+  ))) return null;
+  const currencies = new Set(currencyValues);
+  const amounts = state.bundle.map((summary) => summaryNumber(summary.amountDue));
+  if (currencies.size !== 1 || amounts.some((amount) => amount === null)) {
+    return null;
+  }
+  return {
+    currency: state.bundle[0].currency,
+    amount: amounts.reduce((total, amount) => total + amount, 0),
+  };
+}
+
+function verificationSummary(level) {
+  return verificationLabels[level] || statusLabel(level || "evidence_extracted");
+}
+
+function renderHousehold() {
+  const summaryElement = byId("household-summary");
+  const billsElement = byId("household-bills");
+  if (!state.bundle.length) {
+    summaryElement.innerHTML = "";
+    billsElement.innerHTML = "";
+    return;
+  }
+
+  const combined = combinedBundleAmount();
+  const countLabel = state.bundle.length === 1
+    ? "1 completed bill"
+    : `${state.bundle.length} completed bills`;
+  summaryElement.innerHTML = `
+    <div class="household-summary-copy">
+      <span class="card-kicker">Page-memory household</span>
+      <h2>${escapeHtml(countLabel)}</h2>
+      <p>Only minimized bill summaries and editable review drafts remain in this page.</p>
+    </div>
+    <div class="combined-amount ${combined ? "available" : "separate"}">
+      ${combined
+    ? `<span>Combined amount shown</span><strong>${escapeHtml(money(combined.amount, combined.currency))}</strong><small>Printed amounts share one currency and a common service-period overlap.</small>`
+    : `<span>Printed amounts remain separate</span><strong>Not combined</strong><small>Every bill needs one currency and a complete, mutually overlapping service period.</small>`}
+    </div>`;
+
+  billsElement.innerHTML = state.bundle.map((summary) => {
+    const services = summary.serviceTypes
+      .map((serviceType) => serviceLabels[serviceType] || serviceType)
+      .join(", ");
+    const providers = summary.providers.join(" + ") || "Provider not printed";
+    const verification = verificationSummary(summary.verificationLevel);
+    const levelClass = Object.hasOwn(verificationLabels, summary.verificationLevel)
+      ? summary.verificationLevel
+      : "evidence_extracted";
+    const usage = summary.usageSummaries.length
+      ? summary.usageSummaries.map((item) => `
+        <li><span>${escapeHtml(serviceLabels[item.serviceType] || item.serviceType)}</span><strong>${escapeHtml(decimalValue(item.value))} ${escapeHtml(item.unit)}</strong></li>`).join("")
+      : `<li><span>Usage</span><strong>Not printed</strong></li>`;
+    return `
+      <article class="household-bill-card">
+        <header>
+          <div><span class="service-type">${escapeHtml(services || "Utility service")}</span><h3>${escapeHtml(providers)}</h3></div>
+          <span class="household-status ${escapeHtml(levelClass)}">${escapeHtml(verification)}</span>
+        </header>
+        <dl>
+          <div><dt>Service period</dt><dd>${escapeHtml(summary.period)}</dd></div>
+          <div><dt>Printed amount</dt><dd>${escapeHtml(money(summary.amountDue, summary.currency))}</dd></div>
+          <div><dt>Discrepancy total</dt><dd>${escapeHtml(money(summary.discrepancyTotal, summary.currency))}</dd></div>
+          <div><dt>Root issues</dt><dd>${escapeHtml(summary.issueCount)}</dd></div>
+        </dl>
+        <div class="household-usage"><span>Usage summaries</span><ul>${usage}</ul></div>
+      </article>`;
+  }).join("");
+}
+
+function summariesForRequests(result = null) {
+  if (state.bundle.length) return state.bundle;
+  if (!result || !state.extraction) return [];
+  const summary = summarizeCurrentBill();
+  return summary ? [summary] : [];
+}
+
+function renderProviderReviewRequests(result = null) {
+  const entries = summariesForRequests(result).flatMap((summary) => (
+    summary.reviewRequests.map((request, requestIndex) => ({
+      summary,
+      request,
+      requestIndex,
+    }))
+  ));
+  byId("provider-review-requests").innerHTML = entries.length
+    ? entries.map(({ summary, request, requestIndex }, index) => {
+      const subjectId = `letter-subject-${index}`;
+      const bodyId = `letter-body-${index}`;
+      const services = summary.serviceTypes
+        .map((serviceType) => serviceLabels[serviceType] || serviceType)
+        .join(", ");
+      return `
+        <article class="provider-request-card">
+          <div class="request-editor">
+            <span class="card-kicker">${escapeHtml(request.provider)}</span>
+            <label for="${subjectId}">Subject</label><input id="${subjectId}" data-bundle-id="${escapeHtml(summary.id)}" data-request-index="${requestIndex}" data-request-field="subject" type="text" value="${escapeHtml(request.subject)}">
+            <label for="${bodyId}">Message</label><textarea id="${bodyId}" data-bundle-id="${escapeHtml(summary.id)}" data-request-index="${requestIndex}" data-request-field="body" rows="12">${escapeHtml(request.body)}</textarea>
+            <div class="letter-actions"><button class="button primary" type="button" data-copy-request="${index}">Copy request</button><button class="button secondary" type="button" data-download-request="${index}">Download .txt</button></div>
+            <p class="review-note"><span aria-hidden="true">!</span><strong>User review required.</strong> Edits stay in this page. WattProof never sends messages or adds account details automatically.</p>
+          </div>
+          <aside class="request-grounding"><span class="card-kicker">Completed summary</span><h2>Draft boundary</h2><div class="grounded-claim"><strong>${escapeHtml(summary.providers.join(" + ") || request.provider)}</strong><br>${escapeHtml(services || "Utility service")} · ${escapeHtml(summary.period)} · ${escapeHtml(verificationSummary(summary.verificationLevel))}</div><p class="grounding-limit">Only the provider, subject, and message draft are retained for this request.</p></aside>
+        </article>`;
+    }).join("")
+    : `<div class="household-placeholder"><h2>No provider request is needed</h2><p>The completed summaries contain no review request draft.</p></div>`;
+}
+
+function updateReviewRequestDraft(bundleId, requestIndex, field, value) {
+  if (!["subject", "body"].includes(field)) return;
+  const summary = state.bundle.find((candidate) => candidate.id === bundleId);
+  const request = summary?.reviewRequests?.[Number(requestIndex)];
+  if (!request) return;
+  request[field] = String(value);
+}
+
+function announceBundle(message) {
+  byId("bundle-status").textContent = message;
+}
+
 function safeSourceUrl(value) {
   const url = String(value || "").trim();
   return /^https?:\/\//i.test(url) ? escapeHtml(url) : "";
@@ -590,32 +837,6 @@ function renderComparison(comparison) {
     </div>`;
 }
 
-function renderProviderReviewRequests(result) {
-  const requests = Array.isArray(result.review_requests) ? result.review_requests : [];
-  const lines = new Map(result.lines.map((line) => [line.id, line]));
-  byId("provider-review-requests").innerHTML = requests.length
-    ? requests.map((request, index) => {
-      const grounded = request.grounded_audit_line_ids
-        .map((id) => lines.get(id))
-        .filter(Boolean);
-      const grounding = grounded.length
-        ? grounded.map((line) => `<div class="grounded-claim"><strong>${escapeHtml(line.label)}</strong><br>${escapeHtml(line.formula)}</div>`).join("")
-        : `<p class="grounding-limit">This request asks for missing source coverage and does not claim a provider error.</p>`;
-      return `
-        <article class="provider-request-card">
-          <div class="request-editor">
-            <span class="card-kicker">${escapeHtml(request.provider)}</span>
-            <label for="letter-subject-${index}">Subject</label><input id="letter-subject-${index}" type="text" value="${escapeHtml(request.subject)}">
-            <label for="letter-body-${index}">Message</label><textarea id="letter-body-${index}" rows="12">${escapeHtml(request.body)}</textarea>
-            <div class="letter-actions"><button class="button primary" type="button" data-copy-request="${index}">Copy request</button><button class="button secondary" type="button" data-download-request="${index}">Download .txt</button></div>
-            <p class="review-note"><span aria-hidden="true">!</span><strong>User review required.</strong> WattProof never sends messages or adds account details automatically.</p>
-          </div>
-          <aside class="request-grounding"><span class="card-kicker">Claim ledger</span><h2>Why this wording is bounded</h2>${grounding}</aside>
-        </article>`;
-    }).join("")
-    : `<div class="household-placeholder"><h2>No provider request is needed</h2><p>The current evidence produced no grounded request draft.</p></div>`;
-}
-
 function renderAudit() {
   const result = state.audit;
   const verificationLabel = verificationLabels[result.verification_level] || "Evidence extracted";
@@ -656,7 +877,62 @@ function clearCurrentDocument() {
   state.extractionRevision += 1;
   byId("upload-form").reset();
   byId("file-label").textContent = "Choose a utility bill";
+  const preview = byId("pdf-preview");
+  preview.removeAttribute("src");
+  preview.hidden = true;
+  byId("synthetic-preview").hidden = true;
+  for (const id of (
+    [
+      "service-review-sections",
+      "verification-level",
+      "verdict-card",
+      "service-results",
+      "priority-findings",
+      "audit-lines",
+      "optional-comparison",
+      "provider-review-requests",
+    ]
+  )) byId(id).innerHTML = "";
+  byId("optional-comparison").hidden = true;
+  byId("calculation-ledger").open = false;
+}
+
+function addAnotherBill() {
+  const summary = appendCurrentBillOnce();
+  if (!summary) return;
+  renderHousehold();
+  renderProviderReviewRequests();
+  const count = state.bundle.length;
+  clearCurrentDocument();
+  state.currentBundleId = null;
   showStep(1);
+  announceBundle(`${count} completed ${count === 1 ? "bill" : "bills"} retained in this page.`);
+}
+
+function finishHouseholdReview() {
+  const summary = appendCurrentBillOnce();
+  if (!summary && !state.bundle.length) return;
+  renderHousehold();
+  renderProviderReviewRequests();
+  showStep(4);
+  const count = state.bundle.length;
+  announceBundle(`Household now contains ${count} completed ${count === 1 ? "bill" : "bills"}.`);
+}
+
+function showProviderReviewRequests() {
+  renderProviderReviewRequests();
+  showStep(5);
+}
+
+function clearHousehold() {
+  state.bundle = [];
+  state.currentBundleId = null;
+  clearCurrentDocument();
+  byId("household-bills").innerHTML = "";
+  byId("household-summary").innerHTML = "";
+  byId("provider-review-requests").innerHTML = "";
+  showStep(1);
+  announceBundle("Household cleared. No completed bill summaries remain in this page.");
 }
 
 function requestText(index) {
@@ -790,9 +1066,22 @@ byId("provider-review-requests").addEventListener("click", async (event) => {
   }
 });
 
-byId("add-another-bill").addEventListener("click", clearCurrentDocument);
-byId("finish-household-review").addEventListener("click", () => showStep(4));
+byId("provider-review-requests").addEventListener("input", (event) => {
+  const input = event.target.closest("[data-request-field]");
+  if (!input) return;
+  updateReviewRequestDraft(
+    input.dataset.bundleId,
+    input.dataset.requestIndex,
+    input.dataset.requestField,
+    input.value,
+  );
+});
+
+byId("add-another-bill").addEventListener("click", addAnotherBill);
+byId("finish-household").addEventListener("click", finishHouseholdReview);
+byId("clear-household").addEventListener("click", clearHousehold);
+byId("review-next-steps").addEventListener("click", showProviderReviewRequests);
 byId("restart").addEventListener("click", () => {
-  invalidatePendingOperation();
+  clearHousehold();
   window.location.reload();
 });

@@ -31,12 +31,13 @@
       </nav>
 
       <div id="global-message" class="message" role="alert" aria-live="assertive" aria-atomic="true" tabindex="-1" hidden></div>
+      <div id="bundle-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
       <div id="synthetic-banner" class="synthetic-banner" role="note" hidden></div>
 
       <section class="step-panel upload-panel" data-step="1" aria-labelledby="upload-title">
         <div class="hero-copy">
           <p class="eyebrow">A receipt checker for utility bills</p>
-          <h1 id="upload-title">Your utility bill has a formula.<br><em>WattProof shows its work.</em></h1>
+          <h1 id="upload-title" tabindex="-1">Your utility bill has a formula.<br><em>WattProof shows its work.</em></h1>
           <p class="lede">Review what was read, reproduce supported meter, unit, rate, tax, and subtotal math, and see exactly where published-tariff coverage begins and ends.</p>
           <ul class="trust-list">
             <li><span>01</span><strong>Evidence first</strong><small>Every material fact keeps its rendered page and printed text.</small></li>
@@ -122,29 +123,26 @@
         <section id="optional-comparison" class="optional-comparison" aria-labelledby="comparison-title" hidden></section>
         <div class="form-actions result-actions">
           <button class="button text" type="button" data-back="2">← Review facts</button>
-          <div><button class="button secondary" type="button" id="add-another-bill">Add another bill</button><button class="button primary" type="button" id="finish-household-review">Finish household review <span aria-hidden="true">→</span></button></div>
+          <div><button class="button secondary" type="button" id="add-another-bill">Add another bill</button><button class="button primary" type="button" id="finish-household">Finish household review <span aria-hidden="true">→</span></button></div>
         </div>
       </section>
 
       <section class="step-panel" data-step="4" aria-labelledby="household-title" hidden>
         <div class="section-heading">
           <div><p class="eyebrow">Current review</p><h1 id="household-title" tabindex="-1">Household</h1></div>
-          <p>Household summaries stay only in this browser page. Persistent multi-bill state is outside this review-screen increment.</p>
+          <p>Completed bill summaries stay only in this browser page and disappear on refresh or close. Raw documents, account identity, meter identifiers, and evidence excerpts are not kept in the bundle.</p>
         </div>
-        <div class="household-placeholder">
-          <span class="card-kicker">One completed bill</span>
-          <h2>Continue to provider-specific next steps</h2>
-          <p>The current result remains available when you go back. No account identity or document contents are stored here.</p>
-        </div>
-        <div class="form-actions"><button class="button text" type="button" data-back="3">← Verification result</button><button class="button primary" type="button" data-next="5">Review next steps <span aria-hidden="true">→</span></button></div>
+        <section id="household-summary" class="household-summary" aria-live="polite" aria-atomic="true"></section>
+        <div id="household-bills" class="household-bills" aria-label="Completed utility bills"></div>
+        <div class="form-actions household-actions"><button class="button text" type="button" data-back="3">← Verification result</button><div><button class="button secondary" type="button" id="clear-household">Clear household</button><button class="button primary" type="button" id="review-next-steps">Review next steps <span aria-hidden="true">→</span></button></div></div>
       </section>
 
       <section class="step-panel" data-step="5" aria-labelledby="next-steps-title" hidden>
         <div class="section-heading">
           <div><p class="eyebrow">Evidence into action</p><h1 id="next-steps-title" tabindex="-1">Provider review requests</h1></div>
-          <p>Each draft is grounded to its provider and audit lines. Review every word and add account-safe details yourself; WattProof never sends a message.</p>
+          <p>Each completed bill keeps its provider draft separate. Edits stay only in this page; review every word and add account-safe details yourself. WattProof never sends a message.</p>
         </div>
-        <div id="provider-review-requests" class="provider-review-requests"></div>
+        <div id="provider-requests"><div id="provider-review-requests" class="provider-review-requests"></div></div>
         <div class="form-actions"><button class="button text" type="button" data-back="4">← Household</button><button class="button dark" type="button" id="restart">Start over</button></div>
       </section>
     </main>

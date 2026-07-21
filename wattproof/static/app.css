@@ -22,6 +22,17 @@
 
 [hidden] { display: none !important; }
 
+.visually-hidden {
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 html { scroll-behavior: smooth; }
 
 body {
@@ -506,17 +517,58 @@ td input { width: 82px; padding: 7px; border: 1px solid #c7d0cf; border-radius: 
 .principle-strip { margin-top: 14px; padding: 18px 22px; display: flex; justify-content: space-between; gap: 30px; color: #d8e5e5; background: var(--navy-2); border-radius: 12px; }
 .principle-strip span { font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; }
 
-.result-actions > div { display: flex; gap: 9px; }
+.result-actions > div, .household-actions > div { display: flex; gap: 9px; }
 .household-placeholder { padding: clamp(28px, 5vw, 54px); background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 .household-placeholder h2 { margin: 0; font-family: Georgia, Baskerville, serif; font-size: clamp(1.8rem, 3vw, 2.8rem); font-weight: 500; }
 .household-placeholder p { max-width: 700px; color: var(--muted); }
 
+.household-summary {
+  margin-bottom: 17px;
+  padding: clamp(22px, 4vw, 34px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.42fr);
+  gap: 24px;
+  align-items: center;
+  color: white;
+  background: var(--navy-2);
+  border-radius: var(--radius);
+}
+.household-summary .card-kicker { color: #84c8b3; }
+.household-summary h2 { margin: 0; font-family: Georgia, Baskerville, serif; font-size: clamp(1.9rem, 3vw, 2.8rem); font-weight: 500; }
+.household-summary p { margin: 8px 0 0; color: #c9d8d8; }
+.combined-amount { padding: 17px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.16); border-radius: 12px; }
+.combined-amount span, .combined-amount small { display: block; }
+.combined-amount span { color: #bfd0d0; font-size: 0.65rem; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; }
+.combined-amount strong { display: block; margin: 3px 0; font-family: Georgia, Baskerville, serif; font-size: 1.75rem; font-weight: 500; }
+.combined-amount small { color: #c9d8d8; line-height: 1.45; }
+.combined-amount.available { border-color: #d7b75e; }
+.combined-amount.available span { color: #f2cc65; }
+
+.household-bills { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 15px; }
+.household-bill-card { min-width: 0; overflow: hidden; background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 10px 28px rgba(22, 45, 51, 0.06); }
+.household-bill-card header { min-height: 105px; padding: 18px; display: flex; justify-content: space-between; align-items: start; gap: 15px; color: white; background: var(--navy-2); }
+.household-bill-card h3 { margin: 4px 0 0; font-family: Georgia, Baskerville, serif; font-size: 1.35rem; font-weight: 500; overflow-wrap: anywhere; }
+.household-status { flex: 0 0 auto; max-width: 46%; padding: 5px 8px; color: #173f34; background: #dff2e9; border: 1px solid #9fcdbc; border-radius: 999px; font-size: 0.61rem; font-weight: 850; line-height: 1.3; text-align: center; }
+.household-status.tariff_verified { color: #644806; background: var(--amber-soft); border-color: #e4c877; }
+.household-status.evidence_extracted { color: #31525b; background: var(--blue-soft); border-color: #bfd0d3; }
+.household-bill-card dl { margin: 0; padding: 8px 18px; }
+.household-bill-card dl div { padding: 9px 0; display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid #e7ebe7; }
+.household-bill-card dt { color: var(--muted); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.household-bill-card dd { margin: 0; max-width: 62%; font-size: 0.75rem; font-weight: 760; text-align: right; overflow-wrap: anywhere; }
+.household-usage { padding: 13px 18px 18px; }
+.household-usage > span { color: var(--muted); font-size: 0.66rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.household-usage ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.household-usage li { padding: 6px 9px; display: flex; justify-content: space-between; gap: 15px; background: #f1f5f1; border-radius: 7px; font-size: 0.72rem; }
+.household-usage li + li { margin-top: 6px; }
+.household-usage strong { text-align: right; overflow-wrap: anywhere; }
+.household-actions { margin-top: 25px; }
+
 .provider-review-requests { display: grid; gap: 20px; }
 .provider-request-card { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(250px, 0.8fr); overflow: hidden; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
-.request-editor { padding: 27px; }
+.request-editor { min-width: 0; padding: 27px; }
 .request-editor label { display: block; margin: 0 0 7px; color: var(--muted); font-size: 0.75rem; font-weight: 800; }
 .request-editor input, .request-editor textarea { width: 100%; margin-bottom: 16px; padding: 10px; color: var(--ink); background: #fbfcf9; border: 1px solid #bdc8c7; border-radius: 8px; }
-.request-editor textarea { resize: vertical; line-height: 1.6; }
+.request-editor textarea { min-width: 0; resize: vertical; line-height: 1.6; }
 .request-grounding { padding: 27px; color: white; background: var(--navy-2); }
 .request-grounding .card-kicker { color: #84c8b3; }
 .request-grounding h2 { margin: 0 0 15px; font-family: Georgia, Baskerville, serif; font-size: 1.6rem; font-weight: 500; }
@@ -569,6 +621,7 @@ footer { width: min(1200px, calc(100% - 40px)); margin: 0 auto; padding: 22px 0 
   .service-chips { justify-content: flex-start; }
   .verification-level { display: grid; gap: 3px; }
   .priority-finding { grid-template-columns: 1fr; }
+  .table-scroll { overflow-x: visible; }
   .audit-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .audit-table, .audit-table tbody, .audit-table tr, .audit-table td { width: 100%; display: block; }
   .audit-table tr { margin-top: 13px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; }
@@ -577,7 +630,10 @@ footer { width: min(1200px, calc(100% - 40px)); margin: 0 auto; padding: 22px 0 
   .audit-table td::before { content: attr(data-label); color: var(--muted); font-size: 0.62rem; font-weight: 850; letter-spacing: 0.06em; text-transform: uppercase; }
   .audit-table td > * { min-width: 0; }
   .trace, .evidence-line { overflow-wrap: anywhere; }
-  .form-actions, .letter-actions, footer, .result-actions > div { align-items: stretch; flex-direction: column; }
+  .household-summary, .household-bills, .provider-request-card { grid-template-columns: 1fr; }
+  .household-bill-card header { flex-direction: column; }
+  .household-status { max-width: 100%; }
+  .form-actions, .letter-actions, footer, .result-actions > div, .household-actions > div { align-items: stretch; flex-direction: column; }
   .form-actions .button, .letter-actions .button { width: 100%; }
 }
 

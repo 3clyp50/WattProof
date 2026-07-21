@@ -358,10 +358,10 @@ async function main() {
           && document.activeElement?.id === "verify-title"`);
       }
 
-      await clickById("finish-household-review");
+      await clickById("finish-household");
       await waitFor(`!document.querySelector('[data-step="4"]').hidden
         && document.activeElement?.id === "household-title"`);
-      await evaluate(`document.querySelector('[data-next="5"]').click(); true`);
+      await clickById("review-next-steps");
       await waitFor(`!document.querySelector('[data-step="5"]').hidden
         && document.activeElement?.id === "next-steps-title"`);
       const requests = await evaluate(`(() => {
@@ -384,6 +384,130 @@ async function main() {
     for (const sample of ["authentic", "synthetic", "duke", "centerpoint", "bloomington"]) {
       flows.push(await runFlow(sample));
     }
+
+    async function completeSample(sample, completionId) {
+      await clickById(`${sample}-sample`);
+      await waitFor(`!document.querySelector('[data-step="2"]').hidden
+        && document.activeElement?.id === "review-title"`);
+      await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
+      await waitFor(`!document.querySelector('[data-step="3"]').hidden
+        && document.activeElement?.id === "verify-title"`);
+      await clickById(completionId);
+    }
+
+    await navigateHome();
+    await completeSample("duke", "add-another-bill");
+    await waitFor(`!document.querySelector('[data-step="1"]').hidden
+      && document.activeElement?.id === "upload-title"`);
+    await completeSample("centerpoint", "add-another-bill");
+    await waitFor(`!document.querySelector('[data-step="1"]').hidden
+      && document.activeElement?.id === "upload-title"`);
+    await completeSample("bloomington", "finish-household");
+    await waitFor(`!document.querySelector('[data-step="4"]').hidden
+      && document.activeElement?.id === "household-title"`);
+    const sequentialDesktop = await evaluate(`(() => {
+      const cards = [...document.querySelectorAll(".household-bill-card")];
+      return {
+        focus: document.activeElement?.id,
+        bundleLength: state.bundle.length,
+        currentBundleId: state.currentBundleId,
+        cardCount: cards.length,
+        text: document.getElementById("household-bills").innerText,
+        summaryText: document.getElementById("household-summary").innerText,
+        uniqueIds: new Set(state.bundle.map((summary) => summary.id)).size,
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        pageErrors: [...window.__wattproofBrowserErrors],
+      };
+    })()`);
+
+    await evaluate(`document.querySelector('[data-step="4"] [data-back="3"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-step="3"]').hidden
+      && document.activeElement?.id === "verify-title"`);
+    await clickById("finish-household");
+    await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
+    await evaluate(`document.querySelector('[data-step="4"] [data-back="3"]').click(); true`);
+    await clickById("finish-household");
+    await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
+    const repeatedFinishCount = await evaluate(`state.bundle.length`);
+
+    await command("Emulation.setDeviceMetricsOverride", {
+      width: 390,
+      height: 844,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    const mobileHousehold = await evaluate(`(() => {
+      const container = document.getElementById("household-bills");
+      const cards = [...container.querySelectorAll(".household-bill-card")];
+      return {
+        width: innerWidth,
+        height: innerHeight,
+        columns: getComputedStyle(container).gridTemplateColumns.trim().split(/\\s+/).length,
+        cardCount: cards.length,
+        maxCardWidth: Math.max(...cards.map((card) => card.getBoundingClientRect().width)),
+        clientWidth: document.documentElement.clientWidth,
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      };
+    })()`);
+
+    await clickById("review-next-steps");
+    await waitFor(`!document.querySelector('[data-step="5"]').hidden
+      && document.activeElement?.id === "next-steps-title"`);
+    const mobileRequests = await evaluate(`(() => {
+      const cards = [...document.querySelectorAll(".provider-request-card")];
+      return {
+        focus: document.activeElement?.id,
+        count: cards.length,
+        text: document.getElementById("provider-review-requests").innerText,
+        cardColumns: cards.map((card) =>
+          getComputedStyle(card).gridTemplateColumns.trim().split(/\\s+/).length),
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      };
+    })()`);
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-request-field="subject"]');
+      input.value = "Edited only in this page";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    await evaluate(`document.querySelector('[data-step="5"] [data-back="4"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
+    await clickById("review-next-steps");
+    await waitFor(`!document.querySelector('[data-step="5"]').hidden`);
+    const editedDraft = await evaluate(
+      `document.querySelector('[data-request-field="subject"]').value`,
+    );
+
+    await evaluate(`document.querySelector('[data-step="5"] [data-back="4"]').click(); true`);
+    await evaluate(`document.querySelector('[data-step="4"] [data-back="3"]').click(); true`);
+    await clickById("add-another-bill");
+    await waitFor(`!document.querySelector('[data-step="1"]').hidden
+      && document.activeElement?.id === "upload-title"`);
+    await evaluate(`document.querySelector('#upload-form button[type="submit"]').click(); true`);
+    await waitFor(`document.getElementById("global-message").textContent
+      === "Choose a PDF bill first."`);
+    const laterFailure = await evaluate(`({
+      bundleLength: state.bundle.length,
+      currentBundleId: state.currentBundleId,
+      extractionCleared: state.extraction === null,
+      auditCleared: state.audit === null,
+      retainedCardCount: document.querySelectorAll(".household-bill-card").length,
+      message: document.getElementById("global-message").textContent,
+      focus: document.activeElement?.id,
+      pageErrors: [...window.__wattproofBrowserErrors],
+    })`);
+
+    await navigateHome();
+    const refreshClears = await evaluate(`({
+      bundleLength: state.bundle.length,
+      currentBundleId: state.currentBundleId,
+      cardCount: document.querySelectorAll(".household-bill-card").length,
+      requestsCount: document.querySelectorAll(".provider-request-card").length,
+      pageErrors: [...window.__wattproofBrowserErrors],
+    })`);
 
     await command("Emulation.setDeviceMetricsOverride", {
       width: 390,
@@ -429,6 +553,9 @@ async function main() {
         ledgerOpen: document.getElementById("calculation-ledger").open,
         rowDisplay: getComputedStyle(row).display,
         cellDisplay: getComputedStyle(cell).display,
+        tableScrollOverflowX: getComputedStyle(
+          document.querySelector(".table-scroll"),
+        ).overflowX,
         pageErrors: [...window.__wattproofBrowserErrors],
       };
     })()`);
@@ -467,6 +594,13 @@ async function main() {
     await evaluate(`new Promise((resolve) => setTimeout(() => resolve(true), 100))`);
     return {
       flows,
+      sequentialDesktop,
+      repeatedFinishCount,
+      mobileHousehold,
+      mobileRequests,
+      editedDraft,
+      laterFailure,
+      refreshClears,
       mobileReview,
       mobileResult,
       hostileDom,
@@ -614,11 +748,13 @@ const context = {
   AbortController,
   Blob,
   console,
+  crypto: { randomUUID: () => "bundle-id" },
   document,
   elements,
   fetch: deferredFetch,
   FormData,
   navigator: { clipboard: { writeText: async () => {} } },
+  structuredClone,
   payload,
   URL: { createObjectURL: () => "blob:test", revokeObjectURL() {} },
   window: {
@@ -645,6 +781,8 @@ function currentState() {
   return invoke(`({
     extraction: state.extraction,
     audit: state.audit,
+    bundle: state.bundle,
+    currentBundleId: state.currentBundleId,
     operationToken: state.operationToken,
   })`);
 }
@@ -755,6 +893,20 @@ async function run() {
     };
   }
 
+  if (payload.scenario === "bundle_then_sample_error") {
+    invoke(`state.audit = payload.auditA; addAnotherBill(); renderHousehold()`);
+    const request = invoke(`loadSample("duke", byId("duke-sample"))`);
+    settle("/api/sample/duke", { error: "Fixture temporarily unavailable" }, false);
+    await request;
+    return {
+      ...currentState(),
+      householdHtml: element("household-bills").innerHTML,
+      message: element("global-message").textContent,
+      activeElement: document.activeElement?.id || null,
+      uploadHidden: element("step-1").hidden,
+    };
+  }
+
   throw new Error(`Unknown scenario: ${payload.scenario}`);
 }
 
@@ -764,6 +916,239 @@ run()
     process.stderr.write(`${error.stack || error}\n`);
     process.exitCode = 1;
   });
+"""
+
+
+HOUSEHOLD_STATE_HARNESS = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+class FakeElement {
+  constructor(id) {
+    this.id = id;
+    this.innerHTML = "";
+    this.textContent = "";
+    this.value = "";
+    this.hidden = false;
+    this.dataset = {};
+    this.attributes = {};
+    this.resetCount = 0;
+    this.className = "";
+    this.src = "";
+    this.classList = { toggle() {}, add() {}, remove() {} };
+  }
+  querySelectorAll() { return []; }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  removeAttribute(name) {
+    delete this.attributes[name];
+    if (name === "src") this.src = "";
+  }
+  scrollIntoView() {}
+  focus() { document.activeElement = this; }
+  reset() { this.resetCount += 1; }
+}
+
+const payload = JSON.parse(fs.readFileSync(0, "utf8"));
+const elements = new Map();
+const element = (id) => {
+  if (!elements.has(id)) elements.set(id, new FakeElement(id));
+  return elements.get(id);
+};
+const stepPanels = [1, 2, 3, 4, 5].map((step) => {
+  const panel = element(`step-${step}`);
+  panel.dataset.step = String(step);
+  return panel;
+});
+const indicators = [1, 2, 3, 4, 5].map((step) => {
+  const indicator = element(`indicator-${step}`);
+  indicator.dataset.stepIndicator = String(step);
+  return indicator;
+});
+const headings = new Map(stepPanels.map((panel) => {
+  const heading = element(`heading-${panel.dataset.step}`);
+  return [panel.dataset.step, heading];
+}));
+const revokedUrls = [];
+let nextId = 0;
+const document = {
+  activeElement: null,
+  getElementById: element,
+  querySelector(selector) {
+    const match = selector.match(/^\[data-step="(\d)"\] h1$/);
+    return match ? headings.get(match[1]) : null;
+  },
+  querySelectorAll(selector) {
+    if (selector === "[data-step]") return stepPanels;
+    if (selector === "[data-step-indicator]") return indicators;
+    if (selector.includes("aria-describedby")) return [];
+    return [];
+  },
+};
+const context = {
+  AbortController,
+  Blob,
+  console,
+  crypto: { randomUUID: () => `bundle-id-${++nextId}` },
+  document,
+  elements,
+  FormData,
+  navigator: { clipboard: { writeText: async () => {} } },
+  structuredClone,
+  URL: {
+    createObjectURL: () => "blob:generated",
+    revokeObjectURL: (url) => revokedUrls.push(url),
+  },
+  window: { location: { reload() {} }, scrollTo() {} },
+};
+vm.createContext(context);
+const source = fs.readFileSync(payload.appPath, "utf8");
+const bindingStart = source.indexOf('byId("authentic-sample").addEventListener');
+if (bindingStart < 0) throw new Error("Could not isolate WattProof UI logic");
+vm.runInContext(source.slice(0, bindingStart), context);
+
+function invoke(expression) {
+  return vm.runInContext(expression, context);
+}
+
+function installDocument(index) {
+  context.currentDocument = structuredClone(payload.documents[index]);
+  invoke(`(() => {
+    state.extraction = currentDocument.extraction;
+    state.audit = currentDocument.audit;
+    state.reviewMode = currentDocument.mode;
+    state.previewUrl = currentDocument.previewUrl;
+  })()`);
+}
+
+function markupCount(markup, className) {
+  return (markup.match(new RegExp(`class="[^"]*${className}`, "g")) || []).length;
+}
+
+const summaries = payload.documents.map((_entry, index) => {
+  installDocument(index);
+  return invoke("summarizeCurrentBill()");
+});
+const firstSummarySnapshot = structuredClone(summaries[0]);
+installDocument(0);
+invoke(`(() => {
+  if (state.extraction.sections?.[0]?.provider) {
+    state.extraction.sections[0].provider.value = "mutated provider";
+  } else {
+    state.extraction.delivery_provider.value = "mutated provider";
+  }
+  if (state.audit.review_requests?.[0]) {
+    state.audit.review_requests[0].body = "mutated request";
+  }
+})()`);
+
+installDocument(0);
+invoke("finishHouseholdReview(); finishHouseholdReview(); showStep(3); finishHouseholdReview()");
+const afterRepeatedFinish = invoke(`({
+  bundleLength: state.bundle.length,
+  currentBundleId: state.currentBundleId,
+})`);
+invoke("addAnotherBill()");
+const afterAddFollowingFinish = invoke(`({
+  bundleLength: state.bundle.length,
+  currentBundleId: state.currentBundleId,
+  extraction: state.extraction,
+  audit: state.audit,
+  uploadVisible: !document.getElementById("step-1").hidden,
+})`);
+
+installDocument(1);
+invoke("addAnotherBill()");
+installDocument(2);
+invoke("finishHouseholdReview(); finishHouseholdReview()");
+const bundle = invoke("structuredClone(state.bundle)");
+context.savedBundle = structuredClone(bundle);
+const householdHtml = element("household-bills").innerHTML;
+const householdSummaryHtml = element("household-summary").innerHTML;
+invoke("renderProviderReviewRequests()");
+const requestsHtml = element("provider-review-requests").innerHTML;
+const requestCount = markupCount(requestsHtml, "provider-request-card");
+
+const editedDraft = "Page-memory edit only <draft>";
+invoke(`updateReviewRequestDraft(
+  state.bundle[0].id,
+  0,
+  "body",
+  ${JSON.stringify(editedDraft)}
+); renderProviderReviewRequests()`);
+const editedRequestsHtml = element("provider-review-requests").innerHTML;
+const editedRequestBody = invoke("state.bundle[0].reviewRequests[0].body");
+
+invoke(`state.bundle = state.bundle.map((summary, index) => ({
+  ...summary,
+  periodStart: ["2024-01-01", "2024-01-15", "2024-01-20"][index],
+  periodEnd: ["2024-01-31", "2024-02-15", "2024-01-25"][index],
+  period: "Compatible test period",
+  amountDue: [10.01, 20.02, 30.03][index],
+  currency: "USD",
+})); renderHousehold()`);
+const compatibleSummaryHtml = element("household-summary").innerHTML;
+
+invoke(`state.bundle[2].currency = "CAD"; renderHousehold()`);
+const mixedCurrencySummaryHtml = element("household-summary").innerHTML;
+invoke(`state.bundle[2].currency = "USD";
+  state.bundle[2].periodStart = null; renderHousehold()`);
+const missingPeriodSummaryHtml = element("household-summary").innerHTML;
+invoke(`state.bundle[2].periodStart = "2025-01-01";
+  state.bundle[2].periodEnd = "2025-01-31"; renderHousehold()`);
+const nonoverlapSummaryHtml = element("household-summary").innerHTML;
+invoke(`state.bundle = state.bundle.map((summary, index) => ({
+  ...summary,
+  periodStart: ["2024-01-01", "2024-01-15", "2024-01-20"][index],
+  periodEnd: ["2024-01-31", "2024-02-15", "2024-01-25"][index],
+  currency: "USD",
+})); state.bundle[2].amountDue = null; renderHousehold()`);
+const missingAmountSummaryHtml = element("household-summary").innerHTML;
+invoke(`state.bundle[2].amountDue = 30.03;
+  state.bundle = state.bundle.map((summary) => ({ ...summary, currency: null }));
+  renderHousehold()`);
+const missingCurrencySummaryHtml = element("household-summary").innerHTML;
+
+invoke("state.bundle = savedBundle; renderHousehold(); renderProviderReviewRequests()");
+invoke("clearHousehold()");
+const afterClear = invoke(`({
+  bundleLength: state.bundle.length,
+  currentBundleId: state.currentBundleId,
+  extraction: state.extraction,
+  audit: state.audit,
+  previewUrl: state.previewUrl,
+  uploadVisible: !document.getElementById("step-1").hidden,
+})`);
+
+process.stdout.write(JSON.stringify({
+  summaries,
+  firstSummarySnapshot,
+  summarySourceIsolated: JSON.stringify(firstSummarySnapshot) === JSON.stringify(summaries[0]),
+  afterRepeatedFinish,
+  afterAddFollowingFinish,
+  bundle,
+  householdHtml,
+  householdSummaryHtml,
+  requestCount,
+  requestsHtml,
+  editedRequestBody,
+  editedRequestsHtml,
+  compatibleSummaryHtml,
+  mixedCurrencySummaryHtml,
+  missingPeriodSummaryHtml,
+  nonoverlapSummaryHtml,
+  missingAmountSummaryHtml,
+  missingCurrencySummaryHtml,
+  revokedUrls,
+  uploadResetCount: element("upload-form").resetCount,
+  afterClear,
+  clearedMarkup: {
+    household: element("household-bills").innerHTML,
+    summary: element("household-summary").innerHTML,
+    requests: element("provider-review-requests").innerHTML,
+    review: element("service-review-sections").innerHTML,
+    audit: element("audit-lines").innerHTML,
+  },
+}));
 """
 
 
@@ -818,6 +1203,7 @@ const payload = JSON.parse(fs.readFileSync(0, "utf8"));
 const context = {
   Blob,
   console,
+  crypto: { randomUUID: () => "renderer-bundle-id" },
   elements,
   FormData,
   payload,
@@ -916,6 +1302,37 @@ def _exercise_async_state_contract(
     assert completed.returncode == 0, completed.stderr
     result: dict[str, Any] = json.loads(completed.stdout)
     return result
+
+
+def _exercise_household_state_contract(
+    documents: list[dict[str, Any]],
+) -> dict[str, Any]:
+    completed = subprocess.run(
+        ["node", "-e", HOUSEHOLD_STATE_HARNESS],
+        input=json.dumps(
+            {
+                "appPath": str(APP_JAVASCRIPT),
+                "documents": documents,
+            }
+        ),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result: dict[str, Any] = json.loads(completed.stdout)
+    return result
+
+
+def _sample_document(client: Any, kind: str) -> dict[str, Any]:
+    extraction = client.get(f"/api/sample/{kind}").get_json()["extraction"]
+    audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+    return {
+        "extraction": extraction,
+        "audit": audit,
+        "mode": kind,
+        "previewUrl": f"blob:{kind}",
+    }
 
 
 @pytest.mark.parametrize(
@@ -1072,11 +1489,261 @@ def test_result_markup_exposes_neutral_contract() -> None:
         "service-review-sections",
         "provider-review-requests",
         "add-another-bill",
-        "finish-household-review",
+        "finish-household",
     ):
         assert f'id="{element_id}"' in page
     assert 'id="optional-comparison"' in page
     assert "hidden" in page[page.index('id="optional-comparison"') :][:160]
+
+
+def test_household_and_next_steps_have_required_controls() -> None:
+    page = create_app().test_client().get("/").get_data(as_text=True)
+
+    for element_id in (
+        "add-another-bill",
+        "finish-household",
+        "household-bills",
+        "household-summary",
+        "clear-household",
+        "provider-requests",
+    ):
+        assert f'id="{element_id}"' in page
+
+    assert 'id="household-summary"' in page
+    summary_markup = page[page.index('id="household-summary"') :][:220]
+    assert 'aria-live="polite"' in summary_markup
+    assert 'aria-atomic="true"' in summary_markup
+
+
+def test_bundle_uses_page_memory_only() -> None:
+    source = APP_JAVASCRIPT.read_text(encoding="utf-8")
+
+    assert "bundle: []" in source
+    assert "currentBundleId: null" in source
+    for persistent_api in (
+        "localStorage",
+        "sessionStorage",
+        "indexedDB",
+        "document.cookie",
+    ):
+        assert persistent_api not in source
+
+
+def test_bundle_summary_has_a_strict_privacy_allowlist_and_numeric_usage() -> None:
+    client = create_app().test_client()
+    documents = [
+        _sample_document(client, kind)
+        for kind in ("synthetic", "centerpoint", "bloomington")
+    ]
+    centerpoint = documents[1]
+    centerpoint["extraction"]["customer_identity"] = {
+        "name": "PRIVATE CUSTOMER",
+        "account_number": "PRIVATE ACCOUNT 991",
+        "service_address": "PRIVATE ADDRESS",
+    }
+    centerpoint["extraction"]["sections"][0]["meter"] = {
+        "meter_id": "PRIVATE METER 88"
+    }
+    centerpoint["extraction"]["private_pdf_blob"] = "blob:private-source"
+    centerpoint["audit"]["private_audit_note"] = "PRIVATE AUDIT NOTE"
+    centerpoint["audit"]["review_requests"][0].update(
+        {
+            "evidence": ["PRIVATE REQUEST EVIDENCE"],
+            "citations": ["PRIVATE REQUEST CITATION"],
+            "account_number": "PRIVATE REQUEST ACCOUNT",
+        }
+    )
+
+    result = _exercise_household_state_contract(documents)
+    summary_keys = {
+        "id",
+        "providers",
+        "serviceTypes",
+        "periodStart",
+        "periodEnd",
+        "period",
+        "usageSummaries",
+        "amountDue",
+        "currency",
+        "verificationLevel",
+        "discrepancyTotal",
+        "issueCount",
+        "reviewRequests",
+    }
+    request_keys = {"provider", "subject", "body"}
+    usage_keys = {"serviceType", "value", "unit"}
+
+    assert result["summarySourceIsolated"] is True
+    for summary in result["summaries"]:
+        assert set(summary) == summary_keys
+        assert isinstance(summary["amountDue"], int | float)
+        assert isinstance(summary["discrepancyTotal"], int | float)
+        assert all(set(usage) == usage_keys for usage in summary["usageSummaries"])
+        assert all(
+            isinstance(usage["value"], int | float)
+            and not isinstance(usage["value"], bool)
+            for usage in summary["usageSummaries"]
+        )
+        assert all(set(request) == request_keys for request in summary["reviewRequests"])
+
+    synthetic, centerpoint_summary, _bloomington = result["summaries"]
+    assert synthetic["issueCount"] == 1
+    assert centerpoint_summary["usageSummaries"] == [
+        {"serviceType": "natural_gas", "value": 112.277, "unit": "therm"}
+    ]
+    serialized = json.dumps(centerpoint_summary, sort_keys=True)
+    for forbidden in (
+        "PRIVATE CUSTOMER",
+        "PRIVATE ACCOUNT 991",
+        "PRIVATE ADDRESS",
+        "PRIVATE METER 88",
+        "blob:private-source",
+        "PRIVATE AUDIT NOTE",
+        "PRIVATE REQUEST EVIDENCE",
+        "PRIVATE REQUEST CITATION",
+        "PRIVATE REQUEST ACCOUNT",
+        "grounded_audit_line_ids",
+        "requires_user_review",
+        "original_value",
+        "evidence",
+        "citations",
+    ):
+        assert forbidden not in serialized
+
+
+def test_household_sequence_deduplicates_combines_safely_and_clears() -> None:
+    client = create_app().test_client()
+    documents = [
+        _sample_document(client, kind)
+        for kind in ("duke", "centerpoint", "bloomington")
+    ]
+
+    result = _exercise_household_state_contract(documents)
+
+    assert result["afterRepeatedFinish"]["bundleLength"] == 1
+    assert result["afterRepeatedFinish"]["currentBundleId"] is not None
+    assert result["afterAddFollowingFinish"] == {
+        "bundleLength": 1,
+        "currentBundleId": None,
+        "extraction": None,
+        "audit": None,
+        "uploadVisible": True,
+    }
+    assert len(result["bundle"]) == 3
+    assert len({summary["id"] for summary in result["bundle"]}) == 3
+    assert result["householdHtml"].count("household-bill-card") == 3
+    for provider in (
+        "Duke Energy",
+        "CenterPoint Energy",
+        "City of Bloomington Utilities",
+    ):
+        assert provider in result["householdHtml"]
+    assert "112.277 therm" in result["householdHtml"]
+    assert "$132.19" in result["householdHtml"]
+    assert "Combined amount shown" not in result["householdSummaryHtml"]
+    assert not {
+        "savings",
+        "overcharge",
+    } & set(result["householdHtml"].lower().split())
+
+    assert result["requestCount"] == 3
+    assert result["requestsHtml"].count("provider-request-card") == 3
+    for provider in (
+        "Duke Energy Indiana, LLC",
+        "Southern Indiana Gas and Electric Company d/b/a CenterPoint Energy Indiana South",
+        "City of Bloomington Utilities",
+    ):
+        assert provider in result["requestsHtml"]
+    assert result["editedRequestBody"] == "Page-memory edit only <draft>"
+    assert "Page-memory edit only &lt;draft&gt;" in result["editedRequestsHtml"]
+    assert result["editedRequestsHtml"].count("provider-request-card") == 3
+
+    assert "Combined amount shown" in result["compatibleSummaryHtml"]
+    assert "$60.06" in result["compatibleSummaryHtml"]
+    for incompatible in (
+        result["mixedCurrencySummaryHtml"],
+        result["missingPeriodSummaryHtml"],
+        result["nonoverlapSummaryHtml"],
+        result["missingAmountSummaryHtml"],
+        result["missingCurrencySummaryHtml"],
+    ):
+        assert "Combined amount shown" not in incompatible
+
+    assert result["revokedUrls"] == [
+        "blob:duke",
+        "blob:centerpoint",
+        "blob:bloomington",
+    ]
+    assert result["uploadResetCount"] == 3
+    assert result["afterClear"] == {
+        "bundleLength": 0,
+        "currentBundleId": None,
+        "extraction": None,
+        "audit": None,
+        "previewUrl": None,
+        "uploadVisible": True,
+    }
+    assert set(result["clearedMarkup"].values()) == {""}
+
+
+def test_household_and_request_values_are_inert_markup() -> None:
+    client = create_app().test_client()
+    documents = [
+        _sample_document(client, kind)
+        for kind in ("duke", "centerpoint", "bloomington")
+    ]
+    marker = '<img id="household-hostile" src=x onerror=alert(1)>'
+    documents[0]["extraction"]["sections"][0]["provider"]["value"] = marker
+    documents[0]["extraction"]["sections"][0]["service_type"] = marker
+    documents[0]["audit"]["verification_level"] = marker
+    documents[0]["audit"]["review_requests"][0].update(
+        {"provider": marker, "subject": marker, "body": marker}
+    )
+
+    result = _exercise_household_state_contract(documents)
+    fragments = result["householdHtml"] + result["requestsHtml"]
+    probe = _MarkupProbe()
+    probe.feed(fragments)
+
+    assert "img" not in probe.tags
+    assert not any(name.lower().startswith("on") for name, _value in probe.attributes)
+    assert marker in "".join(probe.text) or marker in {
+        value for name, value in probe.attributes if name == "value"
+    }
+
+
+def test_later_bill_failure_keeps_completed_household_cards() -> None:
+    client = create_app().test_client()
+    duke = _sample_document(client, "duke")
+
+    result = _exercise_async_state_contract(
+        "bundle_then_sample_error",
+        extraction_a=duke["extraction"],
+        audit_a=duke["audit"],
+        mode="duke",
+        abortAware=False,
+    )
+
+    assert len(result["bundle"]) == 1
+    assert "Duke Energy" in result["householdHtml"]
+    assert result["currentBundleId"] is None
+    assert result["extraction"] is None
+    assert result["audit"] is None
+    assert result["message"] == "Fixture temporarily unavailable"
+    assert result["activeElement"] == "global-message"
+    assert result["uploadHidden"] is False
+
+
+def test_mobile_contract_removes_horizontal_audit_and_household_scroll() -> None:
+    stylesheet = (PROJECT_ROOT / "wattproof" / "static" / "app.css").read_text(
+        encoding="utf-8"
+    )
+    mobile = stylesheet[stylesheet.index("@media (max-width: 640px)") :]
+
+    assert ".table-scroll { overflow-x: visible; }" in mobile
+    assert ".household-bills" in mobile
+    assert ".provider-request-card" in mobile
+    assert "grid-template-columns: 1fr" in mobile
 
 
 def test_global_error_alert_is_keyboard_focusable() -> None:
@@ -1674,6 +2341,64 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         for flow in flows
         if flow["sample"] not in {"authentic", "synthetic"}
     )
+
+    sequential = evidence["sequentialDesktop"]
+    assert sequential["focus"] == "household-title"
+    assert sequential["bundleLength"] == 3
+    assert sequential["currentBundleId"]
+    assert sequential["cardCount"] == 3
+    assert sequential["uniqueIds"] == 3
+    assert sequential["noHorizontalOverflow"] is True
+    assert sequential["pageErrors"] == []
+    for visible_value in (
+        "Duke Energy",
+        "CenterPoint Energy",
+        "City of Bloomington Utilities",
+        "112.277 therm",
+        "$132.19",
+    ):
+        assert visible_value in sequential["text"]
+    assert "Combined amount shown" not in sequential["summaryText"]
+    assert evidence["repeatedFinishCount"] == 3
+
+    mobile_household = evidence["mobileHousehold"]
+    assert mobile_household["width"] == 390
+    assert mobile_household["height"] == 844
+    assert mobile_household["columns"] == 1
+    assert mobile_household["cardCount"] == 3
+    assert mobile_household["maxCardWidth"] <= mobile_household["clientWidth"]
+    assert mobile_household["noHorizontalOverflow"] is True
+
+    mobile_requests = evidence["mobileRequests"]
+    assert mobile_requests["focus"] == "next-steps-title"
+    assert mobile_requests["count"] == 3
+    assert mobile_requests["cardColumns"] == [1, 1, 1]
+    assert mobile_requests["noHorizontalOverflow"] is True
+    for provider in (
+        "Duke Energy Indiana, LLC",
+        "Southern Indiana Gas and Electric Company d/b/a CenterPoint Energy Indiana South",
+        "City of Bloomington Utilities",
+    ):
+        assert provider.lower() in mobile_requests["text"].lower()
+    assert evidence["editedDraft"] == "Edited only in this page"
+
+    assert evidence["laterFailure"] == {
+        "bundleLength": 3,
+        "currentBundleId": None,
+        "extractionCleared": True,
+        "auditCleared": True,
+        "retainedCardCount": 3,
+        "message": "Choose a PDF bill first.",
+        "focus": "bill-file",
+        "pageErrors": [],
+    }
+    assert evidence["refreshClears"] == {
+        "bundleLength": 0,
+        "currentBundleId": None,
+        "cardCount": 0,
+        "requestsCount": 0,
+        "pageErrors": [],
+    }
     assert evidence["protocolErrors"] == []
     assert evidence["externalRequests"] == []
     assert evidence["hostileDom"] == {
@@ -1700,4 +2425,5 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     assert mobile_result["ledgerOpen"] is True
     assert mobile_result["rowDisplay"] == "block"
     assert mobile_result["cellDisplay"] == "grid"
+    assert mobile_result["tableScrollOverflowX"] == "visible"
     assert mobile_result["pageErrors"] == []
