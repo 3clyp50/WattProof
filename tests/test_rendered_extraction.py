@@ -176,6 +176,27 @@ def test_render_pages_builds_ordered_data_urls_before_temporary_cleanup(
     assert not render_directory.exists()
 
 
+def test_render_pages_accepts_zero_padded_names_in_numeric_page_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def render_padded(command: list[str], **_kwargs: object) -> SimpleNamespace:
+        prefix = Path(command[-1])
+        for page in range(1, 12):
+            prefix.with_name(f"{prefix.name}-{page:02}.png").write_bytes(
+                b"\x89PNG\r\n\x1a\n" + bytes([page])
+            )
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr("wattproof.extract.subprocess.run", render_padded)
+
+    rendered = _render_pages(Path("bill.pdf"), page_count=11)
+
+    assert [page.page for page in rendered] == list(range(1, 12))
+    assert [
+        base64.b64decode(page.data_url.partition(",")[2])[-1] for page in rendered
+    ] == list(range(1, 12))
+
+
 def test_render_pages_converts_timeout_to_safe_document_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -262,6 +283,34 @@ def test_render_pages_rejects_duplicate_or_unexpected_page_output(
 
     with pytest.raises(InvalidDocumentError, match="incomplete or out of sequence"):
         _render_pages(Path("bill.pdf"), page_count=1)
+
+
+@pytest.mark.parametrize(
+    ("names", "page_count"),
+    [
+        (("page-final.png",), 1),
+        (("page-0.png",), 1),
+        (("page-2.png",), 1),
+        (("page-1.png", "page-2.png"), 1),
+    ],
+)
+def test_render_pages_rejects_invalid_or_out_of_range_numeric_suffixes(
+    names: tuple[str, ...],
+    page_count: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def render_invalid_names(
+        command: list[str], **_kwargs: object
+    ) -> SimpleNamespace:
+        prefix = Path(command[-1])
+        for name in names:
+            prefix.with_name(name).write_bytes(b"\x89PNG\r\n\x1a\n")
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr("wattproof.extract.subprocess.run", render_invalid_names)
+
+    with pytest.raises(InvalidDocumentError, match="incomplete or out of sequence"):
+        _render_pages(Path("bill.pdf"), page_count=page_count)
 
 
 def test_render_pages_rejects_non_png_output(
@@ -390,6 +439,51 @@ def test_page_count_converts_nonzero_exit_to_safe_document_error(
     assert "account 123" not in str(error.value)
 
 
+@pytest.mark.parametrize("stdout", [None, b"Pages: 1\n"])
+def test_page_count_rejects_non_text_command_output(
+    stdout: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "wattproof.extract.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        ),
+    )
+
+    with pytest.raises(InvalidDocumentError, match="inspection returned invalid output"):
+        _page_count(Path("bill.pdf"))
+
+
+def test_page_count_converts_unicode_decode_failure_to_safe_document_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def undecodable(*_args: object, **_kwargs: object) -> None:
+        raise UnicodeDecodeError(
+            "utf-8",
+            b"private account 123 \xff",
+            20,
+            21,
+            "secret decoder detail",
+        )
+
+    monkeypatch.setattr("wattproof.extract.subprocess.run", undecodable)
+
+    with pytest.raises(
+        InvalidDocumentError,
+        match="PDF inspection returned undecodable output",
+    ) as error:
+        _page_count(Path("bill.pdf"))
+
+    assert "private" not in str(error.value)
+    assert "account 123" not in str(error.value)
+    assert "secret decoder" not in str(error.value)
+    assert error.value.__cause__ is None
+    assert error.value.__suppress_context__ is True
+
+
 @pytest.mark.parametrize(
     ("stdout", "message"),
     [
@@ -495,20 +589,49 @@ def test_native_text_converts_nonzero_exit_to_safe_document_error(
     assert "account 123" not in str(error.value)
 
 
+@pytest.mark.parametrize("stdout", [None, b"private bytes"])
 def test_native_text_rejects_malformed_command_output(
+    stdout: object,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         "wattproof.extract.subprocess.run",
         lambda *_args, **_kwargs: SimpleNamespace(
             returncode=0,
-            stdout=None,
+            stdout=stdout,
             stderr="",
         ),
     )
 
     with pytest.raises(InvalidDocumentError, match="invalid output"):
         _native_text(Path("bill.pdf"))
+
+
+def test_native_text_converts_unicode_decode_failure_to_safe_document_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def undecodable(*_args: object, **_kwargs: object) -> None:
+        raise UnicodeDecodeError(
+            "utf-8",
+            b"private account 123 \xff",
+            20,
+            21,
+            "secret decoder detail",
+        )
+
+    monkeypatch.setattr("wattproof.extract.subprocess.run", undecodable)
+
+    with pytest.raises(
+        InvalidDocumentError,
+        match="PDF text extraction returned undecodable output",
+    ) as error:
+        _native_text(Path("bill.pdf"))
+
+    assert "private" not in str(error.value)
+    assert "account 123" not in str(error.value)
+    assert "secret decoder" not in str(error.value)
+    assert error.value.__cause__ is None
+    assert error.value.__suppress_context__ is True
 
 
 def test_gpt_receives_rendered_evidence_before_the_untrusted_native_hint(

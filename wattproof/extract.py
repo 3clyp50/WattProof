@@ -91,6 +91,10 @@ def _page_count(path: Path) -> int:
         raise InvalidDocumentError(
             "PDF inspection timed out after 10 seconds."
         ) from None
+    except UnicodeDecodeError:
+        raise InvalidDocumentError(
+            "PDF inspection returned undecodable output."
+        ) from None
     except FileNotFoundError:
         raise ExtractionUnavailableError(
             "PDF inspection is unavailable because Poppler's pdfinfo command "
@@ -101,6 +105,8 @@ def _page_count(path: Path) -> int:
             "The PDF could not be inspected. The file may be malformed, encrypted, "
             "or unsupported."
         )
+    if not isinstance(process.stdout, str):
+        raise InvalidDocumentError("PDF inspection returned invalid output.")
     for line in process.stdout.splitlines():
         if line.startswith("Pages:"):
             try:
@@ -132,6 +138,10 @@ def _native_text(path: Path) -> str:
     except subprocess.TimeoutExpired:
         raise InvalidDocumentError(
             "PDF text-layer reading timed out after 20 seconds."
+        ) from None
+    except UnicodeDecodeError:
+        raise InvalidDocumentError(
+            "PDF text extraction returned undecodable output."
         ) from None
     except FileNotFoundError:
         raise ExtractionUnavailableError(
@@ -194,14 +204,23 @@ def _render_pages(path: Path, page_count: int) -> tuple[RenderedPage, ...]:
             )
 
         output_paths = tuple(prefix.parent.glob(f"{prefix.name}-*.png"))
-        expected_names = {
-            f"{prefix.name}-{page}.png" for page in range(1, page_count + 1)
-        }
-        if (
-            len(output_paths) != page_count
-            or {output.name for output in output_paths} != expected_names
-            or any(not output.is_file() for output in output_paths)
-        ):
+        outputs_by_page: dict[int, Path] = {}
+        invalid_output = len(output_paths) != page_count
+        for output in output_paths:
+            suffix = output.stem.removeprefix(f"{prefix.name}-")
+            if (
+                not output.is_file()
+                or not suffix.isascii()
+                or not suffix.isdigit()
+            ):
+                invalid_output = True
+                continue
+            page = int(suffix)
+            if page < 1 or page > page_count or page in outputs_by_page:
+                invalid_output = True
+                continue
+            outputs_by_page[page] = output
+        if invalid_output or set(outputs_by_page) != set(range(1, page_count + 1)):
             raise InvalidDocumentError(
                 "Rendered page output is incomplete or out of sequence."
             )
@@ -209,7 +228,7 @@ def _render_pages(path: Path, page_count: int) -> tuple[RenderedPage, ...]:
         rendered: list[RenderedPage] = []
         total_bytes = 0
         for page in range(1, page_count + 1):
-            output = prefix.with_name(f"{prefix.name}-{page}.png")
+            output = outputs_by_page[page]
             size = output.stat().st_size
             if size > MAX_RENDERED_PAGE_BYTES:
                 raise InvalidDocumentError(
