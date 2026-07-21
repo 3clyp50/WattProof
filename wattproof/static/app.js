@@ -47,12 +47,39 @@ function setValueAt(object, path, value) {
   target[keys.at(-1)] = value;
 }
 
-function showMessage(message = "") {
+let messageAnchor = null;
+
+function positionMessage() {
   const element = byId("global-message");
-  element.textContent = message;
-  element.hidden = !message;
-  if (message) element.scrollIntoView({ block: "center" });
+  if (element.hidden || !messageAnchor) return;
+  const anchorRect = messageAnchor.getBoundingClientRect();
+  const messageRect = element.getBoundingClientRect();
+  const margin = 12;
+  const gap = 12;
+  const above = anchorRect.top >= messageRect.height + gap + margin;
+  const top = above ? anchorRect.top - messageRect.height - gap : anchorRect.bottom + gap;
+  const idealLeft = anchorRect.left + (anchorRect.width - messageRect.width) / 2;
+  const left = Math.max(margin, Math.min(idealLeft, window.innerWidth - messageRect.width - margin));
+  const caret = Math.max(20, Math.min(anchorRect.left + anchorRect.width / 2 - left, messageRect.width - 20));
+  element.dataset.side = above ? "above" : "below";
+  element.style.top = `${Math.round(top)}px`;
+  element.style.left = `${Math.round(left)}px`;
+  element.style.setProperty("--caret-left", `${Math.round(caret)}px`);
 }
+
+function showMessage(message = "", anchor = null) {
+  const element = byId("global-message");
+  messageAnchor?.removeAttribute("aria-describedby");
+  messageAnchor = message ? anchor : null;
+  byId("global-message-text").textContent = message;
+  element.hidden = !message;
+  if (!message) return;
+  messageAnchor?.setAttribute("aria-describedby", "global-message-text");
+  positionMessage();
+}
+
+window.addEventListener("resize", positionMessage);
+window.addEventListener("scroll", positionMessage, true);
 
 function showStep(step) {
   document.querySelectorAll("[data-step]").forEach((panel) => {
@@ -79,6 +106,7 @@ function setLoading(button, loading, label) {
   button.disabled = loading;
   button.toggleAttribute("aria-busy", loading);
   button.innerHTML = loading ? label : button.dataset.originalLabel;
+  if (!loading && messageAnchor === button) button.focus({ preventScroll: true });
 }
 
 async function responseJson(response) {
@@ -137,6 +165,7 @@ function renderReview(mode) {
 }
 
 async function loadSample(kind, button) {
+  showMessage();
   setLoading(button, true, "Loading verified fixture…");
   try {
     const payload = await responseJson(await fetch(`/api/sample/${kind}`));
@@ -145,7 +174,7 @@ async function loadSample(kind, button) {
     renderReview(kind);
     showStep(2);
   } catch (error) {
-    showMessage(error.message);
+    showMessage(error.message, button);
   } finally {
     setLoading(button, false, "");
   }
@@ -248,13 +277,15 @@ byId("synthetic-sample").addEventListener("click", (event) => loadSample("synthe
 
 byId("bill-file").addEventListener("change", (event) => {
   byId("file-label").textContent = event.target.files[0]?.name || "Choose a PG&E bill";
+  if (event.target.files[0]) showMessage();
 });
 
 byId("upload-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector("button[type='submit']");
   const file = byId("bill-file").files[0];
-  if (!file) return showMessage("Choose a PDF bill first.");
+  if (!file) return showMessage("Choose a PDF bill first.", button);
+  showMessage();
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.previewUrl = URL.createObjectURL(file);
   setLoading(button, true, "Extracting native PDF…");
@@ -267,7 +298,7 @@ byId("upload-form").addEventListener("submit", async (event) => {
     renderReview("uploaded");
     showStep(2);
   } catch (error) {
-    showMessage(error.message);
+    showMessage(error.message, button);
   } finally {
     setLoading(button, false, "");
   }
@@ -276,6 +307,7 @@ byId("upload-form").addEventListener("submit", async (event) => {
 byId("review-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = event.currentTarget.querySelector("button[type='submit']");
+  showMessage();
   applyReviewEdits();
   setLoading(button, true, "Running exact tariff math…");
   try {
@@ -289,7 +321,7 @@ byId("review-form").addEventListener("submit", async (event) => {
     renderAudit();
     showStep(3);
   } catch (error) {
-    showMessage(error.message);
+    showMessage(error.message, button);
   } finally {
     setLoading(button, false, "");
   }

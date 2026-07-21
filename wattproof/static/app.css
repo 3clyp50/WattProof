@@ -137,7 +137,7 @@ main {
 .stepper li.active span { color: white; background: var(--navy); border-color: var(--navy); }
 .stepper li.complete span { color: var(--navy); background: var(--amber-soft); border-color: var(--amber); }
 
-.message, .synthetic-banner {
+.synthetic-banner {
   margin: 10px 0 18px;
   padding: 13px 16px;
   border-radius: 12px;
@@ -145,7 +145,60 @@ main {
   font-weight: 650;
 }
 
-.message { color: #7e3028; background: var(--red-soft); border: 1px solid #ebbbb3; }
+.message {
+  --caret-left: 50%;
+  position: fixed;
+  z-index: 80;
+  width: max-content;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 14px 17px;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  color: #7e3028;
+  background: #fff9f7;
+  border: 1px solid #e3aaa0;
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(89, 43, 36, 0.16);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.45;
+  pointer-events: none;
+  animation: callout-enter var(--motion-quick) var(--ease-ui);
+}
+
+.message-mark {
+  flex: 0 0 21px;
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: var(--red);
+  border-radius: 50%;
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.message::before, .message::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--caret-left) - 8px);
+  border: 8px solid transparent;
+}
+
+.message[data-side="above"] { --callout-offset: 4px; transform-origin: var(--caret-left) bottom; }
+.message[data-side="above"]::before { top: 100%; border-top-color: #e3aaa0; }
+.message[data-side="above"]::after { top: calc(100% - 2px); border-top-color: #fff9f7; }
+.message[data-side="below"] { --callout-offset: -4px; transform-origin: var(--caret-left) top; }
+.message[data-side="below"]::before { bottom: 100%; border-bottom-color: #e3aaa0; }
+.message[data-side="below"]::after { bottom: calc(100% - 2px); border-bottom-color: #fff9f7; }
+
+@keyframes callout-enter {
+  from { opacity: 0; transform: translateY(var(--callout-offset)) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 .synthetic-banner { color: #66450a; background: var(--amber-soft); border: 1px solid #e8c36e; }
 
 .step-panel { padding: 36px 0 78px; }

@@ -88,7 +88,18 @@ def create_app() -> Flask:
     def validation_error(error: ValidationError) -> tuple[Response, int]:
         first = error.errors(include_url=False)[0]
         location = ".".join(str(part) for part in first["loc"])
-        return jsonify(error=f"Review {location}: {first['msg']}"), 422
+        message = str(first["msg"]).removeprefix("Value error, ")
+        prefix = f"Review {location}: " if location else "Review: "
+        return jsonify(error=f"{prefix}{message}"), 422
+
+    @app.errorhandler(SourceIntegrityError)
+    def source_integrity_error(_error: SourceIntegrityError) -> tuple[Response, int]:
+        return jsonify(
+            error=(
+                "WattProof could not verify its archived tariff evidence. "
+                "Please try again later."
+            )
+        ), 503
 
     def reviewable_error(error: Exception) -> tuple[Response, int]:
         return jsonify(error=str(error)), 422
@@ -96,7 +107,6 @@ def create_app() -> Flask:
     for error_type in (
         ExtractionUnavailableError,
         InvalidDocumentError,
-        SourceIntegrityError,
         UnsupportedBillError,
         UnsupportedDocumentError,
     ):

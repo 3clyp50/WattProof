@@ -25,7 +25,7 @@ from wattproof.extract import (
 )
 from wattproof.fixtures import FIXTURES_DIR, PROJECT_ROOT, load_sample
 from wattproof.models import AuditLine, AuditResult, BillExtraction, DateFact, TextFact
-from wattproof.tariffs import load_tariff_bundle
+from wattproof.tariffs import SourceIntegrityError, load_tariff_bundle
 
 
 def _lines(result: AuditResult) -> dict[str, AuditLine]:
@@ -325,6 +325,8 @@ def test_web_flow_exposes_all_five_steps() -> None:
     assert "GPT-5.6 may read" in page
     assert "Decimal arithmetic handles money" in page
     assert "Local sample mode" not in page
+    assert 'id="global-message-text"' in page
+    assert 'class="message-mark" aria-hidden="true"' in page
     assert 'id="charge-review"' in page
     assert 'id="audit-details"' in page
     assert 'id="show-all-lines"' not in page
@@ -374,4 +376,22 @@ def test_web_validation_returns_reviewable_field() -> None:
     response = client.post("/api/audit", json=extraction)
 
     assert response.status_code == 422
-    assert "peak and off-peak quantities" in response.get_json()["error"]
+    assert response.get_json()["error"] == (
+        "Review: peak and off-peak quantities do not equal total usage"
+    )
+
+
+def test_web_hides_tariff_source_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken_audit(_extraction: BillExtraction) -> AuditResult:
+        raise SourceIntegrityError("Missing tariff snapshot: /srv/private/rates.pdf")
+
+    monkeypatch.setattr("wattproof.app.audit_bill", broken_audit)
+    extraction = load_sample("authentic").model_dump(mode="json")
+    response = create_app().test_client().post("/api/audit", json=extraction)
+
+    assert response.status_code == 503
+    assert response.get_json()["error"] == (
+        "WattProof could not verify its archived tariff evidence. Please try again later."
+    )
