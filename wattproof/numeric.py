@@ -77,6 +77,9 @@ def _validate_decimal_spelling(value: object) -> object:
             "utility-bill decimal cannot accept a binary float; use an exact "
             "Decimal, integer, or numeric spelling"
         )
+    if isinstance(value, RawJSONDecimal):
+        _validate_decimal_spelling(value.json_token)
+        return value
     if not isinstance(value, (str, bytes, bytearray)):
         return value
     if len(value) > MAX_UTILITY_DECIMAL_CHARACTERS:

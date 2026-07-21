@@ -141,6 +141,141 @@ def _raw_page_body(target: PageTarget, token: str) -> str:
     return encoded.replace(sentinel, token)
 
 
+def _number_body(
+    kind: str,
+    path: tuple[str | int, ...],
+    spelling: str,
+    *,
+    quoted: bool,
+) -> str:
+    payload = create_app().test_client().get(f"/api/sample/{kind}").get_json()[
+        "extraction"
+    ]
+    if quoted:
+        _set_path(payload, path, spelling)
+        return json.dumps(payload, separators=(",", ":"))
+    _set_path(payload, path, "__RAW_DECIMAL__")
+    encoded = json.dumps(payload, separators=(",", ":"))
+    sentinel = json.dumps("__RAW_DECIMAL__")
+    assert encoded.count(sentinel) == 1
+    return encoded.replace(sentinel, spelling)
+
+
+OVERSIZED_NORMALIZING_DECIMAL = "0." + "0" * 70 + "1e70"
+MAX_LENGTH_NORMALIZING_DECIMAL = "0." + "0" * 58 + "1e58"
+assert len(OVERSIZED_NORMALIZING_DECIMAL) == 76
+assert len(MAX_LENGTH_NORMALIZING_DECIMAL) == 64
+
+
+@pytest.mark.parametrize(
+    ("kind", "path", "expected_location"),
+    (
+        (
+            "authentic",
+            ("total_usage", "confidence"),
+            "total_usage.confidence",
+        ),
+        (
+            "duke",
+            ("sections", 0, "charges", 1, "amount", "evidence", "confidence"),
+            "sections.0.charges.1.amount.evidence.confidence",
+        ),
+        (
+            "authentic",
+            ("charges", 0, "rate", "value"),
+            "charges.0.rate.value",
+        ),
+        (
+            "duke",
+            ("sections", 0, "charges", 1, "rate", "value"),
+            "sections.0.charges.1.rate.value",
+        ),
+    ),
+)
+def test_raw_and_quoted_decimal_spellings_share_the_model_length_boundary(
+    kind: str,
+    path: tuple[str | int, ...],
+    expected_location: str,
+) -> None:
+    raw = create_app().test_client().post(
+        "/api/audit",
+        data=_number_body(
+            kind,
+            path,
+            OVERSIZED_NORMALIZING_DECIMAL,
+            quoted=False,
+        ),
+        content_type="application/json",
+    )
+    quoted = create_app().test_client().post(
+        "/api/audit",
+        data=_number_body(
+            kind,
+            path,
+            OVERSIZED_NORMALIZING_DECIMAL,
+            quoted=True,
+        ),
+        content_type="application/json",
+    )
+
+    assert raw.status_code == quoted.status_code == 422
+    assert raw.is_json and quoted.is_json
+    assert raw.get_json() == quoted.get_json()
+    error = raw.get_json()["error"]
+    assert expected_location in error
+    assert "limited to 64 characters" in error
+    assert "Traceback" not in raw.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    ("spelling", "expected"),
+    (
+        (MAX_LENGTH_NORMALIZING_DECIMAL, "0.1"),
+        ("0.123456789012345678", "0.123456789012345678"),
+        ("1e-1", "0.1"),
+        ("1E-1", "0.1"),
+        ("0.000e+10", "0E+7"),
+        ("-0e-10", "-0E-10"),
+        ("1e+0", "1"),
+    ),
+)
+def test_bounded_raw_decimal_spellings_remain_exact_and_marker_free(
+    spelling: str,
+    expected: str,
+) -> None:
+    raw = create_app().test_client().post(
+        "/api/audit",
+        data=_number_body(
+            "authentic",
+            ("total_usage", "confidence"),
+            spelling,
+            quoted=False,
+        ),
+        content_type="application/json",
+    )
+    quoted = create_app().test_client().post(
+        "/api/audit",
+        data=_number_body(
+            "authentic",
+            ("total_usage", "confidence"),
+            spelling,
+            quoted=True,
+        ),
+        content_type="application/json",
+    )
+
+    assert raw.status_code == quoted.status_code == 200
+    assert raw.get_json() == quoted.get_json()
+    meter = next(
+        line for line in raw.get_json()["audit"]["lines"]
+        if line["id"] == "meter_delta"
+    )
+    assert meter["evidence"][0]["confidence"] == expected
+    encoded = raw.get_data(as_text=True)
+    assert "RawJSONDecimal" not in encoded
+    assert "json_token" not in encoded
+
+
 @pytest.mark.parametrize(
     ("target", "token", "expected_location"),
     (
