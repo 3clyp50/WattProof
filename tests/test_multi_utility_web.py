@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import socket
 import subprocess
+import sys
+import threading
 from html import escape
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from werkzeug.serving import make_server
 
 from wattproof.app import create_app
 from wattproof.audit_service import audit_extraction
@@ -17,6 +23,381 @@ from wattproof.utility_models import UtilityAuditResult, UtilityDocument
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_JAVASCRIPT = PROJECT_ROOT / "wattproof" / "static" / "app.js"
+
+REAL_BROWSER_HARNESS = r"""
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+const { mkdtemp, rm } = require("node:fs/promises");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
+
+const payload = JSON.parse(fs.readFileSync(0, "utf8"));
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForDebugTarget(port, process, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = "Chromium did not expose a debug target";
+  while (Date.now() < deadline) {
+    if (process.spawnError) throw process.spawnError;
+    if (process.exitCode !== null) {
+      throw new Error(`Chromium exited before startup (${process.exitCode})`);
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+      if (response.ok) {
+        const targets = await response.json();
+        const page = targets.find((target) => target.type === "page");
+        if (page?.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
+      }
+    } catch (error) {
+      lastError = String(error);
+    }
+    await delay(50);
+  }
+  throw new Error(lastError);
+}
+
+async function connectDevTools(url) {
+  const socket = new WebSocket(url);
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("DevTools WebSocket timed out")), 10000);
+    socket.addEventListener("open", () => {
+      clearTimeout(timeout);
+      resolve();
+    }, { once: true });
+    socket.addEventListener("error", () => {
+      clearTimeout(timeout);
+      reject(new Error("DevTools WebSocket connection failed"));
+    }, { once: true });
+  });
+
+  let nextId = 0;
+  const pending = new Map();
+  const protocolErrors = [];
+  const externalRequests = [];
+
+  socket.addEventListener("message", (event) => {
+    const message = JSON.parse(typeof event.data === "string"
+      ? event.data
+      : Buffer.from(event.data).toString("utf8"));
+    if (message.id && pending.has(message.id)) {
+      const request = pending.get(message.id);
+      pending.delete(message.id);
+      clearTimeout(request.timeout);
+      if (message.error) request.reject(new Error(JSON.stringify(message.error)));
+      else request.resolve(message.result || {});
+      return;
+    }
+
+    if (message.method === "Runtime.exceptionThrown") {
+      const details = message.params?.exceptionDetails || {};
+      protocolErrors.push(details.exception?.description || details.text || "Runtime exception");
+    }
+    if (message.method === "Runtime.consoleAPICalled" && message.params?.type === "error") {
+      const text = (message.params.args || [])
+        .map((argument) => argument.value ?? argument.description ?? argument.type)
+        .join(" ");
+      protocolErrors.push(`console.error: ${text}`);
+    }
+    if (message.method === "Log.entryAdded" && message.params?.entry?.level === "error") {
+      protocolErrors.push(`browser log: ${message.params.entry.text}`);
+    }
+    if (message.method === "Network.requestWillBeSent") {
+      const requestUrl = message.params?.request?.url;
+      if (requestUrl?.startsWith("http://") || requestUrl?.startsWith("https://")) {
+        const hostname = new URL(requestUrl).hostname;
+        if (hostname !== "127.0.0.1" && hostname !== "localhost") {
+          externalRequests.push(requestUrl);
+        }
+      }
+    }
+  });
+
+  function command(method, params = {}, timeoutMs = 15000) {
+    return new Promise((resolve, reject) => {
+      const id = ++nextId;
+      const timeout = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`DevTools command timed out: ${method}`));
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timeout });
+      socket.send(JSON.stringify({ id, method, params }));
+    });
+  }
+
+  async function evaluate(expression) {
+    const result = await command("Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true,
+    });
+    if (result.exceptionDetails) {
+      throw new Error(
+        result.exceptionDetails.exception?.description || result.exceptionDetails.text,
+      );
+    }
+    return result.result?.value;
+  }
+
+  async function waitFor(expression, timeoutMs = 15000) {
+    const deadline = Date.now() + timeoutMs;
+    let lastValue;
+    while (Date.now() < deadline) {
+      lastValue = await evaluate(expression);
+      if (lastValue) return lastValue;
+      await delay(40);
+    }
+    throw new Error(`Timed out waiting for: ${expression}; last value: ${lastValue}`);
+  }
+
+  return { socket, command, evaluate, waitFor, protocolErrors, externalRequests };
+}
+
+async function closeProcess(process) {
+  if (!process.pid || process.exitCode !== null || process.signalCode !== null) return;
+  process.kill("SIGTERM");
+  const exited = await Promise.race([
+    new Promise((resolve) => process.once("exit", () => resolve(true))),
+    delay(3000).then(() => false),
+  ]);
+  if (!exited && process.exitCode === null) {
+    process.kill("SIGKILL");
+    await new Promise((resolve) => process.once("exit", resolve));
+  }
+}
+
+async function main() {
+  if (typeof WebSocket !== "function") {
+    throw new Error("The opt-in real-browser test requires Node.js with global WebSocket support");
+  }
+
+  const profileDirectory = await mkdtemp(join(tmpdir(), "wattproof-chromium-"));
+  const arguments = [
+    "--headless=new",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-default-apps",
+    "--disable-extensions",
+    "--disable-sync",
+    "--metrics-recording-only",
+    "--no-default-browser-check",
+    "--no-first-run",
+    `--remote-debugging-port=${payload.debugPort}`,
+    "--remote-debugging-address=127.0.0.1",
+    "--remote-allow-origins=*",
+    `--user-data-dir=${profileDirectory}`,
+    "about:blank",
+  ];
+  if (payload.noSandbox) arguments.unshift("--no-sandbox");
+
+  const chromium = spawn(payload.browser, arguments, { stdio: ["ignore", "ignore", "pipe"] });
+  chromium.spawnError = null;
+  chromium.on("error", (error) => {
+    chromium.spawnError = error;
+  });
+  let browserStderr = "";
+  chromium.stderr.on("data", (chunk) => {
+    if (browserStderr.length < 12000) browserStderr += chunk.toString("utf8");
+  });
+
+  let devtools;
+  try {
+    const target = await waitForDebugTarget(payload.debugPort, chromium);
+    devtools = await connectDevTools(target);
+    const { command, evaluate, waitFor } = devtools;
+
+    await command("Page.enable");
+    await command("Runtime.enable");
+    await command("Log.enable");
+    await command("Network.enable");
+    await command("Page.addScriptToEvaluateOnNewDocument", {
+      source: `(() => {
+        const errors = [];
+        Object.defineProperty(window, "__wattproofBrowserErrors", { value: errors });
+        window.addEventListener("error", (event) => {
+          errors.push(String(event.error || event.message));
+        });
+        window.addEventListener("unhandledrejection", (event) => {
+          errors.push(String(event.reason));
+        });
+      })();`,
+    });
+    await command("Emulation.setDeviceMetricsOverride", {
+      width: 1280,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+
+    async function navigateHome() {
+      const navigation = await command("Page.navigate", { url: payload.baseUrl });
+      if (navigation.errorText) throw new Error(navigation.errorText);
+      await waitFor(`document.readyState === "complete"
+        && Boolean(document.getElementById("authentic-sample"))`);
+    }
+
+    async function clickById(id) {
+      await evaluate(`document.getElementById(${JSON.stringify(id)}).click(); true`);
+    }
+
+    async function runFlow(sample) {
+      await navigateHome();
+      const identity = await evaluate(`({
+        title: document.title,
+        url: location.href,
+        body: document.body.innerText,
+      })`);
+      await clickById(`${sample}-sample`);
+      await waitFor(`(() => {
+        const panel = document.querySelector('[data-step="2"]');
+        return panel && !panel.hidden && document.activeElement?.id === "review-title";
+      })()`);
+      const review = await evaluate(`(() => {
+        const panel = document.querySelector('[data-step="2"]');
+        const rect = panel.getBoundingClientRect();
+        return {
+          visible: !panel.hidden
+            && getComputedStyle(panel).display !== "none"
+            && rect.width > 0
+            && rect.height > 0,
+          focus: document.activeElement?.id,
+          text: document.getElementById("service-review-sections").innerText,
+          message: document.getElementById("global-message").innerText,
+        };
+      })()`);
+
+      await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
+      await waitFor(`(() => {
+        const panel = document.querySelector('[data-step="3"]');
+        return panel && !panel.hidden && document.activeElement?.id === "verify-title"
+          && Boolean(document.querySelector("#verification-level strong")?.textContent);
+      })()`);
+      const result = await evaluate(`(() => {
+        const visible = (element) => {
+          if (!element || element.hidden) return false;
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          return style.display !== "none"
+            && style.visibility !== "hidden"
+            && rect.width > 0
+            && rect.height > 0;
+        };
+        const comparison = document.getElementById("optional-comparison");
+        return {
+          focus: document.activeElement?.id,
+          verificationVisible: visible(document.getElementById("verification-level")),
+          verificationLabel: document.querySelector("#verification-level strong")
+            .textContent.trim(),
+          servicesText: document.getElementById("service-results").innerText,
+          comparisonHidden: comparison.hidden,
+          comparisonVisible: visible(comparison),
+          requestCount: document.querySelectorAll(".provider-request-card").length,
+          message: document.getElementById("global-message").innerText,
+        };
+      })()`);
+
+      await clickById("finish-household-review");
+      await waitFor(`!document.querySelector('[data-step="4"]').hidden
+        && document.activeElement?.id === "household-title"`);
+      await evaluate(`document.querySelector('[data-next="5"]').click(); true`);
+      await waitFor(`!document.querySelector('[data-step="5"]').hidden
+        && document.activeElement?.id === "next-steps-title"`);
+      const requests = await evaluate(`(() => {
+        const cards = [...document.querySelectorAll(".provider-request-card")];
+        return {
+          focus: document.activeElement?.id,
+          count: cards.length,
+          visibleCount: cards.filter((card) => {
+            const rect = card.getBoundingClientRect();
+            return getComputedStyle(card).display !== "none" && rect.width > 0 && rect.height > 0;
+          }).length,
+          text: document.getElementById("provider-review-requests").innerText,
+          pageErrors: [...window.__wattproofBrowserErrors],
+        };
+      })()`);
+      return { sample, identity, review, result, requests };
+    }
+
+    const flows = [];
+    for (const sample of ["authentic", "synthetic", "duke", "centerpoint", "bloomington"]) {
+      flows.push(await runFlow(sample));
+    }
+
+    await command("Emulation.setDeviceMetricsOverride", {
+      width: 390,
+      height: 844,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    await navigateHome();
+    await clickById("bloomington-sample");
+    await waitFor(`!document.querySelector('[data-step="2"]').hidden
+      && document.activeElement?.id === "review-title"`);
+    const mobileReview = await evaluate(`(() => {
+      const layout = document.querySelector(".review-layout");
+      return {
+        focus: document.activeElement?.id,
+        columns: getComputedStyle(layout).gridTemplateColumns.trim().split(/\\s+/).length,
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      };
+    })()`);
+    await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-step="3"]').hidden
+      && document.activeElement?.id === "verify-title"`);
+    await evaluate(`document.querySelector("#calculation-ledger summary").click(); true`);
+    await waitFor(`document.getElementById("calculation-ledger").open`);
+    const mobileResult = await evaluate(`(() => {
+      const results = document.getElementById("service-results");
+      const cards = [...results.querySelectorAll(".service-result-card")];
+      const row = document.querySelector("#audit-lines tr:not([hidden])");
+      const cell = row?.querySelector("td");
+      return {
+        width: innerWidth,
+        height: innerHeight,
+        verificationLabel: document.querySelector("#verification-level strong").textContent.trim(),
+        serviceColumns: getComputedStyle(results).gridTemplateColumns.trim().split(/\\s+/).length,
+        maxCardWidth: Math.max(...cards.map((card) => card.getBoundingClientRect().width)),
+        clientWidth: document.documentElement.clientWidth,
+        noHorizontalOverflow:
+          document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        actionDirection: getComputedStyle(
+          document.querySelector(".result-actions > div"),
+        ).flexDirection,
+        ledgerOpen: document.getElementById("calculation-ledger").open,
+        rowDisplay: getComputedStyle(row).display,
+        cellDisplay: getComputedStyle(cell).display,
+        pageErrors: [...window.__wattproofBrowserErrors],
+      };
+    })()`);
+
+    await evaluate(`new Promise((resolve) => setTimeout(() => resolve(true), 100))`);
+    return {
+      flows,
+      mobileReview,
+      mobileResult,
+      protocolErrors: devtools.protocolErrors,
+      externalRequests: devtools.externalRequests,
+    };
+  } finally {
+    if (devtools) devtools.socket.close();
+    await closeProcess(chromium);
+    await rm(profileDirectory, { recursive: true, force: true });
+    if (chromium.exitCode && browserStderr) process.stderr.write(browserStderr);
+  }
+}
+
+main()
+  .then((evidence) => process.stdout.write(JSON.stringify(evidence)))
+  .catch((error) => {
+    process.stderr.write(`${error.stack || error}\n`);
+    process.exitCode = 1;
+  });
+"""
 
 
 def _exercise_javascript_contract(
@@ -460,3 +841,191 @@ def test_cli_returns_nonzero_for_sample_validation_error(
     assert "WattProof could not audit this document" in captured.err
     assert "Traceback" not in captured.err
     assert captured.out == ""
+
+
+def _find_real_browser_binary() -> str:
+    configured = os.environ.get("AGENT_BROWSER_BIN")
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if configured_path.is_file() and os.access(configured_path, os.X_OK):
+            return str(configured_path)
+        configured_command = shutil.which(configured)
+        if configured_command:
+            return configured_command
+        raise AssertionError(
+            f"AGENT_BROWSER_BIN does not identify an executable browser: {configured}"
+        )
+
+    for command in (
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+        "google-chrome-stable",
+        "chrome",
+        "microsoft-edge",
+    ):
+        installed = shutil.which(command)
+        if installed:
+            return installed
+
+    if sys.platform == "darwin":
+        for candidate in (
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+            Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+        ):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+
+    raise AssertionError(
+        "no Chromium browser found; set AGENT_BROWSER_BIN to a Chrome, Chromium, "
+        "or Edge executable"
+    )
+
+
+def _unused_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return cast(int, listener.getsockname()[1])
+
+
+def _run_real_browser_smoke() -> dict[str, Any]:
+    server = make_server("127.0.0.1", 0, create_app(), threaded=True)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    try:
+        node = shutil.which("node")
+        assert node, "the opt-in real-browser test requires Node.js"
+        completed = subprocess.run(
+            [node, "-e", REAL_BROWSER_HARNESS],
+            input=json.dumps(
+                {
+                    "baseUrl": f"http://127.0.0.1:{server.server_port}/",
+                    "browser": _find_real_browser_binary(),
+                    "debugPort": _unused_local_port(),
+                    "noSandbox": hasattr(os, "geteuid") and os.geteuid() == 0,
+                }
+            ),
+            text=True,
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+        assert completed.returncode == 0, (
+            "real Chromium harness failed\n"
+            f"stdout:\n{completed.stdout}\n"
+            f"stderr:\n{completed.stderr}"
+        )
+        evidence = json.loads(completed.stdout)
+        assert isinstance(evidence, dict)
+        return cast(dict[str, Any], evidence)
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
+
+
+def test_real_chromium_sample_review_and_audit_flows() -> None:
+    if os.environ.get("WATTPROOF_REAL_BROWSER") != "1":
+        pytest.skip(
+            "set WATTPROOF_REAL_BROWSER=1 to run the real Chromium UI smoke test"
+        )
+
+    evidence = _run_real_browser_smoke()
+    expectations: dict[str, dict[str, Any]] = {
+        "authentic": {
+            "verification": "Tariff verified",
+            "comparison": True,
+            "requests": 2,
+            "review_units": ("kWh",),
+            "result_units": ("kWh",),
+        },
+        "synthetic": {
+            "verification": "Tariff verified",
+            "comparison": True,
+            "requests": 1,
+            "review_units": ("kWh",),
+            "result_units": ("kWh",),
+        },
+        "duke": {
+            "verification": "Internally reconciled",
+            "comparison": False,
+            "requests": 1,
+            "review_units": ("kWh",),
+            "result_units": ("kWh",),
+        },
+        "centerpoint": {
+            "verification": "Internally reconciled",
+            "comparison": False,
+            "requests": 1,
+            "review_units": ("CCF", "therm"),
+            "result_units": ("therm",),
+        },
+        "bloomington": {
+            "verification": "Internally reconciled",
+            "comparison": False,
+            "requests": 1,
+            "review_units": ("kgal",),
+            "result_units": ("kgal",),
+        },
+    }
+
+    flows = evidence["flows"]
+    assert [flow["sample"] for flow in flows] == list(expectations)
+    for flow in flows:
+        expected = expectations[flow["sample"]]
+        assert flow["identity"]["title"] == (
+            "WattProof — Check the math on your utility bill"
+        )
+        assert flow["identity"]["url"].startswith("http://127.0.0.1:")
+        assert "Your utility bill has a formula" in flow["identity"]["body"]
+        assert flow["review"]["visible"] is True
+        assert flow["review"]["focus"] == "review-title"
+        assert flow["review"]["message"] == ""
+        for unit in expected["review_units"]:
+            assert unit in flow["review"]["text"]
+
+        result = flow["result"]
+        assert result["focus"] == "verify-title"
+        assert result["verificationVisible"] is True
+        assert result["verificationLabel"] == expected["verification"]
+        assert result["comparisonHidden"] is (not expected["comparison"])
+        assert result["comparisonVisible"] is expected["comparison"]
+        assert result["requestCount"] == expected["requests"]
+        assert result["message"] == ""
+        for unit in expected["result_units"]:
+            assert unit in result["servicesText"]
+
+        requests = flow["requests"]
+        assert requests["focus"] == "next-steps-title"
+        assert requests["count"] == expected["requests"]
+        assert requests["visibleCount"] == expected["requests"]
+        assert requests["pageErrors"] == []
+
+    assert flows[0]["requests"]["count"] > 1
+    assert all(
+        flow["result"]["verificationLabel"] != "Tariff verified"
+        for flow in flows
+        if flow["sample"] not in {"authentic", "synthetic"}
+    )
+    assert evidence["protocolErrors"] == []
+    assert evidence["externalRequests"] == []
+
+    mobile_review = evidence["mobileReview"]
+    assert mobile_review == {
+        "focus": "review-title",
+        "columns": 1,
+        "noHorizontalOverflow": True,
+    }
+    mobile_result = evidence["mobileResult"]
+    assert mobile_result["width"] == 390
+    assert mobile_result["height"] == 844
+    assert mobile_result["verificationLabel"] == "Internally reconciled"
+    assert mobile_result["serviceColumns"] == 1
+    assert mobile_result["maxCardWidth"] <= mobile_result["clientWidth"]
+    assert mobile_result["noHorizontalOverflow"] is True
+    assert mobile_result["actionDirection"] == "column"
+    assert mobile_result["ledgerOpen"] is True
+    assert mobile_result["rowDisplay"] == "block"
+    assert mobile_result["cellDisplay"] == "grid"
+    assert mobile_result["pageErrors"] == []
