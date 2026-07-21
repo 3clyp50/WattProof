@@ -14,6 +14,7 @@ from .extract import (
     extract_pdf,
 )
 from .fixtures import load_sample
+from .utility_models import UtilityDocument
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -37,6 +38,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         bill = extract_pdf(args.file) if args.file else load_sample(args.sample)
+        if isinstance(bill, UtilityDocument):
+            raise UnsupportedDocumentError(
+                "This utility document was extracted, but provider-neutral CLI audit "
+                "routing is not available yet."
+            )
         result = audit_bill(bill)
     except (
         ExtractionUnavailableError,
