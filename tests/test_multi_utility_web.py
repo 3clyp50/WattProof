@@ -7,7 +7,10 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from html import escape
 from html.parser import HTMLParser
 from io import BytesIO
@@ -25,6 +28,15 @@ from wattproof.utility_models import UtilityAuditResult, UtilityDocument
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_JAVASCRIPT = PROJECT_ROOT / "wattproof" / "static" / "app.js"
+REVIEW_SCREENSHOT_SPECS = {
+    "multi-utility-upload-desktop.png": (1440, 1000),
+    "pge-tariff-verified-desktop.png": (1440, 1000),
+    "duke-internal-reconciliation-desktop.png": (1440, 1000),
+    "centerpoint-gas-desktop.png": (1440, 1000),
+    "household-bundle-desktop.png": (1440, 1000),
+    "water-review-mobile.png": (390, 844),
+    "household-result-mobile.png": (390, 844),
+}
 
 
 class _MarkupProbe(HTMLParser):
@@ -1663,18 +1675,82 @@ def _sample_document(client: Any, kind: str) -> dict[str, Any]:
     }
 
 
-def test_review_artifacts_exist() -> None:
-    expected = {
-        "multi-utility-upload-desktop.png": (1440, 1000),
-        "pge-tariff-verified-desktop.png": (1440, 1000),
-        "duke-internal-reconciliation-desktop.png": (1440, 1000),
-        "centerpoint-gas-desktop.png": (1440, 1000),
-        "household-bundle-desktop.png": (1440, 1000),
-        "water-review-mobile.png": (390, 844),
-        "household-result-mobile.png": (390, 844),
-    }
+def _validate_staged_screenshot(path: Path, dimensions: tuple[int, int]) -> None:
+    assert path.is_file() and not path.is_symlink(), (
+        f"staged screenshot is not a regular file: {path.name}"
+    )
+    data = path.read_bytes()
+    assert len(data) > 10_000, f"staged screenshot is too small: {path.name}"
+    assert data.startswith(b"\x89PNG\r\n\x1a\n"), (
+        f"staged screenshot is not PNG: {path.name}"
+    )
+    assert data[12:16] == b"IHDR", f"staged screenshot lacks IHDR: {path.name}"
+    actual_dimensions = tuple(
+        int.from_bytes(data[offset : offset + 4], "big") for offset in (16, 20)
+    )
+    assert actual_dimensions == dimensions, (
+        f"staged screenshot has dimensions {actual_dimensions}, expected "
+        f"{dimensions}: {path.name}"
+    )
 
-    for name, dimensions in expected.items():
+
+def _publish_staged_screenshots(staging: Path, target: Path) -> None:
+    actual_names = {path.name for path in staging.iterdir()}
+    expected_names = set(REVIEW_SCREENSHOT_SPECS)
+    assert actual_names == expected_names, (
+        "capture must contain the exact screenshot set; "
+        f"missing={sorted(expected_names - actual_names)}, "
+        f"unexpected={sorted(actual_names - expected_names)}"
+    )
+    for name, dimensions in REVIEW_SCREENSHOT_SPECS.items():
+        _validate_staged_screenshot(staging / name, dimensions)
+
+    assert target.is_dir() and not target.is_symlink(), (
+        f"screenshot target must be an existing regular directory: {target}"
+    )
+    backup = staging / ".previous"
+    backup.mkdir()
+    previously_present: set[str] = set()
+    for name in REVIEW_SCREENSHOT_SPECS:
+        destination = target / name
+        if destination.exists() or destination.is_symlink():
+            assert destination.is_file() and not destination.is_symlink(), (
+                f"refusing non-regular screenshot target: {destination}"
+            )
+            os.link(destination, backup / name)
+            previously_present.add(name)
+
+    published: list[str] = []
+    try:
+        for name in REVIEW_SCREENSHOT_SPECS:
+            os.replace(staging / name, target / name)
+            published.append(name)
+    except BaseException:
+        for name in reversed(published):
+            destination = target / name
+            if name in previously_present:
+                os.replace(backup / name, destination)
+            else:
+                destination.unlink(missing_ok=True)
+        raise
+
+
+@contextmanager
+def _screenshot_capture_transaction(target: Path) -> Iterator[Path]:
+    assert target.is_dir() and not target.is_symlink(), (
+        f"screenshot target must be an existing regular directory: {target}"
+    )
+    with tempfile.TemporaryDirectory(
+        prefix=f".{target.name}-capture-",
+        dir=target.parent,
+    ) as temporary_directory:
+        staging = Path(temporary_directory)
+        yield staging
+        _publish_staged_screenshots(staging, target)
+
+
+def test_review_artifacts_exist() -> None:
+    for name, dimensions in REVIEW_SCREENSHOT_SPECS.items():
         image = PROJECT_ROOT / "docs" / "screenshots" / name
         assert image.is_file()
         assert image.stat().st_size > 10_000
@@ -1687,12 +1763,122 @@ def test_review_artifacts_exist() -> None:
     assert (PROJECT_ROOT / "docs" / "screenshots" / "README.md").is_file()
 
 
+def _seed_screenshot_target(target: Path) -> dict[str, bytes]:
+    target.mkdir(parents=True)
+    originals: dict[str, bytes] = {}
+    for index, name in enumerate(REVIEW_SCREENSHOT_SPECS):
+        original = f"existing screenshot {index}".encode()
+        (target / name).write_bytes(original)
+        originals[name] = original
+    (target / "README.md").write_text("preserve this manifest\n", encoding="utf-8")
+    return originals
+
+
+def _stage_committed_screenshots(staging: Path, *, omit: str | None = None) -> None:
+    source = PROJECT_ROOT / "docs" / "screenshots"
+    for name in REVIEW_SCREENSHOT_SPECS:
+        if name != omit:
+            shutil.copyfile(source / name, staging / name)
+
+
+def test_screenshot_capture_transaction_rejects_incomplete_set_without_changes(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "screenshots"
+    originals = _seed_screenshot_target(target)
+    missing = "water-review-mobile.png"
+    staging_path: Path | None = None
+
+    with pytest.raises(AssertionError, match="exact screenshot set"):
+        with _screenshot_capture_transaction(target) as staging:
+            staging_path = staging
+            _stage_committed_screenshots(staging, omit=missing)
+
+    assert staging_path is not None and not staging_path.exists()
+    assert {name: (target / name).read_bytes() for name in originals} == originals
+    assert (target / "README.md").read_text(encoding="utf-8") == (
+        "preserve this manifest\n"
+    )
+
+
+def test_screenshot_capture_transaction_cleans_interrupted_capture(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "screenshots"
+    originals = _seed_screenshot_target(target)
+    staging_path: Path | None = None
+
+    with pytest.raises(KeyboardInterrupt):
+        with _screenshot_capture_transaction(target) as staging:
+            staging_path = staging
+            first = next(iter(REVIEW_SCREENSHOT_SPECS))
+            shutil.copyfile(PROJECT_ROOT / "docs" / "screenshots" / first, staging / first)
+            raise KeyboardInterrupt
+
+    assert staging_path is not None and not staging_path.exists()
+    assert {name: (target / name).read_bytes() for name in originals} == originals
+
+
+def test_screenshot_capture_transaction_rolls_back_publication_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "screenshots"
+    originals = _seed_screenshot_target(target)
+    staging_path: Path | None = None
+    real_replace = os.replace
+    publication_calls = 0
+
+    def fail_second_publication(source: str | Path, destination: str | Path) -> None:
+        nonlocal publication_calls
+        if staging_path is not None and Path(source).parent == staging_path:
+            publication_calls += 1
+            if publication_calls == 2:
+                raise OSError("simulated publication interruption")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", fail_second_publication)
+    with pytest.raises(OSError, match="simulated publication interruption"):
+        with _screenshot_capture_transaction(target) as staging:
+            staging_path = staging
+            _stage_committed_screenshots(staging)
+
+    assert staging_path is not None and not staging_path.exists()
+    assert {name: (target / name).read_bytes() for name in originals} == originals
+
+
+def test_screenshot_capture_transaction_publishes_complete_valid_set(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "screenshots"
+    _seed_screenshot_target(target)
+    staging_path: Path | None = None
+
+    with _screenshot_capture_transaction(target) as staging:
+        staging_path = staging
+        _stage_committed_screenshots(staging)
+
+    assert staging_path is not None and not staging_path.exists()
+    for name in REVIEW_SCREENSHOT_SPECS:
+        assert (target / name).read_bytes() == (
+            PROJECT_ROOT / "docs" / "screenshots" / name
+        ).read_bytes()
+    assert (target / "README.md").read_text(encoding="utf-8") == (
+        "preserve this manifest\n"
+    )
+
+
 def test_public_sample_fetcher_uses_official_hash_pinned_sources() -> None:
     fetcher = PROJECT_ROOT / "scripts" / "fetch-public-samples.sh"
     source = fetcher.read_text(encoding="utf-8")
 
     assert "set -euo pipefail" in source
-    assert "tmp/public-samples" in source
+    assert 'tmp_directory="$repository_root/tmp"' in source
+    assert 'destination_directory="$tmp_directory/public-samples"' in source
+    assert "cd -P" in source
+    assert "pwd -P" in source
+    assert "stat -f '%d:%i'" in source
+    assert "stat -c '%d:%i'" in source
     assert "sha256sum" in source
     assert "shasum" in source
     assert '[[ -e "$destination" || -L "$destination" ]]' in source
@@ -1790,6 +1976,152 @@ def test_public_sample_fetcher_refuses_dangling_destination_symlink(
     assert not download_marker.exists()
     assert "refusing non-regular existing path" in completed.stderr
     assert not list(isolated_samples.glob(".download.*"))
+
+
+def _write_download_guard(fake_bin: Path, marker: Path) -> None:
+    fake_curl = fake_bin / "curl"
+    fake_curl.write_text(
+        f"#!/usr/bin/env bash\ntouch {shlex.quote(str(marker))}\nexit 99\n",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+
+
+def _run_isolated_fetcher(
+    isolated_root: Path,
+    fake_bin: Path,
+) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+    return subprocess.run(
+        ["bash", str(isolated_root / "scripts" / "fetch-public-samples.sh")],
+        cwd=isolated_root,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_public_sample_fetcher_rejects_symlinked_tmp_component(
+    tmp_path: Path,
+) -> None:
+    isolated_root = tmp_path / "checkout"
+    isolated_scripts = isolated_root / "scripts"
+    outside = tmp_path / "outside"
+    fake_bin = isolated_root / "fake-bin"
+    isolated_scripts.mkdir(parents=True)
+    outside.mkdir()
+    fake_bin.mkdir()
+    shutil.copy2(
+        PROJECT_ROOT / "scripts" / "fetch-public-samples.sh",
+        isolated_scripts / "fetch-public-samples.sh",
+    )
+    (isolated_root / "tmp").symlink_to(outside, target_is_directory=True)
+    download_marker = isolated_root / "download-attempted"
+    _write_download_guard(fake_bin, download_marker)
+
+    completed = _run_isolated_fetcher(isolated_root, fake_bin)
+
+    assert completed.returncode != 0
+    assert not download_marker.exists()
+    assert not list(outside.iterdir())
+    assert "symlinked path component" in completed.stderr
+
+
+def test_public_sample_fetcher_rejects_symlinked_public_samples_component(
+    tmp_path: Path,
+) -> None:
+    isolated_root = tmp_path / "checkout"
+    isolated_scripts = isolated_root / "scripts"
+    isolated_tmp = isolated_root / "tmp"
+    outside = tmp_path / "outside"
+    fake_bin = isolated_root / "fake-bin"
+    isolated_scripts.mkdir(parents=True)
+    isolated_tmp.mkdir()
+    outside.mkdir()
+    fake_bin.mkdir()
+    shutil.copy2(
+        PROJECT_ROOT / "scripts" / "fetch-public-samples.sh",
+        isolated_scripts / "fetch-public-samples.sh",
+    )
+    (isolated_tmp / "public-samples").symlink_to(
+        outside,
+        target_is_directory=True,
+    )
+    download_marker = isolated_root / "download-attempted"
+    _write_download_guard(fake_bin, download_marker)
+
+    completed = _run_isolated_fetcher(isolated_root, fake_bin)
+
+    assert completed.returncode != 0
+    assert not download_marker.exists()
+    assert not list(outside.iterdir())
+    assert "symlinked path component" in completed.stderr
+
+
+def test_public_sample_fetcher_detects_destination_replacement_before_publish(
+    tmp_path: Path,
+) -> None:
+    isolated_root = tmp_path / "checkout"
+    isolated_scripts = isolated_root / "scripts"
+    isolated_samples = isolated_root / "tmp" / "public-samples"
+    moved_samples = isolated_root / "tmp" / "public-samples-before-replacement"
+    fake_bin = isolated_root / "fake-bin"
+    isolated_scripts.mkdir(parents=True)
+    isolated_samples.mkdir(parents=True)
+    fake_bin.mkdir()
+    shutil.copy2(
+        PROJECT_ROOT / "scripts" / "fetch-public-samples.sh",
+        isolated_scripts / "fetch-public-samples.sh",
+    )
+    fake_curl = fake_bin / "curl"
+    fake_curl.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env bash",
+                'output=""',
+                'while [[ "$#" -gt 0 ]]; do',
+                '  if [[ "$1" == "--output" ]]; then',
+                "    shift",
+                '    output="$1"',
+                "  fi",
+                "  shift",
+                "done",
+                'printf "approved bytes" > "$output"',
+                f"mv {shlex.quote(str(isolated_samples))} "
+                f"{shlex.quote(str(moved_samples))}",
+                f"mkdir {shlex.quote(str(isolated_samples))}",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fake_curl.chmod(0o755)
+    fake_sha256sum = fake_bin / "sha256sum"
+    fake_sha256sum.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env bash",
+                'last_argument="${!#}"',
+                'printf "%s  %s\\n" '
+                '"b131c36a215762796e72f3d20986fbea7e64e2dd611081d8936f8442102c3e9a" '
+                '"$last_argument"',
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fake_sha256sum.chmod(0o755)
+
+    completed = _run_isolated_fetcher(isolated_root, fake_bin)
+
+    assert completed.returncode != 0
+    assert isolated_samples.is_dir() and not isolated_samples.is_symlink()
+    assert not list(isolated_samples.iterdir())
+    assert moved_samples.is_dir()
+    assert not list(moved_samples.glob(".download.*"))
+    assert "destination directory changed" in completed.stderr
 
 
 @pytest.mark.parametrize(
@@ -2856,32 +3188,44 @@ def _run_real_browser_smoke() -> dict[str, Any]:
     try:
         node = shutil.which("node")
         assert node, "the opt-in real-browser test requires Node.js"
-        completed = subprocess.run(
-            [node, "-e", REAL_BROWSER_HARNESS],
-            input=json.dumps(
-                {
-                    "baseUrl": f"http://127.0.0.1:{server.server_port}/",
-                    "browser": _find_real_browser_binary(),
-                    "captureDirectory": os.environ.get(
-                        "WATTPROOF_SCREENSHOT_DIR"
-                    ),
-                    "debugPort": _unused_local_port(),
-                    "noSandbox": hasattr(os, "geteuid") and os.geteuid() == 0,
-                }
-            ),
-            text=True,
-            capture_output=True,
-            timeout=120,
-            check=False,
-        )
-        assert completed.returncode == 0, (
-            "real Chromium harness failed\n"
-            f"stdout:\n{completed.stdout}\n"
-            f"stderr:\n{completed.stderr}"
-        )
-        evidence = json.loads(completed.stdout)
-        assert isinstance(evidence, dict)
-        return cast(dict[str, Any], evidence)
+
+        def run_harness(capture_directory: Path | None) -> dict[str, Any]:
+            completed = subprocess.run(
+                [node, "-e", REAL_BROWSER_HARNESS],
+                input=json.dumps(
+                    {
+                        "baseUrl": f"http://127.0.0.1:{server.server_port}/",
+                        "browser": _find_real_browser_binary(),
+                        "captureDirectory": (
+                            str(capture_directory) if capture_directory else None
+                        ),
+                        "debugPort": _unused_local_port(),
+                        "noSandbox": hasattr(os, "geteuid")
+                        and os.geteuid() == 0,
+                    }
+                ),
+                text=True,
+                capture_output=True,
+                timeout=120,
+                check=False,
+            )
+            assert completed.returncode == 0, (
+                "real Chromium harness failed\n"
+                f"stdout:\n{completed.stdout}\n"
+                f"stderr:\n{completed.stderr}"
+            )
+            evidence = json.loads(completed.stdout)
+            assert isinstance(evidence, dict)
+            return cast(dict[str, Any], evidence)
+
+        capture_target_value = os.environ.get("WATTPROOF_SCREENSHOT_DIR")
+        if capture_target_value:
+            capture_target = Path(capture_target_value)
+            if not capture_target.is_absolute():
+                capture_target = Path.cwd() / capture_target
+            with _screenshot_capture_transaction(capture_target) as staging:
+                return run_harness(staging)
+        return run_harness(None)
     finally:
         server.shutdown()
         server.server_close()

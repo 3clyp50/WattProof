@@ -60,9 +60,16 @@ WATTPROOF_REAL_BROWSER=1 WATTPROOF_SCREENSHOT_DIR="$PWD/docs/screenshots" \
 Set `AGENT_BROWSER_BIN` only if Chrome/Chromium/Edge is not discovered automatically.
 When `WATTPROOF_SCREENSHOT_DIR` is present, the harness uses Chromium's DevTools
 `Page.captureScreenshot` with `format: "png"` after fonts and two animation frames
-settle. The smoke test verifies the same five sample paths, the exact sequential
-household order, the `1440 × 1000` desktop capture, the `390 × 844` mobile contract,
-no sideways overflow, no page errors, and no external browser requests.
+settle. Chrome writes only to a temporary sibling staging directory, never directly
+to these tracked PNG paths. The harness requires the exact seven filenames, validates
+every PNG signature, byte size, and viewport dimensions, and only then publishes each
+file with atomic replacement. Incomplete or interrupted captures publish nothing;
+publication errors roll back prior replacements; staging is always removed. The
+manifest remains untouched.
+
+The smoke test verifies the same five sample paths, the exact sequential household
+order, the `1440 × 1000` desktop capture, the `390 × 844` mobile contract, no sideways
+overflow, no page errors, and no external browser requests.
 
 ## Verify the artifacts
 
