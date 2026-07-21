@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import date
 from decimal import Decimal
 from typing import Literal, Self
@@ -62,6 +63,37 @@ class ChargeLine(BaseModel):
     billed_amount: DecimalFact
 
 
+def iter_bill_evidence(bill: BillExtraction) -> Iterator[EvidenceBase]:
+    yield bill.delivery_provider
+    yield bill.generation_provider
+    yield bill.delivery_schedule
+    yield bill.generation_schedule
+    yield bill.statement_date
+    yield bill.service_start
+    yield bill.service_end
+    yield bill.billing_days
+    yield bill.total_usage
+    yield bill.peak_usage
+    yield bill.off_peak_usage
+    yield bill.baseline_territory
+    yield bill.heat_source
+    yield bill.baseline_allowance
+    yield bill.daily_baseline_quantity
+    if bill.meter_read_status is not None:
+        yield bill.meter_read_status
+    for line in bill.charges:
+        if line.quantity is not None:
+            yield line.quantity
+        if line.rate is not None:
+            yield line.rate
+        yield line.billed_amount
+    yield bill.delivery_subtotal
+    yield bill.generation_subtotal
+    yield bill.current_charges
+    yield bill.outstanding_balance
+    yield bill.amount_due
+
+
 class BillExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -69,7 +101,7 @@ class BillExtraction(BaseModel):
     fixture_kind: Literal["authentic", "synthetic", "uploaded"]
     synthetic_notice: str | None = None
     document_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
-    page_count: int = Field(ge=1, le=20)
+    page_count: int | None = Field(default=None, ge=1, le=20)
     delivery_provider: TextFact
     generation_provider: TextFact
     delivery_schedule: TextFact
@@ -119,6 +151,13 @@ class BillExtraction(BaseModel):
                 raise ValueError(
                     f"charges must include at least one {required_section} charge"
                 )
+
+        if self.page_count is not None and any(
+            fact.source_page > self.page_count for fact in iter_bill_evidence(self)
+        ):
+            raise ValueError(
+                "evidence source_page cannot exceed authoritative page_count"
+            )
 
         if self.fixture_kind == "synthetic" and not self.synthetic_notice:
             raise ValueError("synthetic fixtures require a visible notice")

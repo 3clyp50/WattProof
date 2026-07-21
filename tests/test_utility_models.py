@@ -94,6 +94,31 @@ def test_legacy_translation_preserves_authoritative_page_count() -> None:
     assert max(line.billed_amount.source_page for line in legacy.charges) == 4
     assert legacy.page_count == 6
     assert translated.page_count == 6
+    assert not any("evidence-page lower bound" in warning for warning in translated.warnings)
+
+
+def test_legacy_schema_one_payload_without_page_count_still_validates() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload.pop("page_count")
+
+    legacy = BillExtraction.model_validate(payload)
+
+    assert legacy.schema_version == "1.0"
+    assert legacy.page_count is None
+
+
+def test_legacy_translation_warns_when_page_count_is_only_a_lower_bound() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload.pop("page_count")
+    legacy = BillExtraction.model_validate(payload)
+
+    translated = translate_legacy_bill(legacy)
+
+    assert translated.page_count == 4
+    assert (
+        "Legacy schema 1.0 omitted authoritative page count; page_count is an "
+        "evidence-page lower bound."
+    ) in translated.warnings
 
 
 def test_legacy_translation_preserves_charge_math_and_evidence() -> None:
@@ -250,6 +275,28 @@ def test_legacy_bill_requires_cca_generation_charge() -> None:
     ]
 
     with pytest.raises(ValidationError, match="at least one cca_generation charge"):
+        BillExtraction.model_validate(payload)
+
+
+def test_legacy_bill_rejects_evidence_after_authoritative_page_count() -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    payload["page_count"] = 3
+
+    with pytest.raises(ValidationError, match="source_page.*page_count"):
+        BillExtraction.model_validate(payload)
+
+
+@pytest.mark.parametrize("fact_name", ["quantity", "rate", "billed_amount"])
+def test_legacy_bill_rejects_charge_evidence_after_page_count(
+    fact_name: str,
+) -> None:
+    payload = load_sample("authentic").model_dump(mode="json")
+    charge = next(
+        charge for charge in payload["charges"] if charge["id"] == "cca_nov_peak"
+    )
+    charge[fact_name]["source_page"] = payload["page_count"] + 1
+
+    with pytest.raises(ValidationError, match="source_page.*page_count"):
         BillExtraction.model_validate(payload)
 
 

@@ -11,6 +11,7 @@ from .models import (
     EvidenceBase,
     IntegerFact,
     TextFact,
+    iter_bill_evidence,
 )
 from .utility_models import (
     CalculationSpec,
@@ -31,6 +32,10 @@ _PERCENT_BASES: dict[str, tuple[str, str]] = {
     "cca_nov_uut": ("cca_nov_peak", "cca_nov_off_peak"),
     "cca_dec_uut": ("cca_dec_peak", "cca_dec_off_peak"),
 }
+_MISSING_PAGE_COUNT_WARNING = (
+    "Legacy schema 1.0 omitted authoritative page count; page_count is an "
+    "evidence-page lower bound."
+)
 
 
 def _evidence(fact: EvidenceBase) -> EvidenceRef:
@@ -179,18 +184,23 @@ def translate_legacy_bill(bill: BillExtraction) -> UtilityDocument:
             subtotal=_money_fact(bill.generation_subtotal),
         ),
     )
-    warnings = (bill.synthetic_notice,) if bill.synthetic_notice is not None else ()
+    warnings = [bill.synthetic_notice] if bill.synthetic_notice is not None else []
+    if bill.page_count is None:
+        page_count = max(fact.source_page for fact in iter_bill_evidence(bill))
+        warnings.append(_MISSING_PAGE_COUNT_WARNING)
+    else:
+        page_count = bill.page_count
 
     return UtilityDocument(
         schema_version="2.0",
         fixture_kind=bill.fixture_kind,
         document_sha256=bill.document_sha256,
-        page_count=bill.page_count,
+        page_count=page_count,
         statement_date=_date_fact(bill.statement_date),
         currency=bill.current_charges.unit,
         sections=sections,
         current_charges=_money_fact(bill.current_charges),
         outstanding_balance=_money_fact(bill.outstanding_balance),
         amount_due=_money_fact(bill.amount_due),
-        warnings=warnings,
+        warnings=tuple(warnings),
     )
