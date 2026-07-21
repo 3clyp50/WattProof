@@ -400,3 +400,9 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
   after the heading exists and removed whenever comparison content is cleared. Static
   and real-Chromium tests lock both states. The full verification gate again passes
   **575 tests**, Ruff, strict MyPy across 28 source files, and bytecode compilation.
+- Commit `fe21dd1d341fc7dd576a8f4eb26e9226d29ccca1` passed Python 3.12,
+  Python 3.13, and deployment in Actions run
+  [`29876549181`](https://github.com/3clyp50/WattProof/actions/runs/29876549181).
+  A cache-busted public WAVE rerun of that deployed commit reports **0 errors, 0
+  contrast errors, 0 alerts, and 10/10 AIM**. This is automated evaluation evidence,
+  not a substitute for manual accessibility testing.
