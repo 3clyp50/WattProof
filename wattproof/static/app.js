@@ -320,10 +320,10 @@ function renderCodexStatus(payload) {
   byId("codex-plan").textContent = `${plan}${state.codex.model}`;
   byId("codex-note").classList.toggle("connected", connected);
   byId("codex-note-text").textContent = connected
-    ? `${state.codex.model} is ready to read your bill.`
+    ? `${state.codex.model} is connected and ready to read your PDF. WattProof will handle the math.`
     : codexState === "pending"
-      ? "Finish signing in on the OpenAI page."
-      : "To review your own PDF, connect Codex.";
+      ? "Finish signing in so Codex can read your PDF."
+      : "Why connect? Codex reads your PDF into reviewable facts. WattProof then checks the math. Public samples work without it.";
   byId("codex-note").querySelector("button").hidden = connected;
 
   if (connected) {

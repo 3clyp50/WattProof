@@ -2929,6 +2929,10 @@ def test_page_uses_provider_neutral_five_step_language() -> None:
         "Review the real sample",
         "Catch a labeled $5 test error",
         "Choose your utility bill",
+        "Why connect?",
+        "Codex reads your PDF into reviewable facts",
+        "WattProof then checks the math",
+        "Public samples work without it",
         "Your privacy:",
     ):
         assert phrase in page

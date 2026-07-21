@@ -360,10 +360,11 @@ h1, h2, h3, p { text-wrap: pretty; }
 .or { display: flex; align-items: center; gap: 12px; margin: 22px 0 13px; color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.09em; }
 .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
-.codex-note { margin: 0 0 11px; display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 0.78rem; }
+.codex-note { margin: 0 0 11px; display: flex; align-items: flex-start; gap: 9px; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
+.codex-note > span:nth-child(2) { flex: 1; }
 .codex-note .connection-dot { background: #b78628; box-shadow: 0 0 0 4px rgba(183, 134, 40, 0.11); }
 .codex-note.connected .connection-dot { background: #2e9878; box-shadow: 0 0 0 4px rgba(46, 152, 120, 0.12); }
-.codex-note button { margin-left: auto; padding: 2px 0; color: var(--green); background: none; border: 0; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+.codex-note button { flex: 0 0 auto; margin-left: auto; padding: 2px 0; color: var(--green); background: none; border: 0; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
 
 .file-target {
   min-height: 110px;

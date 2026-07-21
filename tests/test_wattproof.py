@@ -583,7 +583,8 @@ def test_web_flow_exposes_all_five_steps() -> None:
         assert f"<b>{label}</b>" in page
     for obsolete_label in ("Audit", "Compare", "Act"):
         assert f"<b>{obsolete_label}</b>" not in page
-    assert "Your own PDF is read through your connected Codex session" in page
+    assert "Codex reads your PDF into reviewable facts" in page
+    assert "Public samples work without it" in page
     assert "WattProof recalculates supported charges and totals" in page
     assert "Local sample mode" not in page
     assert 'id="codex-connect"' in page

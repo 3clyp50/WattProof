@@ -446,3 +446,17 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - A cache-busted public WAVE evaluation of the deployed release reports **0 errors, 0
   contrast errors, 0 alerts, and 10/10 AIM**. This remains automated evaluation
   evidence rather than a substitute for manual accessibility testing.
+
+## 2026-07-22 - Explain when and why Codex is needed
+
+- Replaced the upload card's requirement-only message with the product boundary in
+  plain language: Codex reads a personal PDF into reviewable facts, WattProof checks
+  the math, and public samples work without Codex. Connected and pending states now
+  explain the same flow instead of reverting to implementation language.
+- Removed the duplicated functional explanation from the privacy line so it now covers
+  only deletion after processing and the 30-minute temporary-session expiry. Increased
+  the connection explanation to 0.82 rem because it is essential guidance rather than
+  fine print.
+- Desktop and 390 px Playwright renders keep the explanation beside the existing
+  Connect action with no horizontal overflow. The full real-browser verification gate
+  passes **575 tests**, Ruff, strict MyPy across 28 source files, and compilation.
