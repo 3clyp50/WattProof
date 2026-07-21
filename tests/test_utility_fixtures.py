@@ -106,6 +106,8 @@ def material_fact_paths(document: UtilityDocument) -> dict[str, FactBaseV2]:
             facts[f"{conversion_prefix}.source"] = conversion.source
             facts[f"{conversion_prefix}.factor"] = conversion.factor
             facts[f"{conversion_prefix}.result"] = conversion.result
+        for supplemental in section.supplemental_facts:
+            facts[f"{prefix}.supplemental:{supplemental.id}"] = supplemental.fact
         for charge in section.charges:
             charge_prefix = f"{prefix}.charge:{charge.id}"
             if charge.quantity is not None:
@@ -136,26 +138,62 @@ def fact_unit_or_currency(fact: FactBaseV2) -> str | None:
     return None
 
 
+def golden_fact_failures(
+    document: UtilityDocument,
+    golden: Mapping[str, GoldenFact],
+) -> tuple[str, ...]:
+    actual = material_fact_paths(document)
+    missing_golden = actual.keys() - golden.keys()
+    stale_golden = golden.keys() - actual.keys()
+    failures = [
+        *(f"{path}: material fact is missing a golden entry" for path in missing_golden),
+        *(f"{path}: golden entry is stale" for path in stale_golden),
+    ]
+
+    for path in golden.keys() & actual.keys():
+        expected = golden[path]
+        fact = actual[path]
+        value = serialized_fact_value(fact)
+        if value != expected.value:
+            failures.append(f"{path}: expected value {expected.value!r}, got {value!r}")
+        unit = fact_unit_or_currency(fact)
+        if unit != expected.unit_or_currency:
+            failures.append(
+                f"{path}: expected unit/currency {expected.unit_or_currency!r}, "
+                f"got {unit!r}"
+            )
+        if fact.status != expected.status:
+            failures.append(
+                f"{path}: expected status {expected.status!r}, got {fact.status!r}"
+            )
+        if fact.evidence.page != expected.page:
+            failures.append(
+                f"{path}: expected page {expected.page}, got {fact.evidence.page}"
+            )
+        if fact.evidence.provenance != "rendered_page":
+            failures.append(
+                f"{path}: expected rendered_page provenance, "
+                f"got {fact.evidence.provenance!r}"
+            )
+        if expected.evidence_substring not in fact.evidence.text:
+            failures.append(
+                f"{path}: evidence is missing {expected.evidence_substring!r}"
+            )
+        evidence_text = fact.evidence.text.casefold()
+        exposed = tuple(
+            marker for marker in _PRIVATE_EVIDENCE_MARKERS if marker in evidence_text
+        )
+        if exposed:
+            failures.append(f"{path}: evidence exposes private marker {exposed[0]!r}")
+    return tuple(sorted(failures))
+
+
 def assert_golden_facts(
     document: UtilityDocument,
     golden: Mapping[str, GoldenFact],
 ) -> None:
-    actual = material_fact_paths(document)
-    missing = golden.keys() - actual.keys()
-    assert not missing, f"Missing material fact paths: {sorted(missing)}"
-
-    for path, expected in golden.items():
-        fact = actual[path]
-        assert serialized_fact_value(fact) == expected.value, path
-        assert fact_unit_or_currency(fact) == expected.unit_or_currency, path
-        assert fact.status == expected.status, path
-        assert fact.evidence.page == expected.page, path
-        assert fact.evidence.provenance == "rendered_page", path
-        assert expected.evidence_substring in fact.evidence.text, path
-        evidence_text = fact.evidence.text.casefold()
-        assert not any(
-            marker in evidence_text for marker in _PRIVATE_EVIDENCE_MARKERS
-        ), path
+    failures = golden_fact_failures(document, golden)
+    assert not failures, "\n".join(failures)
 
 
 def test_unsupported_utility_sample_kind_has_actionable_error() -> None:
@@ -265,9 +303,32 @@ def test_duke_fixture_reconciles_every_visible_product_tax_and_rollup() -> None:
     assert result.comparison is None
 
 
-def test_duke_material_facts_have_exact_golden_evidence() -> None:
-    document = load_utility_sample("duke")
+def duke_golden_facts() -> dict[str, GoldenFact]:
     golden: dict[str, GoldenFact] = {
+        "statement.date": GoldenFact(
+            "2026-03-10", None, 1, "Bill date Mar 10, 2026"
+        ),
+        "section:electricity.provider": GoldenFact(
+            "Duke Energy", None, 1, "DUKE ENERGY"
+        ),
+        "section:electricity.jurisdiction": GoldenFact(
+            "Indiana", None, 3, "Indiana applies a 7% state sales tax"
+        ),
+        "section:electricity.schedule": GoldenFact(
+            "Residential Electric Service (RS)",
+            None,
+            2,
+            "Your current rate is Residential Electric Service (RS).",
+        ),
+        "section:electricity.service_start": GoldenFact(
+            "2026-02-07", None, 1, "For Feb 7 - Mar 6"
+        ),
+        "section:electricity.service_end": GoldenFact(
+            "2026-03-06", None, 1, "For Feb 7 - Mar 6"
+        ),
+        "section:electricity.usage": GoldenFact(
+            "1001", "kWh", 1, "Electric (kWh) 1,001"
+        ),
         "section:electricity.meter.previous": GoldenFact(
             "137956", "kWh", 1, "Previous reading on Feb 7 137956"
         ),
@@ -282,6 +343,18 @@ def test_duke_material_facts_have_exact_golden_evidence() -> None:
         ),
         "section:electricity.subtotal": GoldenFact(
             "167.66", "USD", 2, "Total Current Charges $167.66"
+        ),
+        "section:taxes.provider": GoldenFact(
+            "Duke Energy", None, 1, "DUKE ENERGY"
+        ),
+        "section:taxes.jurisdiction": GoldenFact(
+            "Indiana", None, 3, "Indiana applies a 7% state sales tax"
+        ),
+        "section:taxes.service_start": GoldenFact(
+            "2026-02-07", None, 1, "For Feb 7 - Mar 6"
+        ),
+        "section:taxes.service_end": GoldenFact(
+            "2026-03-06", None, 1, "For Feb 7 - Mar 6"
         ),
         "section:taxes.charge:state_tax.rate": GoldenFact(
             "0.07", "fraction", 3, "7% state sales tax"
@@ -304,28 +377,174 @@ def test_duke_material_facts_have_exact_golden_evidence() -> None:
         ),
     }
     product_golden = {
-        "energy_tier_1": ("300", "0.186556", "55.97", "300.000 kWh"),
-        "energy_tier_2": ("700", "0.135777", "95.04", "700.000 kWh"),
-        "energy_tier_3": ("1", "0.123051", "0.12", "1.000 kWh"),
-        "rider_60": ("1001", "0.006090", "6.10", "Rider No. 60"),
-        "rider_62": ("1001", "-0.003619", "-3.62", "Rider No. 62"),
-        "rider_65": ("1001", "0.002259", "2.26", "Rider No. 65"),
-        "rider_66": ("1001", "0.002717", "2.72", "Rider No. 66"),
-        "rider_67": ("1001", "-0.006040", "-6.05", "Rider No. 67"),
-        "rider_68": ("1001", "0.001947", "1.95", "Rider No. 68"),
-        "rider_70": ("1001", "0.000496", "0.50", "Rider No. 70"),
-        "rider_73": ("1001", "0.000036", "0.04", "Rider No. 73"),
-        "rider_74": ("1001", "-0.001064", "-1.07", "Rider No. 74"),
+        "energy_tier_1": (
+            "300",
+            "0.186556",
+            "55.97",
+            "300.000 kWh",
+            "$0.18655600",
+            "$0.18655600 55.97",
+        ),
+        "energy_tier_2": (
+            "700",
+            "0.135777",
+            "95.04",
+            "700.000 kWh",
+            "$0.13577700",
+            "$0.13577700 95.04",
+        ),
+        "energy_tier_3": (
+            "1",
+            "0.123051",
+            "0.12",
+            "1.000 kWh",
+            "$0.12305100",
+            "$0.12305100 0.12",
+        ),
+        "rider_60": (
+            "1001",
+            "0.006090",
+            "6.10",
+            "1,001.000 kWh",
+            "$0.00609000",
+            "$0.00609000 6.10",
+        ),
+        "rider_62": (
+            "1001",
+            "-0.003619",
+            "-3.62",
+            "1,001.000 kWh",
+            "$-0.00361900",
+            "$-0.00361900 -3.62",
+        ),
+        "rider_65": (
+            "1001",
+            "0.002259",
+            "2.26",
+            "1,001.000 kWh",
+            "$0.00225900",
+            "$0.00225900 2.26",
+        ),
+        "rider_66": (
+            "1001",
+            "0.002717",
+            "2.72",
+            "1,001.000 kWh",
+            "$0.00271700",
+            "$0.00271700 2.72",
+        ),
+        "rider_67": (
+            "1001",
+            "-0.006040",
+            "-6.05",
+            "1,001.000 kWh",
+            "$-0.00604000",
+            "$-0.00604000 -6.05",
+        ),
+        "rider_68": (
+            "1001",
+            "0.001947",
+            "1.95",
+            "1,001.000 kWh",
+            "$0.00194700",
+            "$0.00194700 1.95",
+        ),
+        "rider_70": (
+            "1001",
+            "0.000496",
+            "0.50",
+            "1,001.000 kWh",
+            "$0.00049600",
+            "$0.00049600 0.50",
+        ),
+        "rider_73": (
+            "1001",
+            "0.000036",
+            "0.04",
+            "1,001.000 kWh",
+            "$0.00003600",
+            "$0.00003600 0.04",
+        ),
+        "rider_74": (
+            "1001",
+            "-0.001064",
+            "-1.07",
+            "1,001.000 kWh",
+            "$-0.00106400",
+            "$-0.00106400 -1.07",
+        ),
     }
-    for charge_id, (quantity, rate, amount, excerpt) in product_golden.items():
+    for charge_id, product in product_golden.items():
+        quantity, rate, amount, quantity_excerpt, rate_excerpt, amount_excerpt = product
         path = f"section:electricity.charge:{charge_id}"
         golden[f"{path}.quantity"] = GoldenFact(
-            quantity, "kWh", 2, excerpt
+            quantity, "kWh", 2, quantity_excerpt
         )
-        golden[f"{path}.rate"] = GoldenFact(rate, "USD/kWh", 2, excerpt)
-        golden[f"{path}.amount"] = GoldenFact(amount, "USD", 2, excerpt)
+        golden[f"{path}.rate"] = GoldenFact(rate, "USD/kWh", 2, rate_excerpt)
+        golden[f"{path}.amount"] = GoldenFact(amount, "USD", 2, amount_excerpt)
+    return golden
 
-    assert_golden_facts(document, golden)
+
+def test_duke_material_facts_have_exact_golden_evidence() -> None:
+    document = load_utility_sample("duke")
+
+    assert_golden_facts(document, duke_golden_facts())
+
+
+def test_duke_golden_check_rejects_quantity_only_rate_evidence() -> None:
+    document = load_utility_sample("duke")
+    electricity = next(
+        section for section in document.sections if section.id == "electricity"
+    )
+    tier = next(
+        charge for charge in electricity.charges if charge.id == "energy_tier_1"
+    )
+    assert tier.rate is not None
+    mutated_rate = tier.rate.model_copy(
+        update={
+            "evidence": tier.rate.evidence.model_copy(
+                update={"text": "300.000 kWh"}
+            )
+        }
+    )
+    mutated_tier = tier.model_copy(update={"rate": mutated_rate})
+    mutated_electricity = electricity.model_copy(
+        update={
+            "charges": tuple(
+                mutated_tier if charge.id == tier.id else charge
+                for charge in electricity.charges
+            )
+        }
+    )
+    mutated_document = document.model_copy(
+        update={
+            "sections": tuple(
+                mutated_electricity if section.id == electricity.id else section
+                for section in document.sections
+            )
+        }
+    )
+
+    failures = golden_fact_failures(mutated_document, duke_golden_facts())
+
+    assert failures == (
+        "section:electricity.charge:energy_tier_1.rate: "
+        "evidence is missing '$0.18655600'",
+    )
+
+
+def test_golden_check_rejects_missing_and_stale_paths() -> None:
+    document = load_utility_sample("duke")
+    golden = duke_golden_facts()
+    del golden["statement.date"]
+    golden["statement.stale_total"] = GoldenFact(
+        "0.00", "USD", 1, "stale"
+    )
+
+    failures = golden_fact_failures(document, golden)
+
+    assert "statement.date: material fact is missing a golden entry" in failures
+    assert "statement.stale_total: golden entry is stale" in failures
 
 
 def test_centerpoint_fixture_uses_only_rendered_gas_values_and_reconciles() -> None:
@@ -403,6 +622,9 @@ def test_centerpoint_material_facts_have_exact_golden_evidence() -> None:
         "section:gas.provider": GoldenFact(
             "CenterPoint Energy", None, 2, "CenterPoint Energy"
         ),
+        "section:gas.jurisdiction": GoldenFact(
+            "Indiana", None, 2, "CenterPoint Energy Indiana South"
+        ),
         "section:gas.schedule": GoldenFact(
             "RES 110_IN S 110 Residential Service",
             None,
@@ -459,6 +681,7 @@ def test_centerpoint_rejects_every_known_native_only_value() -> None:
         "6.326",
         "134.69",
         "28.79",
+        "6.93",
         "105.90",
         "98.97",
         "25.01",
@@ -595,6 +818,9 @@ def test_bloomington_material_facts_have_exact_golden_evidence() -> None:
             1,
             "CITY OF BLOOMINGTON UTILITIES",
         ),
+        "section:water.jurisdiction": GoldenFact(
+            "Bloomington, Indiana", None, 1, "WWW.BLOOMINGTON.IN.GOV"
+        ),
         "section:water.service_start": GoldenFact(
             "2018-03-01", None, 1, "Service Period 03/01/2018 to 04/01/2018"
         ),
@@ -605,13 +831,13 @@ def test_bloomington_material_facts_have_exact_golden_evidence() -> None:
             "2", "kgal", 1, "WATER Usage (DOM) $3.73 2 $7.46"
         ),
         "section:water.charge:water_usage.quantity": GoldenFact(
-            "2", "kgal", 1, "WATER Usage (DOM) $3.73 2 $7.46"
+            "2", "kgal", 1, "Usage (DOM) $3.73 2"
         ),
         "section:water.charge:water_usage.rate": GoldenFact(
-            "3.73", "USD/kgal", 1, "WATER Usage (DOM) $3.73 2 $7.46"
+            "3.73", "USD/kgal", 1, "$3.73"
         ),
         "section:water.charge:water_usage.amount": GoldenFact(
-            "7.46", "USD", 1, "WATER Usage (DOM) $3.73 2 $7.46"
+            "7.46", "USD", 1, "$7.46"
         ),
         "section:water.charge:water_service.amount": GoldenFact(
             "7.86", "USD", 1, "Water Service $7.86"
@@ -630,17 +856,32 @@ def test_bloomington_material_facts_have_exact_golden_evidence() -> None:
             "Fire Protection $2.93; Sales Tax $1.28",
             status="inferred",
         ),
+        "section:wastewater.provider": GoldenFact(
+            "City of Bloomington Utilities",
+            None,
+            1,
+            "CITY OF BLOOMINGTON UTILITIES",
+        ),
+        "section:wastewater.jurisdiction": GoldenFact(
+            "Bloomington, Indiana", None, 1, "WWW.BLOOMINGTON.IN.GOV"
+        ),
+        "section:wastewater.service_start": GoldenFact(
+            "2018-03-01", None, 1, "Service Period 03/01/2018 to 04/01/2018"
+        ),
+        "section:wastewater.service_end": GoldenFact(
+            "2018-04-01", None, 1, "Service Period 03/01/2018 to 04/01/2018"
+        ),
         "section:wastewater.usage": GoldenFact(
             "2", "kgal", 1, "WASTEWATER Usage $7.76 2 $15.52"
         ),
         "section:wastewater.charge:wastewater_usage.quantity": GoldenFact(
-            "2", "kgal", 1, "WASTEWATER Usage $7.76 2 $15.52"
+            "2", "kgal", 1, "Usage $7.76 2"
         ),
         "section:wastewater.charge:wastewater_usage.rate": GoldenFact(
-            "7.76", "USD/kgal", 1, "WASTEWATER Usage $7.76 2 $15.52"
+            "7.76", "USD/kgal", 1, "$7.76"
         ),
         "section:wastewater.charge:wastewater_usage.amount": GoldenFact(
-            "15.52", "USD", 1, "WASTEWATER Usage $7.76 2 $15.52"
+            "15.52", "USD", 1, "$15.52"
         ),
         "section:wastewater.charge:wastewater_service.amount": GoldenFact(
             "7.95", "USD", 1, "Wastewater Service $7.95"
@@ -652,6 +893,21 @@ def test_bloomington_material_facts_have_exact_golden_evidence() -> None:
             "WASTEWATER Usage $7.76 2 $15.52; Wastewater Service $7.95",
             status="inferred",
         ),
+        "section:stormwater.provider": GoldenFact(
+            "City of Bloomington Utilities",
+            None,
+            1,
+            "CITY OF BLOOMINGTON UTILITIES",
+        ),
+        "section:stormwater.jurisdiction": GoldenFact(
+            "Bloomington, Indiana", None, 1, "WWW.BLOOMINGTON.IN.GOV"
+        ),
+        "section:stormwater.service_start": GoldenFact(
+            "2018-03-01", None, 1, "Service Period 03/01/2018 to 04/01/2018"
+        ),
+        "section:stormwater.service_end": GoldenFact(
+            "2018-04-01", None, 1, "Service Period 03/01/2018 to 04/01/2018"
+        ),
         "section:stormwater.charge:stormwater.amount": GoldenFact(
             "2.70", "USD", 1, "STORMWATER Stormwater Charge $2.70"
         ),
@@ -661,6 +917,21 @@ def test_bloomington_material_facts_have_exact_golden_evidence() -> None:
             1,
             "STORMWATER Stormwater Charge $2.70",
             status="inferred",
+        ),
+        "section:sanitation.provider": GoldenFact(
+            "City of Bloomington Utilities",
+            None,
+            1,
+            "CITY OF BLOOMINGTON UTILITIES",
+        ),
+        "section:sanitation.jurisdiction": GoldenFact(
+            "Bloomington, Indiana", None, 1, "WWW.BLOOMINGTON.IN.GOV"
+        ),
+        "section:sanitation.service_start": GoldenFact(
+            "2018-03-01", None, 1, "Service Period 03/01/2018 to 04/01/2018"
+        ),
+        "section:sanitation.service_end": GoldenFact(
+            "2018-04-01", None, 1, "Service Period 03/01/2018 to 04/01/2018"
         ),
         "section:sanitation.charge:sanitation.amount": GoldenFact(
             "6.22", "USD", 1, "SANITATION Small Cart $6.22 1 $6.22"
