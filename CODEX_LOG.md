@@ -406,3 +406,34 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
   A cache-busted public WAVE rerun of that deployed commit reports **0 errors, 0
   contrast errors, 0 alerts, and 10/10 AIM**. This is automated evaluation evidence,
   not a substitute for manual accessibility testing.
+
+## 2026-07-22 - Friendlier first screen and collapsible printed charges
+
+### Product and implementation decisions
+
+- Rewrote the upload screen in direct consumer language while keeping its established
+  headline. Replaced implementation terms such as schema versions, keyless fixtures,
+  Decimal arithmetic, and internal reconciliation with three plain promises: see the
+  source, check the math, and no guesswork. Kept the Codex requirement, temporary-file
+  deletion, 30-minute session expiry, and clearly labeled synthetic error explicit.
+- Wrapped each service's printed charge editors in a native HTML `details` disclosure,
+  closed by default. The summary states how many printed lines remain available; no
+  charge data or editable evidence was removed. Native disclosure behavior supplies
+  keyboard and accessibility semantics without a new JavaScript component or
+  dependency.
+
+### Corrections and verification
+
+- A first focused test command used the stale `.venv/bin/pytest` launcher and reached
+  the host Python before collection. Re-ran through `.venv/bin/python -m pytest`, the
+  repository's actual interpreter. A layout-rectangle assertion also misclassified a
+  control inside closed native `details`; the real-browser regression now uses
+  Chromium's visibility API and exercises closed, opened, and re-closed states.
+- At 1440 px, the authentic review fell from approximately **4,708 px to 1,918 px**
+  tall while retaining all 15 printed lines. At 390 px, the landing and collapsed
+  review have no horizontal overflow. The accessibility snapshot names the disclosure
+  “Printed charges — 15 lines found on this bill”; click opens it, Space closes it, and
+  focus remains on the summary.
+- `PATH="$PWD/.venv/bin:$PATH" WATTPROOF_REAL_BROWSER=1 make verify` passes **575
+  tests**, including all five sample flows in real Chromium; Ruff is clean; strict MyPy
+  is clean across 28 source files; and bytecode compilation succeeds.

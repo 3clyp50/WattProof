@@ -320,10 +320,10 @@ function renderCodexStatus(payload) {
   byId("codex-plan").textContent = `${plan}${state.codex.model}`;
   byId("codex-note").classList.toggle("connected", connected);
   byId("codex-note-text").textContent = connected
-    ? `${state.codex.model} is ready to read rendered bill pages.`
+    ? `${state.codex.model} is ready to read your bill.`
     : codexState === "pending"
-      ? "Codex sign-in is waiting for confirmation."
-      : "Personal PDFs require your Codex access.";
+      ? "Finish signing in on the OpenAI page."
+      : "To review your own PDF, connect Codex.";
   byId("codex-note").querySelector("button").hidden = connected;
 
   if (connected) {
@@ -591,6 +591,16 @@ function periodText(start, end) {
   return start?.value || end?.value || "";
 }
 
+function printedChargesDisclosure(charges, count) {
+  if (!count) return "";
+  const countLabel = `${count} ${count === 1 ? "line" : "lines"} found on this bill`;
+  return `
+    <details class="charge-group">
+      <summary><span><strong>Printed charges</strong><small>${countLabel}</small></span><span class="charge-toggle" aria-hidden="true"></span></summary>
+      <div class="charge-list">${charges}</div>
+    </details>`;
+}
+
 function renderLegacyReview() {
   const extraction = state.extraction;
   const fields = legacyFactDefinitions.map(([path, label, type]) => (
@@ -622,7 +632,7 @@ function renderLegacyReview() {
         <div class="service-chips"><span>${escapeHtml(measurementFactText(extraction.total_usage))}</span><span>${escapeHtml(periodText(extraction.service_start, extraction.service_end))}</span></div>
       </header>
       <div class="fact-fields">${fields.join("")}</div>
-      <section class="charge-group"><h4>Printed charge lines</h4>${charges}</section>
+      ${printedChargesDisclosure(charges, extraction.charges.length)}
     </article>`;
   byId("fact-count").textContent = `${factCount} reviewable facts`;
 }
@@ -689,7 +699,7 @@ function renderUtilityReview() {
           <div class="service-chips">${section.schedule ? `<span>${escapeHtml(section.schedule.value)}</span>` : ""}${period ? `<span>${escapeHtml(period)}</span>` : ""}${usage ? `<span>${escapeHtml(usage)}</span>` : ""}</div>
         </header>
         <div class="fact-fields">${facts.join("")}</div>
-        <section class="charge-group"><h4>Printed charge lines</h4>${charges}</section>
+        ${printedChargesDisclosure(charges, section.charges.length)}
         <div class="subtotal-fact">${factEditor(section.subtotal, "Section subtotal", `${base}.subtotal`, "number")}</div>
       </article>`;
   });
@@ -1269,7 +1279,7 @@ function clearCurrentDocument({ resetUpload = true } = {}) {
   state.currentBundleAuditRevision = null;
   if (resetUpload) {
     byId("upload-form").reset();
-    byId("file-label").textContent = "Choose a utility bill";
+    byId("file-label").textContent = "Choose your utility bill";
   }
   byId("synthetic-preview").hidden = true;
   for (const id of (
@@ -1437,7 +1447,7 @@ byId("bill-file").addEventListener("change", (event) => {
   prepareForNewDocument({ resetUpload: false });
   if (returnToUpload) showStep(1);
   else showMessage();
-  byId("file-label").textContent = event.target.files[0]?.name || "Choose a utility bill";
+  byId("file-label").textContent = event.target.files[0]?.name || "Choose your utility bill";
 });
 
 byId("upload-form").addEventListener("submit", async (event) => {

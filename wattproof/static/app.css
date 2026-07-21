@@ -444,8 +444,15 @@ h1, h2, h3, p { text-wrap: pretty; }
 .service-chips span, .scope-chip { display: inline-flex; padding: 4px 7px; border-radius: 999px; font-size: 0.75rem; font-weight: 800; }
 .service-chips span { color: #e2eceb; background: rgba(255,255,255,0.11); border: 1px solid rgba(255,255,255,0.17); }
 .service-review-card > .fact-fields, .subtotal-fact { padding: 15px; }
-.charge-group { margin: 0 15px 15px; padding-top: 13px; border-top: 1px solid var(--line); }
-.charge-group h4 { margin: 0 0 9px; font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.charge-group { margin: 0 15px 15px; border-top: 1px solid var(--line); }
+.charge-group > summary { padding: 14px 0; display: flex; justify-content: space-between; align-items: center; gap: 18px; cursor: pointer; list-style: none; }
+.charge-group > summary::-webkit-details-marker { display: none; }
+.charge-group > summary > span:first-child { display: grid; gap: 3px; }
+.charge-group > summary strong { font-size: 0.88rem; }
+.charge-group > summary small { color: var(--muted); font-size: 0.78rem; }
+.charge-toggle::after { content: "Show"; color: var(--green); font-size: 0.78rem; font-weight: 850; }
+.charge-group[open] .charge-toggle::after { content: "Hide"; }
+.charge-list { padding-bottom: 4px; }
 .charge-editor { margin-top: 9px; padding: 12px; background: #f5f7f3; border-radius: 10px; }
 .charge-editor-heading { margin-bottom: 9px; display: flex; justify-content: space-between; gap: 15px; }
 .charge-editor-heading strong { font-size: 0.82rem; }

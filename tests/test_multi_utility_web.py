@@ -343,6 +343,15 @@ async function main() {
         const panel = document.querySelector('[data-step="2"]');
         const rect = panel.getBoundingClientRect();
         const billingDays = document.getElementById("fact-billing_days");
+        const chargeDisclosures = [...document.querySelectorAll(".charge-group")];
+        const firstDisclosure = chargeDisclosures[0];
+        const firstChargeInput = firstDisclosure?.querySelector("input");
+        const allInitiallyClosed = chargeDisclosures.every((details) => !details.open);
+        const closedInputVisible = firstChargeInput?.checkVisibility() ?? false;
+        firstDisclosure?.querySelector("summary")?.click();
+        const openAfterClick = firstDisclosure?.open ?? false;
+        const openInputVisible = firstChargeInput?.checkVisibility() ?? false;
+        firstDisclosure?.querySelector("summary")?.click();
         return {
           visible: !panel.hidden
             && getComputedStyle(panel).display !== "none"
@@ -360,6 +369,16 @@ async function main() {
             unavailable: billingDays.closest(".fact-field")
               .innerText.includes("Exact numeric spelling unavailable"),
           } : null,
+          chargeDisclosures: {
+            count: chargeDisclosures.length,
+            chargeEditorCount: document.querySelectorAll(".charge-editor").length,
+            allInitiallyClosed,
+            firstSummary: firstDisclosure?.querySelector("summary")?.innerText.trim() || "",
+            closedInputVisible,
+            openAfterClick,
+            openInputVisible,
+            closedAfterSecondClick: firstDisclosure ? !firstDisclosure.open : false,
+          },
           message: document.getElementById("global-message-text").innerText,
         };
       })()`);
@@ -2900,8 +2919,26 @@ def test_page_uses_provider_neutral_five_step_language() -> None:
     page = create_app().test_client().get("/").get_data(as_text=True)
     for label in ("Upload", "Review", "Verify", "Household", "Next steps"):
         assert f"<b>{label}</b>" in page
-    assert "Choose a utility bill" in page
+    for phrase in (
+        "A clearer second look at your utility bill",
+        "See what your bill says",
+        "See the source",
+        "Check the math",
+        "No guesswork",
+        "Start with a sample bill",
+        "Review the real sample",
+        "Catch a labeled $5 test error",
+        "Choose your utility bill",
+        "Your privacy:",
+    ):
+        assert phrase in page
     assert "Your utility bill has a formula." in page
+    for jargon in (
+        "internal reconciliation",
+        "strict schema 2.0",
+        "deterministically and keyless",
+    ):
+        assert jargon not in page
     assert "PG&amp;E-first" not in page
     assert "Indiana-only" not in page
     for sample_id in ("duke-sample", "centerpoint-sample", "bloomington-sample"):
@@ -3905,7 +3942,7 @@ def test_file_change_owns_pending_preview_and_ignores_stale_upload(
     assert after_empty["state"]["replacementBundleId"] == "retained-bill-id"
     assert after_empty["state"]["replacementArmed"] is True
     assert after_empty["fileCount"] == 0
-    assert after_empty["fileLabel"] == "Choose a utility bill"
+    assert after_empty["fileLabel"] == "Choose your utility bill"
     assert after_empty["uploadResetCount"] == 0
     assert after_empty["revokedUrls"] == [
         "blob:test-1",
@@ -4385,6 +4422,16 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         assert flow["review"]["visible"] is True
         assert flow["review"]["focus"] == "review-title"
         assert flow["review"]["message"] == ""
+        charge_disclosures = flow["review"]["chargeDisclosures"]
+        assert charge_disclosures["count"] >= 1
+        assert charge_disclosures["chargeEditorCount"] >= charge_disclosures["count"]
+        assert charge_disclosures["allInitiallyClosed"] is True
+        assert charge_disclosures["firstSummary"].startswith("Printed charges")
+        assert "found on this bill" in charge_disclosures["firstSummary"]
+        assert charge_disclosures["closedInputVisible"] is False
+        assert charge_disclosures["openAfterClick"] is True
+        assert charge_disclosures["openInputVisible"] is True
+        assert charge_disclosures["closedAfterSecondClick"] is True
         for unit in expected["review_units"]:
             assert unit in flow["review"]["text"]
         if flow["sample"] == "centerpoint":
@@ -4621,7 +4668,7 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         "extractionCleared": True,
         "auditCleared": True,
         "fileCount": 0,
-        "fileLabel": "Choose a utility bill",
+        "fileLabel": "Choose your utility bill",
         "message": "Choose a PDF bill first.",
         "createdUrls": [first_pending_preview, replacement_preview],
         "revokedUrls": [first_pending_preview, replacement_preview],

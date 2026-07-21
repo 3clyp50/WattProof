@@ -49,50 +49,50 @@
 
       <section class="step-panel upload-panel" data-step="1" aria-labelledby="upload-title">
         <div class="hero-copy">
-          <p class="eyebrow">A receipt checker for utility bills</p>
+          <p class="eyebrow">A clearer second look at your utility bill</p>
           <h1 id="upload-title" tabindex="-1">Your utility bill has a formula.<br><em>WattProof shows its work.</em></h1>
-          <p class="lede">Review what was read, reproduce supported meter, unit, rate, tax, and subtotal math, and see exactly where published-tariff coverage begins and ends.</p>
+          <p class="lede">See what your bill says, check whether the numbers add up, and know exactly what WattProof could—and could not—verify.</p>
           <ul class="trust-list">
-            <li><span>01</span><strong>Evidence first</strong><small>Every material fact keeps its rendered page and printed text.</small></li>
-            <li><span>02</span><strong>Code calculates</strong><small>Structured reading may extract; Decimal arithmetic handles money.</small></li>
-            <li><span>03</span><strong>No invented savings</strong><small>Unsupported rates and comparisons remain explicit limitations.</small></li>
+            <li><span>01</span><strong>See the source</strong><small>Each important number points back to the page and text it came from.</small></li>
+            <li><span>02</span><strong>Check the math</strong><small>WattProof recalculates supported charges and totals.</small></li>
+            <li><span>03</span><strong>No guesswork</strong><small>If the evidence is incomplete, WattProof says so instead of guessing.</small></li>
           </ul>
         </div>
 
         <div class="upload-card">
-          <div class="card-kicker">Start a review</div>
-          <h2>Begin with a public bill</h2>
-          <p>PG&amp;E delivery + 3CE generation · E-TOU-C · Dec 2022</p>
+          <div class="card-kicker">Try WattProof</div>
+          <h2>Start with a sample bill</h2>
+          <p>PG&amp;E + 3CE electricity · December 2022</p>
           <button class="button primary wide" id="authentic-sample" type="button">
-            Audit authentic sample <span aria-hidden="true">→</span>
+            Review the real sample <span aria-hidden="true">→</span>
           </button>
           <button class="button secondary wide" id="synthetic-sample" type="button">
-            Detect a labeled $5 synthetic error
+            Catch a labeled $5 test error
           </button>
 
-          <div class="sample-divider"><span>More public samples</span></div>
+          <div class="sample-divider"><span>Try another sample</span></div>
           <div class="utility-samples" aria-label="Provider-neutral public samples">
-            <button class="sample-button" id="duke-sample" type="button"><strong>Duke Electric</strong><small>kWh · internal reconciliation</small></button>
-            <button class="sample-button" id="centerpoint-sample" type="button"><strong>CenterPoint Gas</strong><small>CCF + therm · internal reconciliation</small></button>
-            <button class="sample-button" id="bloomington-sample" type="button"><strong>Bloomington Water</strong><small>Water + city services</small></button>
+            <button class="sample-button" id="duke-sample" type="button"><strong>Duke Electric</strong><small>Electricity · kWh</small></button>
+            <button class="sample-button" id="centerpoint-sample" type="button"><strong>CenterPoint Gas</strong><small>Gas · CCF and therms</small></button>
+            <button class="sample-button" id="bloomington-sample" type="button"><strong>Bloomington Water</strong><small>Water and city services</small></button>
           </div>
 
           <div class="or"><span>or upload a PDF</span></div>
           <div id="codex-note" class="codex-note">
             <span class="connection-dot" aria-hidden="true"></span>
-            <span id="codex-note-text">Personal PDFs require your Codex access.</span>
+            <span id="codex-note-text">To review your own PDF, connect Codex.</span>
             <button type="button" data-codex-connect>Connect</button>
           </div>
           <form id="upload-form" enctype="multipart/form-data">
             <label class="file-target" for="bill-file">
               <span class="file-icon" aria-hidden="true">PDF</span>
-              <strong id="file-label">Choose a utility bill</strong>
+              <strong id="file-label">Choose your utility bill</strong>
               <small>PDF · up to 10 MB · 20 pages</small>
               <input id="bill-file" name="bill" type="file" accept="application/pdf,.pdf">
             </label>
-            <button class="button dark wide" type="submit">Extract visible bill facts</button>
+            <button class="button dark wide" type="submit">Review my bill</button>
           </form>
-          <p class="privacy"><strong>How reading works:</strong> known public fixtures run deterministically and keyless. Personal PDFs use a connected Codex session to extract strict schema 2.0 facts from rendered pages; there is no native-text-only fallback. Uploads use a temporary file that is deleted after processing, and session state expires after 30 minutes.</p>
+          <p class="privacy"><strong>Your privacy:</strong> public samples work without signing in. Your own PDF is read through your connected Codex session, then deleted after processing. The temporary server session expires after 30 minutes.</p>
         </div>
       </section>
 
