@@ -257,6 +257,44 @@ def water_document_with_service_base_status(
     return document.model_copy(update={"sections": (changed_section,)})
 
 
+def document_with_percentage_bases(
+    bases: tuple[UtilityCharge, ...],
+    *,
+    tax_amount: str,
+    subtotal: str,
+) -> UtilityDocument:
+    tax = UtilityCharge(
+        id="sales_tax",
+        label="Sales tax",
+        rate=decimal_fact("0.10", "fraction", "Sales tax rate: 0.10"),
+        amount=money_fact(tax_amount, f"Sales tax ${tax_amount}"),
+        calculation=CalculationSpec(
+            kind="percent_of_charges",
+            charge_ids=tuple(base.id for base in bases),
+        ),
+    )
+    section = ServiceSection(
+        id="water",
+        service_type="water",
+        provider=text_fact("City Water", "Provider: City Water"),
+        charges=(*bases, tax),
+        subtotal=money_fact(subtotal, f"Water subtotal ${subtotal}"),
+    )
+    return UtilityDocument(
+        schema_version="2.0",
+        fixture_kind="uploaded",
+        document_sha256="d" * 64,
+        page_count=1,
+        currency="USD",
+        sections=(section,),
+        current_charges=money_fact(
+            subtotal,
+            f"Current charges ${subtotal}",
+        ),
+        amount_due=money_fact(subtotal, f"Amount due ${subtotal}"),
+    )
+
+
 def simple_section(
     *,
     section_id: str,
@@ -976,6 +1014,81 @@ def test_percent_request_discloses_referenced_base_provenance(
     request = result.review_requests[0]
     assert request.grounded_audit_line_ids == ("charge::sales_tax",)
     assert f"charge::service_charge={expected_trace}" in request.body
+
+
+def test_percent_request_includes_real_operand_ending_in_provenance() -> None:
+    service = UtilityCharge(
+        id="service_provenance",
+        label="Service",
+        amount=money_fact(
+            "8.00",
+            "Corrected service $8.00",
+            status="user_corrected",
+            original_value="7.00",
+        ),
+    )
+    result = reconcile_document(
+        document_with_percentage_bases(
+            (service,),
+            tax_amount="0.70",
+            subtotal="8.70",
+        )
+    )
+    line = next(line for line in result.lines if line.id == "charge::sales_tax")
+
+    expected_trace = (
+        "8.00 USD [user-corrected; original extracted value: 7.00]"
+    )
+    assert expected_trace in line.formula
+    assert line.inputs["charge::service_provenance"] == expected_trace
+    request = result.review_requests[0]
+    assert request.grounded_audit_line_ids == ("charge::sales_tax",)
+    assert f"charge::service_provenance={expected_trace}" in request.body
+    assert "__provenance__::" not in request.body
+
+
+def test_percent_request_keeps_service_and_service_provenance_distinct() -> None:
+    service = UtilityCharge(
+        id="service",
+        label="Service",
+        amount=money_fact(
+            "5.00",
+            "Inferred service $5.00",
+            status="inferred",
+        ),
+    )
+    service_provenance = UtilityCharge(
+        id="service_provenance",
+        label="Service provenance",
+        amount=money_fact(
+            "8.00",
+            "Corrected service provenance $8.00",
+            status="user_corrected",
+            original_value="7.00",
+        ),
+    )
+    result = reconcile_document(
+        document_with_percentage_bases(
+            (service, service_provenance),
+            tax_amount="1.00",
+            subtotal="14.00",
+        )
+    )
+    line = next(line for line in result.lines if line.id == "charge::sales_tax")
+
+    inferred_trace = "5.00 USD [inferred extraction]"
+    corrected_trace = (
+        "8.00 USD [user-corrected; original extracted value: 7.00]"
+    )
+    assert inferred_trace in line.formula
+    assert corrected_trace in line.formula
+    assert line.inputs["charge::service"] == inferred_trace
+    assert line.inputs["charge::service_provenance"] == corrected_trace
+    request = result.review_requests[0]
+    assert request.grounded_audit_line_ids == ("charge::sales_tax",)
+    assert f"charge::service={inferred_trace}" in request.body
+    assert f"charge::service_provenance={corrected_trace}" in request.body
+    assert "__provenance__::" not in request.body
 
 
 def test_evidence_is_limited_to_exact_printed_operands() -> None:

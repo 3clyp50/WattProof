@@ -18,6 +18,7 @@ from .utility_models import (
 
 CENT = Decimal("0.01")
 MONEY_TOLERANCE = Decimal("0.01")
+_PROVENANCE_INPUT_PREFIX = "__provenance__::"
 
 
 def round_money(value: Decimal) -> Decimal:
@@ -43,6 +44,10 @@ def _provenance_annotation(fact: FactBaseV2) -> str:
     if fact.status == "user_corrected":
         annotation += f"; original extracted value: {fact.original_value}"
     return annotation
+
+
+def _provenance_input_key(operand_key: str) -> str:
+    return f"{_PROVENANCE_INPUT_PREFIX}{operand_key}"
 
 
 def _annotated_value(value: Decimal, unit: str, fact: FactBaseV2) -> str:
@@ -710,7 +715,7 @@ def _amount_due_line(
     operands: list[EvidenceRef] = [document.current_charges.evidence]
     inputs = {
         "current_charges": f"{document.current_charges.value} {document.currency}",
-        "current_charges_provenance": _provenance_annotation(
+        _provenance_input_key("current_charges"): _provenance_annotation(
             document.current_charges
         ),
     }
@@ -725,7 +730,7 @@ def _amount_due_line(
         inputs["outstanding_balance"] = (
             f"{document.outstanding_balance.value} {document.currency}"
         )
-        inputs["outstanding_balance_provenance"] = _provenance_annotation(
+        inputs[_provenance_input_key("outstanding_balance")] = _provenance_annotation(
             document.outstanding_balance
         )
         formula += " + " + _annotated_value(
@@ -976,9 +981,11 @@ _NON_OPERAND_INPUT_KEYS = frozenset(
 def _expected_operand_detail(line: UtilityAuditLine) -> str | None:
     operands: list[str] = []
     for key, value in line.inputs.items():
-        if key in _NON_OPERAND_INPUT_KEYS or key.endswith("_provenance"):
+        if key in _NON_OPERAND_INPUT_KEYS or key.startswith(
+            _PROVENANCE_INPUT_PREFIX
+        ):
             continue
-        provenance = line.inputs.get(f"{key}_provenance")
+        provenance = line.inputs.get(_provenance_input_key(key))
         trace = f"{value} [{provenance}]" if provenance is not None else value
         operands.append(f"{key}={trace}")
     if not operands:
