@@ -308,3 +308,10 @@ Set an explicit completion goal, follow through efficiently and thoroughly, pref
 - The production image pins the official Codex 0.145.0 standalone release by SHA-256 rather than carrying Node/npm or the unused Python SDK. The resulting image is 185 MB and runs as UID 10001.
 - An exact production-security container smoke (`read_only`, all capabilities dropped, `no-new-privileges`, PID limit, tmpfs) issued a real OpenAI device code, reported pending status, logged out, and left no Codex temporary directory.
 - The browser pass repeated the device-code flow against that container at desktop and mobile sizes, returned the temporary server session to `disconnected`, and recorded zero console errors or warnings. Screenshot evidence replaced the live code with the inert placeholder `ABCD-EFGH` before capture.
+
+### Production verification
+
+- Commit `9533b08aaaa5567c4213c7a242e7dee3a50cf86c` triggered GitHub Actions run [`29871750262`](https://github.com/3clyp50/WattProof/actions/runs/29871750262). Python 3.12 and 3.13 both passed the full gate, and the dependent deployment job placed that exact commit on the VM.
+- The deployed read-only container reports Codex 0.145.0. HTTPS checks confirmed a secure, HTTP-only, SameSite=Lax session cookie; real device-code issuance on the official OpenAI URL; pending status; logout; and the unchanged local authentic fixture.
+- A fresh 390 px production browser pass confirmed the explicit `Continue with Codex — official OpenAI sign-in` accessible name, initial Close focus, Escape behavior, ten- and thirty-minute privacy copy, successful server cleanup, and zero console errors or warnings.
+- A cache-busted WAVE analysis of the deployed release retained **0 errors, 0 contrast errors, 0 alerts, and an AIM score of 10/10**. WAVE also recognizes the new control's explicit label and popup relationship.
