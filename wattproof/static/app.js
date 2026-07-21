@@ -13,6 +13,8 @@ const state = {
   bundle: [],
   currentBundleId: null,
   currentBundleAuditRevision: null,
+  replacementBundleId: null,
+  replacementArmed: false,
 };
 
 const legacyFactDefinitions = [
@@ -162,9 +164,13 @@ function finishOperation(operation) {
 }
 
 function replaceExtraction(extraction, mode) {
+  const replacementId = state.replacementArmed
+    && state.bundle.some((summary) => summary.id === state.replacementBundleId)
+    ? state.replacementBundleId
+    : null;
   state.extraction = extraction;
   state.audit = null;
-  state.currentBundleId = null;
+  state.currentBundleId = replacementId;
   state.currentBundleAuditRevision = null;
   state.reviewMode = mode;
   state.extractionRevision += 1;
@@ -440,7 +446,20 @@ function renderReview(mode) {
   state.reviewMode = mode;
   if (isUtilityDocument(state.extraction)) renderUtilityReview();
   else renderLegacyReview();
+  renderReviewWarnings();
   renderDocumentPreview(mode);
+}
+
+function renderReviewWarnings() {
+  const container = byId("review-warnings");
+  const warnings = Array.isArray(state.extraction?.warnings)
+    ? state.extraction.warnings
+      .filter((warning) => typeof warning === "string" && warning.trim())
+    : [];
+  container.hidden = warnings.length === 0;
+  container.innerHTML = warnings.length
+    ? `<strong>Review before continuing</strong><p>The source reader reported:</p><ul>${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>`
+    : "";
 }
 
 async function loadSample(kind, button) {
@@ -809,8 +828,13 @@ function renderPriorityFindings(result) {
   const findings = result.lines.filter((line) => (
     line.status === "discrepancy" || line.status === "needs_review"
   ));
-  byId("priority-findings").innerHTML = findings.length
-    ? findings.map((line) => `
+  const findingIds = new Set(findings.map((line) => String(line.id || "")));
+  const rootFindings = findings.filter((line) => {
+    const rootId = String(line.root_cause_id || "");
+    return !rootId || rootId === String(line.id || "") || !findingIds.has(rootId);
+  });
+  byId("priority-findings").innerHTML = rootFindings.length
+    ? rootFindings.map((line) => `
       <article class="priority-finding ${escapeHtml(line.status)}">
         <span class="status-pill ${escapeHtml(line.status)}">${escapeHtml(statusLabels[line.status])}</span>
         <div><h3>${escapeHtml(line.label)}</h3><p>${escapeHtml(line.limitation || line.formula)}</p><small>${lineEvidence(line)}</small></div>
@@ -873,7 +897,7 @@ function renderAudit() {
   if (result.verification_level === "tariff_verified") {
     explanation = "At least one governing charge matched an exact, period-bound published-tariff adapter.";
   } else if (result.verification_level === "internally_reconciled") {
-    explanation = "Printed meter, unit, rate, tax, subtotal, and total math was checked without claiming tariff truth.";
+    explanation = "Only deterministic relationships with printed operands were checked. Unsupported lines remain explicitly unverified; this does not claim tariff truth.";
   }
   verdict.innerHTML = `
     <div class="verdict-icon" aria-hidden="true">${discrepancy || needsReview ? "!" : "✓"}</div>
@@ -896,6 +920,13 @@ function releasePreview() {
   preview.hidden = true;
 }
 
+function hasCurrentDocument() {
+  return state.extraction !== null
+    || state.audit !== null
+    || state.previewUrl !== null
+    || state.reviewMode !== null;
+}
+
 function clearCurrentDocument() {
   invalidatePendingOperation();
   releasePreview();
@@ -912,6 +943,7 @@ function clearCurrentDocument() {
   for (const id of (
     [
       "service-review-sections",
+      "review-warnings",
       "verification-level",
       "verdict-card",
       "service-results",
@@ -921,6 +953,7 @@ function clearCurrentDocument() {
       "provider-review-requests",
     ]
   )) byId(id).innerHTML = "";
+  byId("review-warnings").hidden = true;
   byId("optional-comparison").hidden = true;
   byId("calculation-ledger").open = false;
 }
@@ -930,9 +963,15 @@ function resetCurrentBundleIdentity() {
   state.currentBundleAuditRevision = null;
 }
 
+function resetReplacementIdentity() {
+  state.replacementBundleId = null;
+  state.replacementArmed = false;
+}
+
 function prepareForNewDocument() {
   clearCurrentDocument();
   resetCurrentBundleIdentity();
+  if (!state.replacementArmed) resetReplacementIdentity();
 }
 
 function discardCurrentDocument() {
@@ -952,6 +991,7 @@ function addAnotherBill() {
   const count = state.bundle.length;
   clearCurrentDocument();
   resetCurrentBundleIdentity();
+  resetReplacementIdentity();
   showStep(1);
   announceBundle(`${count} completed ${count === 1 ? "bill" : "bills"} retained in this page.`);
 }
@@ -959,11 +999,30 @@ function addAnotherBill() {
 function finishHouseholdReview() {
   const summary = appendCurrentBillOnce();
   if (!summary && !state.bundle.length) return;
+  const completedId = summary?.id || state.replacementBundleId;
   renderHousehold();
-  renderProviderReviewRequests();
-  showStep(4);
   const count = state.bundle.length;
+  if (hasCurrentDocument()) clearCurrentDocument();
+  resetCurrentBundleIdentity();
+  state.replacementBundleId = state.bundle.some((item) => item.id === completedId)
+    ? completedId
+    : null;
+  state.replacementArmed = false;
+  showStep(4);
   announceBundle(`Household now contains ${count} completed ${count === 1 ? "bill" : "bills"}.`);
+}
+
+function beginHouseholdReplacement() {
+  if (!state.replacementBundleId
+      || !state.bundle.some((summary) => summary.id === state.replacementBundleId)) {
+    showMessage("Choose a completed bill to replace.");
+    return;
+  }
+  state.replacementArmed = true;
+  if (hasCurrentDocument()) clearCurrentDocument();
+  resetCurrentBundleIdentity();
+  showStep(1);
+  announceBundle("Replace / re-upload is armed for the last completed bill. Review and verify the replacement before finishing.");
 }
 
 function showProviderReviewRequests() {
@@ -974,6 +1033,7 @@ function showProviderReviewRequests() {
 function clearHousehold() {
   state.bundle = [];
   resetCurrentBundleIdentity();
+  resetReplacementIdentity();
   clearCurrentDocument();
   byId("household-bills").innerHTML = "";
   byId("household-summary").innerHTML = "";
@@ -1133,6 +1193,7 @@ byId("provider-review-requests").addEventListener("input", (event) => {
 
 byId("add-another-bill").addEventListener("click", addAnotherBill);
 byId("finish-household").addEventListener("click", finishHouseholdReview);
+byId("replace-household-bill").addEventListener("click", beginHouseholdReplacement);
 byId("clear-household").addEventListener("click", clearHousehold);
 byId("review-next-steps").addEventListener("click", showProviderReviewRequests);
 byId("restart").addEventListener("click", () => {

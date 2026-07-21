@@ -95,6 +95,7 @@
           </div>
           <form id="review-form" class="facts-card">
             <div class="facts-header"><div><span class="card-kicker">Evidence ledger</span><h2>Facts by service</h2></div><span id="fact-count" class="fact-count"></span></div>
+            <div id="review-warnings" class="review-warnings" role="alert" aria-live="polite" aria-atomic="true" hidden></div>
             <div id="service-review-sections" class="service-review-sections"></div>
             <div class="form-actions"><button class="button text" type="button" id="discard-current-document">← Start over</button><button class="button primary" type="submit">Confirm &amp; run checks <span aria-hidden="true">→</span></button></div>
           </form>
@@ -104,7 +105,7 @@
       <section class="step-panel" data-step="3" aria-labelledby="verify-title" hidden>
         <div class="section-heading result-heading">
           <div><p class="eyebrow">Evidence-bound result</p><h1 id="verify-title" tabindex="-1">Verification result</h1></div>
-          <p>Internal reconciliation reproduces printed math. Tariff verification appears only when an exact provider, jurisdiction, schedule, and billing-period adapter applies.</p>
+          <p>Internal reconciliation checks deterministic relationships supported by printed operands. Tariff verification appears only when an exact provider, jurisdiction, schedule, and billing-period adapter applies.</p>
         </div>
         <div id="verification-level" class="verification-level" aria-live="polite"></div>
         <div id="verdict-card" class="verdict-card"></div>
@@ -134,7 +135,7 @@
         </div>
         <section id="household-summary" class="household-summary" aria-live="polite" aria-atomic="true"></section>
         <div id="household-bills" class="household-bills" aria-label="Completed utility bills"></div>
-        <div class="form-actions household-actions"><button class="button text" type="button" data-back="3">← Verification result</button><div><button class="button secondary" type="button" id="clear-household">Clear household</button><button class="button primary" type="button" id="review-next-steps">Review next steps <span aria-hidden="true">→</span></button></div></div>
+        <div class="form-actions household-actions"><button class="button text" type="button" id="replace-household-bill">← Replace / re-upload last bill</button><div><button class="button secondary" type="button" id="clear-household">Clear household</button><button class="button primary" type="button" id="review-next-steps">Review next steps <span aria-hidden="true">→</span></button></div></div>
       </section>
 
       <section class="step-panel" data-step="5" aria-labelledby="next-steps-title" hidden>

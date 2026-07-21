@@ -325,6 +325,18 @@ async function main() {
         const panel = document.querySelector('[data-step="2"]');
         return panel && !panel.hidden && document.activeElement?.id === "review-title";
       })()`);
+      if (sample === "centerpoint") {
+        await evaluate(`(() => {
+          window.__wattproofWarningEvent = 0;
+          state.extraction.warnings = [
+            "Rendered/native text conflict requires review.",
+            "<img id=warning-real src=x onerror=window.__wattproofWarningEvent+=1>",
+          ];
+          renderReview("centerpoint");
+          return true;
+        })()`);
+        await delay(100);
+      }
       const review = await evaluate(`(() => {
         const panel = document.querySelector('[data-step="2"]');
         const rect = panel.getBoundingClientRect();
@@ -335,6 +347,10 @@ async function main() {
             && rect.height > 0,
           focus: document.activeElement?.id,
           text: document.getElementById("service-review-sections").innerText,
+          warningHidden: document.getElementById("review-warnings").hidden,
+          warningText: document.getElementById("review-warnings").innerText,
+          warningInjectedElements: document.querySelectorAll("#warning-real").length,
+          warningEventCount: window.__wattproofWarningEvent || 0,
           message: document.getElementById("global-message").innerText,
         };
       })()`);
@@ -372,6 +388,7 @@ async function main() {
           verificationLabel: document.querySelector("#verification-level strong")
             .textContent.trim(),
           servicesText: document.getElementById("service-results").innerText,
+          verdictText: document.getElementById("verdict-card").innerText,
           comparisonHidden: comparison.hidden,
           comparisonVisible: visible(comparison),
           requestCount: document.querySelectorAll(".provider-request-card").length,
@@ -476,6 +493,11 @@ async function main() {
         focus: document.activeElement?.id,
         bundleLength: state.bundle.length,
         currentBundleId: state.currentBundleId,
+        replacementBundleId: state.replacementBundleId,
+        replacementArmed: state.replacementArmed,
+        extractionCleared: state.extraction === null,
+        auditCleared: state.audit === null,
+        previewCleared: state.previewUrl === null,
         cardCount: cards.length,
         text: document.getElementById("household-bills").innerText,
         summaryText: document.getElementById("household-summary").innerText,
@@ -530,10 +552,10 @@ async function main() {
     const bundleIdsBeforeReaudit = await evaluate(
       `state.bundle.map((summary) => summary.id)`,
     );
-    await evaluate(`document.querySelector('[data-step="4"] [data-back="3"]').click(); true`);
-    await waitFor(`!document.querySelector('[data-step="3"]').hidden
-      && document.activeElement?.id === "verify-title"`);
-    await evaluate(`document.querySelector('[data-step="3"] [data-back="2"]').click(); true`);
+    await clickById("replace-household-bill");
+    await waitFor(`!document.querySelector('[data-step="1"]').hidden
+      && document.activeElement?.id === "upload-title"`);
+    await clickById("bloomington-sample");
     await waitFor(`!document.querySelector('[data-step="2"]').hidden
       && document.activeElement?.id === "review-title"`);
     await evaluate(`(() => {
@@ -548,6 +570,14 @@ async function main() {
     await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
     await waitFor(`!document.querySelector('[data-step="3"]').hidden
       && document.activeElement?.id === "verify-title"`);
+    const reauditExpected = await evaluate(`({
+      verification: state.audit.verification_level,
+      discrepancy: Number(state.audit.discrepancy_total),
+      issues: new Set(state.audit.lines
+        .filter((line) => ["discrepancy", "needs_review"].includes(line.status))
+        .map((line, index) => String(line.root_cause_id || line.id || "issue-" + index)))
+        .size,
+    })`);
     await clickById("finish-household");
     await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
     const reauditReplacement = await evaluate(`(() => {
@@ -556,18 +586,27 @@ async function main() {
         bundleLength: state.bundle.length,
         ids: state.bundle.map((candidate) => candidate.id),
         summary,
-        expectedVerification: state.audit.verification_level,
-        expectedDiscrepancy: Number(state.audit.discrepancy_total),
-        expectedIssues: new Set(state.audit.lines
-          .filter((line) => ["discrepancy", "needs_review"].includes(line.status))
-          .map((line, index) => String(line.root_cause_id || line.id || "issue-" + index)))
-          .size,
+        currentBundleId: state.currentBundleId,
+        replacementBundleId: state.replacementBundleId,
+        replacementArmed: state.replacementArmed,
+        extractionCleared: state.extraction === null,
+        auditCleared: state.audit === null,
+        previewCleared: state.previewUrl === null,
         householdText: document.getElementById("household-bills").innerText,
-        requestText: document.getElementById("provider-review-requests").innerText,
       };
     })()`);
-    await evaluate(`document.querySelector('[data-step="4"] [data-back="3"]').click(); true`);
-    await clickById("finish-household");
+    Object.assign(reauditReplacement, {
+      expectedVerification: reauditExpected.verification,
+      expectedDiscrepancy: reauditExpected.discrepancy,
+      expectedIssues: reauditExpected.issues,
+    });
+    await clickById("review-next-steps");
+    await waitFor(`!document.querySelector('[data-step="5"]').hidden`);
+    reauditReplacement.requestText = await evaluate(
+      `document.getElementById("provider-review-requests").innerText`,
+    );
+    await evaluate(`document.querySelector('[data-step="5"] [data-back="4"]').click(); true`);
+    await evaluate(`finishHouseholdReview(); true`);
     await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
     const repeatedFinish = await evaluate(`({
       count: state.bundle.length,
@@ -625,8 +664,7 @@ async function main() {
     );
 
     await evaluate(`document.querySelector('[data-step="5"] [data-back="4"]').click(); true`);
-    await evaluate(`document.querySelector('[data-step="4"] [data-back="3"]').click(); true`);
-    await clickById("add-another-bill");
+    await clickById("replace-household-bill");
     await waitFor(`!document.querySelector('[data-step="1"]').hidden
       && document.activeElement?.id === "upload-title"`);
     await evaluate(`document.querySelector('#upload-form button[type="submit"]').click(); true`);
@@ -635,6 +673,8 @@ async function main() {
     const laterFailure = await evaluate(`({
       bundleLength: state.bundle.length,
       currentBundleId: state.currentBundleId,
+      replacementBundleId: state.replacementBundleId,
+      replacementArmed: state.replacementArmed,
       extractionCleared: state.extraction === null,
       auditCleared: state.audit === null,
       retainedCardCount: document.querySelectorAll(".household-bill-card").length,
@@ -688,6 +728,51 @@ async function main() {
       pageErrors: [...window.__wattproofBrowserErrors],
     })`);
     previewDiscard.uploadedPreviewUrl = uploadedPreviewUrl;
+
+    await navigateHome();
+    await evaluate(`(async () => {
+      window.__wattproofFinishRevokedPreviews = [];
+      const nativeRevoke = URL.revokeObjectURL.bind(URL);
+      URL.revokeObjectURL = (url) => {
+        window.__wattproofFinishRevokedPreviews.push(String(url));
+        return nativeRevoke(url);
+      };
+      const response = await fetch("/sample.pdf");
+      const source = await response.blob();
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([source], "finish-me.pdf", { type: "application/pdf" }));
+      const input = document.getElementById("bill-file");
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector('#upload-form button[type="submit"]').click();
+      return true;
+    })()`);
+    await waitFor(`!document.querySelector('[data-step="2"]').hidden
+      && state.previewUrl?.startsWith("blob:")`, 30000);
+    const finishPreviewUrl = await evaluate(`state.previewUrl`);
+    await evaluate(`document.querySelector('#review-form button[type="submit"]').click(); true`);
+    await waitFor(`!document.querySelector('[data-step="3"]').hidden
+      && state.audit !== null`);
+    await clickById("finish-household");
+    await waitFor(`!document.querySelector('[data-step="4"]').hidden`);
+    const previewFinish = await evaluate(`({
+      bundleLength: state.bundle.length,
+      summary: structuredClone(state.bundle[0]),
+      extractionCleared: state.extraction === null,
+      auditCleared: state.audit === null,
+      previewUrl: state.previewUrl,
+      currentBundleId: state.currentBundleId,
+      replacementBundleId: state.replacementBundleId,
+      replacementArmed: state.replacementArmed,
+      reviewCleared: document.getElementById("service-review-sections").innerHTML === "",
+      auditClearedFromDom: document.getElementById("audit-lines").innerHTML === "",
+      iframeHasSource: document.getElementById("pdf-preview").hasAttribute("src"),
+      revokedUrls: [...window.__wattproofFinishRevokedPreviews],
+      fileCount: document.getElementById("bill-file").files.length,
+      focus: document.activeElement?.id,
+      pageErrors: [...window.__wattproofBrowserErrors],
+    })`);
+    previewFinish.uploadedPreviewUrl = finishPreviewUrl;
 
     await command("Emulation.setDeviceMetricsOverride", {
       width: 390,
@@ -789,6 +874,7 @@ async function main() {
       laterFailure,
       refreshClears,
       previewDiscard,
+      previewFinish,
       mobileReview,
       mobileResult,
       hostileDom,
@@ -987,6 +1073,8 @@ function currentState() {
     bundle: state.bundle,
     currentBundleId: state.currentBundleId,
     currentBundleAuditRevision: state.currentBundleAuditRevision,
+    replacementBundleId: state.replacementBundleId,
+    replacementArmed: state.replacementArmed,
     auditRevision: state.auditRevision,
     previewUrl: state.previewUrl,
     operationToken: state.operationToken,
@@ -1178,17 +1266,32 @@ async function run() {
   }
 
   if (payload.scenario === "finish_reaudit_refinish") {
+    invoke(`state.previewUrl = "blob:completed-upload"`);
     const firstAudit = submitReview();
     settle("/api/audit", { audit: payload.auditA });
     await firstAudit;
     invoke("finishHouseholdReview()");
     const first = invoke("structuredClone(state.bundle[0])");
+    const afterFirstFinish = {
+      state: currentState(),
+      revokedUrls: [...revokedUrls],
+      reviewHtml: element("service-review-sections").innerHTML,
+      warningsHtml: element("review-warnings").innerHTML,
+      verificationHtml: element("verification-level").innerHTML,
+      auditHtml: element("audit-lines").innerHTML,
+      previewSrc: element("pdf-preview").src,
+      uploadResetCount: element("upload-form").resetCount,
+    };
     invoke(`state.bundle[0].reviewRequests[0].body = "Page-memory draft"`);
     invoke("finishHouseholdReview()");
     const idempotent = invoke("structuredClone(state.bundle[0])");
 
-    backToVerify.listeners.click();
-    backToReview.listeners.click();
+    element("replace-household-bill").listeners.click();
+    const armedReplacement = currentState();
+    const replacementLoad = invoke(`loadSample("duke", byId("duke-sample"))`);
+    settle("/api/sample/duke", { extraction: payload.extractionB });
+    await replacementLoad;
+    const afterExplicitReload = currentState();
     const usage = element("corrected-usage");
     usage.dataset.factPath = "sections.0.usage";
     usage.value = payload.nextUsage;
@@ -1201,16 +1304,36 @@ async function run() {
     await secondAudit;
     invoke("finishHouseholdReview()");
     const replaced = invoke("structuredClone(state.bundle[0])");
+    const afterReplacementFinish = currentState();
     invoke("finishHouseholdReview()");
     const repeated = invoke("structuredClone(state.bundle[0])");
+    invoke("renderProviderReviewRequests()");
+    const replacementRequestsHtml = element("provider-review-requests").innerHTML;
+
+    element("replace-household-bill").listeners.click();
+    const addAnotherLoad = invoke(`loadSample("duke", byId("duke-sample"))`);
+    settle("/api/sample/duke", { extraction: payload.extractionB });
+    await addAnotherLoad;
+    factInputs = [];
+    const thirdAudit = submitReview();
+    settle("/api/audit", { audit: payload.auditB });
+    await thirdAudit;
+    invoke("addAnotherBill()");
+    const afterReplacementAddAnother = currentState();
     return {
       ...currentState(),
       first,
+      afterFirstFinish,
       idempotent,
+      armedReplacement,
+      afterExplicitReload,
       replaced,
+      afterReplacementFinish,
       repeated,
+      afterReplacementAddAnother,
+      revokedUrls,
       householdHtml: element("household-bills").innerHTML,
-      requestsHtml: element("provider-review-requests").innerHTML,
+      requestsHtml: replacementRequestsHtml,
     };
   }
 
@@ -1360,6 +1483,15 @@ function installDocument(index) {
   })()`);
 }
 
+function installReplacementDocument(index) {
+  context.currentDocument = structuredClone(payload.documents[index]);
+  invoke(`(() => {
+    replaceExtraction(currentDocument.extraction, currentDocument.mode);
+    state.audit = currentDocument.audit;
+    state.auditRevision += 1;
+  })()`);
+}
+
 function markupCount(markup, className) {
   return (markup.match(new RegExp(`class="[^"]*${className}`, "g")) || []).length;
 }
@@ -1386,11 +1518,20 @@ invoke("finishHouseholdReview(); finishHouseholdReview(); showStep(3); finishHou
 const afterRepeatedFinish = invoke(`({
   bundleLength: state.bundle.length,
   currentBundleId: state.currentBundleId,
+  replacementBundleId: state.replacementBundleId,
+  replacementArmed: state.replacementArmed,
+  extraction: state.extraction,
+  audit: state.audit,
+  previewUrl: state.previewUrl,
 })`);
+invoke("beginHouseholdReplacement()");
+installReplacementDocument(0);
 invoke("addAnotherBill()");
 const afterAddFollowingFinish = invoke(`({
   bundleLength: state.bundle.length,
   currentBundleId: state.currentBundleId,
+  replacementBundleId: state.replacementBundleId,
+  replacementArmed: state.replacementArmed,
   extraction: state.extraction,
   audit: state.audit,
   uploadVisible: !document.getElementById("step-1").hidden,
@@ -1453,6 +1594,8 @@ invoke("clearHousehold()");
 const afterClear = invoke(`({
   bundleLength: state.bundle.length,
   currentBundleId: state.currentBundleId,
+  replacementBundleId: state.replacementBundleId,
+  replacementArmed: state.replacementArmed,
   extraction: state.extraction,
   audit: state.audit,
   previewUrl: state.previewUrl,
@@ -1584,6 +1727,8 @@ const output = vm.runInContext(`(() => {
   return {
     utilityDocument: isUtilityDocument(payload.extraction),
     reviewHtml: byId("service-review-sections").innerHTML,
+    warningsHtml: byId("review-warnings").innerHTML,
+    warningsHidden: byId("review-warnings").hidden,
     verificationHtml: byId("verification-level").innerHTML,
     verificationText: byId("verification-level").textContent,
     servicesHtml: byId("service-results").innerHTML,
@@ -1593,6 +1738,7 @@ const output = vm.runInContext(`(() => {
     comparisonHtml: byId("optional-comparison").innerHTML,
     comparisonHidden: byId("optional-comparison").hidden,
     requestsHtml: byId("provider-review-requests").innerHTML,
+    summaryIssueCount: summarizeCurrentBill()?.issueCount,
     corrected,
     legacyEvidence,
   };
@@ -2276,14 +2422,21 @@ def test_result_markup_exposes_neutral_contract() -> None:
         "service-results",
         "optional-comparison",
         "service-review-sections",
+        "review-warnings",
         "provider-review-requests",
         "add-another-bill",
         "finish-household",
         "discard-current-document",
+        "replace-household-bill",
     ):
         assert f'id="{element_id}"' in page
     assert 'id="optional-comparison"' in page
     assert "hidden" in page[page.index('id="optional-comparison"') :][:160]
+    warnings_markup = page[page.index('id="review-warnings"') :][:240]
+    assert 'role="alert"' in warnings_markup
+    assert 'aria-live="polite"' in warnings_markup
+    assert 'aria-atomic="true"' in warnings_markup
+    assert "hidden" in warnings_markup
 
 
 def test_household_and_next_steps_have_required_controls() -> None:
@@ -2411,10 +2564,17 @@ def test_household_sequence_deduplicates_combines_safely_and_clears() -> None:
     result = _exercise_household_state_contract(documents)
 
     assert result["afterRepeatedFinish"]["bundleLength"] == 1
-    assert result["afterRepeatedFinish"]["currentBundleId"] is not None
+    assert result["afterRepeatedFinish"]["currentBundleId"] is None
+    assert result["afterRepeatedFinish"]["replacementBundleId"] is not None
+    assert result["afterRepeatedFinish"]["replacementArmed"] is False
+    assert result["afterRepeatedFinish"]["extraction"] is None
+    assert result["afterRepeatedFinish"]["audit"] is None
+    assert result["afterRepeatedFinish"]["previewUrl"] is None
     assert result["afterAddFollowingFinish"] == {
         "bundleLength": 1,
         "currentBundleId": None,
+        "replacementBundleId": None,
+        "replacementArmed": False,
         "extraction": None,
         "audit": None,
         "uploadVisible": True,
@@ -2464,10 +2624,12 @@ def test_household_sequence_deduplicates_combines_safely_and_clears() -> None:
         "blob:centerpoint",
         "blob:bloomington",
     ]
-    assert result["uploadResetCount"] == 3
+    assert result["uploadResetCount"] == 5
     assert result["afterClear"] == {
         "bundleLength": 0,
         "currentBundleId": None,
+        "replacementBundleId": None,
+        "replacementArmed": False,
         "extraction": None,
         "audit": None,
         "previewUrl": None,
@@ -2480,6 +2642,8 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
     client = create_app().test_client()
     extraction = client.get("/api/sample/duke").get_json()["extraction"]
     first_audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+    extraction["private_account_marker"] = "PRIVATE RAW ACCOUNT 774"
+    first_audit["private_evidence_marker"] = "PRIVATE RAW EVIDENCE"
     second_audit = json.loads(json.dumps(first_audit))
     second_audit.update(
         {
@@ -2511,6 +2675,7 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
     result = _exercise_async_state_contract(
         "finish_reaudit_refinish",
         extraction_a=extraction,
+        extraction_b=json.loads(json.dumps(extraction)),
         audit_a=first_audit,
         auditB=second_audit,
         mode="duke",
@@ -2519,12 +2684,37 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
         abortAware=False,
     )
 
+    after_finish = result["afterFirstFinish"]
     assert len(result["bundle"]) == 1
     assert result["first"]["id"] == result["replaced"]["id"]
-    assert result["currentBundleId"] == result["first"]["id"]
+    assert after_finish["state"]["extraction"] is None
+    assert after_finish["state"]["audit"] is None
+    assert after_finish["state"]["previewUrl"] is None
+    assert after_finish["state"]["currentBundleId"] is None
+    assert after_finish["state"]["replacementBundleId"] == result["first"]["id"]
+    assert after_finish["state"]["replacementArmed"] is False
+    assert after_finish["revokedUrls"] == ["blob:completed-upload"]
+    assert after_finish["reviewHtml"] == ""
+    assert after_finish["warningsHtml"] == ""
+    assert after_finish["verificationHtml"] == ""
+    assert after_finish["auditHtml"] == ""
+    assert after_finish["previewSrc"] == ""
+    assert after_finish["uploadResetCount"] == 1
+    retained_state = json.dumps(after_finish["state"], sort_keys=True)
+    assert "PRIVATE RAW ACCOUNT 774" not in retained_state
+    assert "PRIVATE RAW EVIDENCE" not in retained_state
     assert result["idempotent"]["reviewRequests"][0]["body"] == (
         "Page-memory draft"
     )
+    assert result["armedReplacement"]["replacementBundleId"] == result["first"][
+        "id"
+    ]
+    assert result["armedReplacement"]["replacementArmed"] is True
+    assert result["armedReplacement"]["extraction"] is None
+    assert result["afterExplicitReload"]["currentBundleId"] == result["first"][
+        "id"
+    ]
+    assert result["afterExplicitReload"]["replacementArmed"] is True
     assert result["replaced"] == result["repeated"]
     assert result["replaced"]["usageSummaries"] == [
         {"serviceType": "electricity", "value": 1234.5, "unit": "kWh"}
@@ -2540,7 +2730,20 @@ def test_reaudit_replaces_completed_summary_with_stable_identity_and_order() -> 
             "body": "Newly sanitized corrected request",
         }
     ]
-    assert result["currentBundleAuditRevision"] == result["auditRevision"]
+    assert result["afterReplacementFinish"]["extraction"] is None
+    assert result["afterReplacementFinish"]["audit"] is None
+    assert result["afterReplacementFinish"]["previewUrl"] is None
+    assert result["afterReplacementFinish"]["currentBundleId"] is None
+    assert result["afterReplacementFinish"]["replacementBundleId"] == result[
+        "first"
+    ]["id"]
+    assert result["afterReplacementFinish"]["replacementArmed"] is False
+    assert result["afterReplacementAddAnother"]["currentBundleId"] is None
+    assert result["afterReplacementAddAnother"]["replacementBundleId"] is None
+    assert result["afterReplacementAddAnother"]["replacementArmed"] is False
+    assert result["afterReplacementAddAnother"]["extraction"] is None
+    assert result["afterReplacementAddAnother"]["audit"] is None
+    assert result["revokedUrls"] == ["blob:completed-upload"]
     assert "$222.22" in result["householdHtml"]
     assert "Newly sanitized corrected request" in result["requestsHtml"]
     assert "Page-memory draft" not in result["requestsHtml"]
@@ -2710,6 +2913,93 @@ def test_javascript_renders_both_schemas_and_unified_results_without_crashing(
         "text": "Legacy rendered evidence",
         "confidence": 0.75,
     }
+
+
+def test_internal_reconciliation_copy_keeps_unverified_categories_explicit() -> None:
+    client = create_app().test_client()
+    extraction = client.get("/api/sample/bloomington").get_json()["extraction"]
+    audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+
+    assert any(
+        line["status"] == "cannot_verify" and "tax" in line["label"].lower()
+        for line in audit["lines"]
+    )
+    rendered = _exercise_javascript_contract(
+        extraction,
+        audit,
+        mode="bloomington",
+    )
+
+    assert (
+        "Only deterministic relationships with printed operands were checked. "
+        "Unsupported lines remain explicitly unverified; this does not claim "
+        "tariff truth."
+    ) in rendered["verdictHtml"]
+    assert "Printed meter, unit, rate, tax, subtotal, and total math was checked" not in (
+        rendered["verdictHtml"]
+    )
+
+
+def test_review_warnings_are_visible_accessible_and_inert_before_audit() -> None:
+    client = create_app().test_client()
+    extraction = client.get("/api/sample/centerpoint").get_json()["extraction"]
+    audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+    hostile = '<img id="warning-hostile" src=x onerror=alert(1)>'
+    extraction["warnings"] = [
+        "Rendered and native text conflict; use the rendered page.",
+        hostile,
+    ]
+
+    rendered = _exercise_javascript_contract(
+        extraction,
+        audit,
+        mode="centerpoint",
+    )
+    probe = _MarkupProbe()
+    probe.feed(rendered["warningsHtml"])
+
+    assert rendered["warningsHidden"] is False
+    assert "Review before continuing" in rendered["warningsHtml"]
+    assert "Rendered and native text conflict" in rendered["warningsHtml"]
+    assert "img" not in probe.tags
+    assert hostile in "".join(probe.text)
+    assert not any(name.startswith("on") for name, _value in probe.attributes)
+
+
+def test_priority_findings_hide_dependent_symptom_when_root_is_present() -> None:
+    client = create_app().test_client()
+    extraction = client.get("/api/sample/duke").get_json()["extraction"]
+    audit = client.post("/api/audit", json=extraction).get_json()["audit"]
+    root = json.loads(json.dumps(audit["lines"][0]))
+    root.update(
+        {
+            "id": "root-finding",
+            "label": "Root printed mismatch",
+            "status": "discrepancy",
+            "delta": 4.25,
+        }
+    )
+    root.pop("root_cause_id", None)
+    dependent = json.loads(json.dumps(root))
+    dependent.update(
+        {
+            "id": "dependent-symptom",
+            "root_cause_id": "root-finding",
+            "label": "Downstream total symptom",
+        }
+    )
+    audit["lines"] = [root, dependent]
+    audit["verdict"] = "possible_discrepancy"
+
+    rendered = _exercise_javascript_contract(extraction, audit, mode="duke")
+
+    assert "Root printed mismatch" in rendered["priorityHtml"]
+    assert "Downstream total symptom" not in rendered["priorityHtml"]
+    assert "Root printed mismatch" in rendered["auditHtml"]
+    assert "Downstream total symptom" in rendered["auditHtml"]
+    assert rendered["summaryIssueCount"] == 1
+    for request in audit["review_requests"]:
+        assert escape(request["subject"]) in rendered["requestsHtml"]
 
 
 def test_dynamic_review_and_audit_values_are_inert_markup() -> None:
@@ -3291,6 +3581,15 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         assert flow["review"]["message"] == ""
         for unit in expected["review_units"]:
             assert unit in flow["review"]["text"]
+        if flow["sample"] == "centerpoint":
+            assert flow["review"]["warningHidden"] is False
+            assert "Review before continuing" in flow["review"]["warningText"]
+            assert "Rendered/native text conflict" in flow["review"]["warningText"]
+            assert "<img id=warning-real" in flow["review"]["warningText"]
+            assert flow["review"]["warningInjectedElements"] == 0
+            assert flow["review"]["warningEventCount"] == 0
+        else:
+            assert flow["review"]["warningHidden"] is True
 
         result = flow["result"]
         assert result["focus"] == "verify-title"
@@ -3302,6 +3601,13 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
         assert result["message"] == ""
         for unit in expected["result_units"]:
             assert unit in result["servicesText"]
+        if flow["sample"] == "bloomington":
+            assert "Only deterministic relationships with printed operands" in result[
+                "verdictText"
+            ]
+            assert "Unsupported lines remain explicitly unverified" in result[
+                "verdictText"
+            ]
 
         requests = flow["requests"]
         assert requests["focus"] == "next-steps-title"
@@ -3326,7 +3632,12 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     sequential = evidence["sequentialDesktop"]
     assert sequential["focus"] == "household-title"
     assert sequential["bundleLength"] == 3
-    assert sequential["currentBundleId"]
+    assert sequential["currentBundleId"] is None
+    assert sequential["replacementBundleId"]
+    assert sequential["replacementArmed"] is False
+    assert sequential["extractionCleared"] is True
+    assert sequential["auditCleared"] is True
+    assert sequential["previewCleared"] is True
     assert sequential["cardCount"] == 3
     assert sequential["uniqueIds"] == 3
     assert sequential["noHorizontalOverflow"] is True
@@ -3345,6 +3656,12 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     assert replacement["bundleLength"] == 3
     assert replacement["ids"] == evidence["bundleIdsBeforeReaudit"]
     assert replacement["summary"]["id"] == evidence["bundleIdsBeforeReaudit"][-1]
+    assert replacement["currentBundleId"] is None
+    assert replacement["replacementBundleId"] == replacement["summary"]["id"]
+    assert replacement["replacementArmed"] is False
+    assert replacement["extractionCleared"] is True
+    assert replacement["auditCleared"] is True
+    assert replacement["previewCleared"] is True
     assert replacement["summary"]["usageSummaries"] == [
         {"serviceType": "water", "value": 5.75, "unit": "kgal"},
         {"serviceType": "wastewater", "value": 2, "unit": "kgal"},
@@ -3393,6 +3710,8 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     assert evidence["laterFailure"] == {
         "bundleLength": 3,
         "currentBundleId": None,
+        "replacementBundleId": replacement["summary"]["id"],
+        "replacementArmed": True,
         "extractionCleared": True,
         "auditCleared": True,
         "retainedCardCount": 3,
@@ -3419,6 +3738,22 @@ def test_real_chromium_sample_review_and_audit_flows() -> None:
     assert preview_discard["fileCount"] == 0
     assert preview_discard["focus"] == "upload-title"
     assert preview_discard["pageErrors"] == []
+    preview_finish = evidence["previewFinish"]
+    assert preview_finish["uploadedPreviewUrl"].startswith("blob:")
+    assert preview_finish["bundleLength"] == 1
+    assert preview_finish["summary"]["id"] == preview_finish["replacementBundleId"]
+    assert preview_finish["extractionCleared"] is True
+    assert preview_finish["auditCleared"] is True
+    assert preview_finish["previewUrl"] is None
+    assert preview_finish["currentBundleId"] is None
+    assert preview_finish["replacementArmed"] is False
+    assert preview_finish["reviewCleared"] is True
+    assert preview_finish["auditClearedFromDom"] is True
+    assert preview_finish["iframeHasSource"] is False
+    assert preview_finish["revokedUrls"] == [preview_finish["uploadedPreviewUrl"]]
+    assert preview_finish["fileCount"] == 0
+    assert preview_finish["focus"] == "household-title"
+    assert preview_finish["pageErrors"] == []
     assert evidence["protocolErrors"] == []
     assert evidence["externalRequests"] == []
     assert evidence["hostileDom"] == {

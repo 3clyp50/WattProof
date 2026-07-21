@@ -357,6 +357,11 @@ h1, h2, h3, p { text-wrap: pretty; }
 .facts-header h2, .results-header h2 { margin: 0; font-family: Georgia, Baskerville, serif; font-size: 1.6rem; font-weight: 500; }
 .facts-header .card-kicker, .results-header .card-kicker { margin-bottom: 4px; }
 .fact-count { padding: 5px 9px; color: var(--green); background: var(--green-soft); border-radius: 999px; font-size: 0.72rem; font-weight: 800; }
+.review-warnings { margin: -4px 0 18px; padding: 14px 16px; color: #634809; background: var(--amber-soft); border: 1px solid #dfbc63; border-left: 5px solid var(--amber); border-radius: 10px; }
+.review-warnings strong { font-size: 0.82rem; }
+.review-warnings p { margin: 3px 0 6px; color: #705712; font-size: 0.72rem; }
+.review-warnings ul { margin: 0; padding-left: 19px; }
+.review-warnings li { margin: 4px 0; overflow-wrap: anywhere; font-size: 0.74rem; }
 .fact-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .fact-field { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .fact-field label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; color: var(--muted); font-size: 0.72rem; font-weight: 750; }
