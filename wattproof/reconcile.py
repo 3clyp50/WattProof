@@ -427,7 +427,7 @@ def _printed_quantum(value: Decimal) -> Decimal:
     exponent = value.as_tuple().exponent
     if not isinstance(exponent, int):
         raise ValueError("reported measurement must be a finite Decimal")
-    return Decimal("1").scaleb(exponent)
+    return Decimal((0, (1,), exponent))
 
 
 def _meter_line(section: ServiceSection) -> UtilityAuditLine | None:

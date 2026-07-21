@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -13,12 +14,18 @@ FIXTURES_DIR = PROJECT_ROOT / "fixtures"
 
 def load_sample(kind: Literal["authentic", "synthetic"]) -> BillExtraction:
     authentic_path = FIXTURES_DIR / "authentic-extraction.json"
-    raw: dict[str, Any] = json.loads(authentic_path.read_text(encoding="utf-8"))
+    raw: dict[str, Any] = json.loads(
+        authentic_path.read_text(encoding="utf-8"),
+        parse_float=Decimal,
+    )
     if kind == "authentic":
         return BillExtraction.model_validate(raw)
 
     alteration_path = FIXTURES_DIR / "synthetic-altered-extraction.json"
-    alteration = json.loads(alteration_path.read_text(encoding="utf-8"))
+    alteration = json.loads(
+        alteration_path.read_text(encoding="utf-8"),
+        parse_float=Decimal,
+    )
     charge_id = alteration["alterations"]["charge_id"]
     for line in raw["charges"]:
         if line["id"] == charge_id:

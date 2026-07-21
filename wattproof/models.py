@@ -8,6 +8,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .numeric import (
+    ConfidenceDecimal,
     UtilityDecimal,
     UtilityInteger,
     abs_exact,
@@ -26,7 +27,7 @@ class EvidenceBase(BaseModel):
 
     source_page: int = Field(ge=1)
     source_text: str = Field(min_length=1)
-    confidence: UtilityDecimal = Field(ge=0, le=1)
+    confidence: ConfidenceDecimal
     status: EvidenceStatus
     original_value: str | None = Field(
         default=None, exclude_if=lambda value: value is None

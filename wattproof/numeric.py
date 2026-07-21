@@ -1,7 +1,18 @@
 from __future__ import annotations
 
 import re
-from decimal import ROUND_HALF_UP, Decimal, localcontext
+from decimal import (
+    MAX_EMAX,
+    MIN_EMIN,
+    ROUND_DOWN,
+    ROUND_HALF_UP,
+    Context,
+    Decimal,
+    DivisionByZero,
+    InvalidOperation,
+    Overflow,
+    localcontext,
+)
 from math import isfinite
 from typing import Annotated
 
@@ -26,9 +37,35 @@ def abs_exact(value: Decimal) -> Decimal:
     return value.copy_abs()
 
 
+def _canonical_zero(value: Decimal) -> Decimal:
+    return value.copy_abs() if value.is_zero() else value
+
+
+def _arithmetic_context(precision: int) -> Context:
+    """Create arithmetic settings independent from mutable process/thread context."""
+
+    return Context(
+        prec=max(precision, 1),
+        rounding=ROUND_HALF_UP,
+        Emin=MIN_EMIN,
+        Emax=MAX_EMAX,
+        capitals=1,
+        clamp=0,
+        flags=[],
+        traps=[InvalidOperation, DivisionByZero, Overflow],
+    )
+
+
 def _validate_decimal_spelling(value: object) -> object:
     """Reject oversized or special string forms before Decimal construction."""
 
+    if isinstance(value, bool):
+        raise ValueError("utility-bill decimal must not be a boolean")
+    if isinstance(value, float):
+        raise ValueError(
+            "utility-bill decimal cannot accept a binary float; use an exact "
+            "Decimal, integer, or numeric spelling"
+        )
     if not isinstance(value, (str, bytes, bytearray)):
         return value
     if len(value) > MAX_UTILITY_DECIMAL_CHARACTERS:
@@ -89,10 +126,25 @@ UtilityDecimal = Annotated[
 ]
 
 
+def validate_confidence_decimal(value: Decimal) -> Decimal:
+    if value < 0 or value > 1:
+        raise ValueError("utility-bill confidence must be between 0 and 1")
+    return value
+
+
+ConfidenceDecimal = Annotated[
+    UtilityDecimal,
+    AfterValidator(validate_confidence_decimal),
+]
+
+
 def _exact_integer(value: Decimal) -> int:
     if not value.is_finite():
         raise ValueError("utility-bill integer must be finite")
-    if value != value.to_integral_value():
+    precision = max(len(value.as_tuple().digits), 1)
+    with localcontext(_arithmetic_context(precision)) as context:
+        integral = value.to_integral_value(rounding=ROUND_DOWN, context=context)
+    if value != integral:
         raise ValueError("utility-bill integer must not contain a fractional value")
     if abs_exact(value) > MAX_UTILITY_INTEGER_ABS:
         raise ValueError(
@@ -170,9 +222,8 @@ def multiply_exact(left: Decimal, right: Decimal) -> Decimal:
         len(left.as_tuple().digits) + len(right.as_tuple().digits),
         1,
     )
-    with localcontext() as context:
-        context.prec = precision
-        return left * right
+    with localcontext(_arithmetic_context(precision)):
+        return _canonical_zero(left * right)
 
 
 def _operation_precision(values: tuple[Decimal, ...]) -> int:
@@ -204,9 +255,8 @@ def sum_exact(values: tuple[Decimal, ...]) -> Decimal:
 
     if not values:
         return Decimal("0")
-    with localcontext() as context:
-        context.prec = _operation_precision(values)
-        return sum(values, Decimal("0"))
+    with localcontext(_arithmetic_context(_operation_precision(values))):
+        return _canonical_zero(sum(values, Decimal("0")))
 
 
 def add_exact(left: Decimal, right: Decimal) -> Decimal:
@@ -215,9 +265,8 @@ def add_exact(left: Decimal, right: Decimal) -> Decimal:
 
 def subtract_exact(left: Decimal, right: Decimal) -> Decimal:
     values = (left, right)
-    with localcontext() as context:
-        context.prec = _operation_precision(values)
-        return left - right
+    with localcontext(_arithmetic_context(_operation_precision(values))):
+        return _canonical_zero(left - right)
 
 
 def quantize_exact(value: Decimal, quantum: Decimal) -> Decimal:
@@ -235,6 +284,6 @@ def quantize_exact(value: Decimal, quantum: Decimal) -> Decimal:
         integer_digits + fractional_digits,
         1,
     )
-    with localcontext() as context:
-        context.prec = precision
-        return value.quantize(quantum, rounding=ROUND_HALF_UP)
+    with localcontext(_arithmetic_context(precision)) as context:
+        result = value.quantize(quantum, rounding=ROUND_HALF_UP, context=context)
+    return _canonical_zero(result)

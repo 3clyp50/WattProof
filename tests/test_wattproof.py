@@ -32,8 +32,11 @@ def _lines(result: AuditResult) -> dict[str, AuditLine]:
 
 def test_authentic_extraction_matches_golden_fixture() -> None:
     extracted = extract_pdf(PROJECT_ROOT / "assets/pge-anonymous-3ce-sample-bill.pdf")
-    golden = BillExtraction.model_validate_json(
-        (FIXTURES_DIR / "authentic-extraction.json").read_text(encoding="utf-8")
+    golden = BillExtraction.model_validate(
+        json.loads(
+            (FIXTURES_DIR / "authentic-extraction.json").read_text(encoding="utf-8"),
+            parse_float=Decimal,
+        )
     )
     assert extracted == golden
     assert extracted.total_usage.value == Decimal("327.119")

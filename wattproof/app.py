@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import tempfile
+from decimal import Decimal, DecimalException
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
 
@@ -23,9 +26,47 @@ from .tariffs import SourceIntegrityError
 from .utility_fixtures import load_utility_sample
 from .utility_models import UtilityDocument
 
+MAX_AUDIT_JSON_NUMBER_CHARACTERS = 128
+
 
 def _json_model(model: BaseModel) -> dict[str, Any]:
     return model.model_dump(mode="json")
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON number: {value}")
+
+
+def _parse_json_decimal(value: str) -> Decimal:
+    if len(value) > MAX_AUDIT_JSON_NUMBER_CHARACTERS:
+        raise ValueError("JSON number is too long")
+    try:
+        return Decimal(value)
+    except DecimalException as error:
+        raise ValueError("JSON decimal is outside the supported parser range") from error
+
+
+def _parse_json_integer(value: str) -> int:
+    if len(value) > MAX_AUDIT_JSON_NUMBER_CHARACTERS:
+        raise ValueError("JSON number is too long")
+    return int(value)
+
+
+def _exact_audit_payload() -> dict[str, Any] | None:
+    """Decode audit numbers exactly instead of first rounding them through float."""
+
+    if not request.is_json:
+        return None
+    try:
+        payload: Any = json.loads(
+            request.get_data(cache=True),
+            parse_float=_parse_json_decimal,
+            parse_int=_parse_json_integer,
+            parse_constant=_reject_json_constant,
+        )
+    except (JSONDecodeError, UnicodeDecodeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def create_app() -> Flask:
@@ -90,8 +131,8 @@ def create_app() -> Flask:
 
     @app.post("/api/audit")
     def audit() -> Response | tuple[Response, int]:
-        payload = request.get_json(silent=True)
-        if not isinstance(payload, dict):
+        payload = _exact_audit_payload()
+        if payload is None:
             return jsonify(error="The reviewed extraction is missing."), 400
         schema_version = payload.get("schema_version")
         extraction: BillExtraction | UtilityDocument
